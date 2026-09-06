@@ -1,0 +1,40 @@
+{
+  "neuro": {
+    "ws_url": "ws://localhost:8000",
+    "reconnect_interval_s": 3
+  },
+  "ipc": {
+    "dir": "<BG3ScriptExtender appdata>/BG3Neuro",
+    "state_file": "bg3_to_neuro.json",
+    "command_file": "neuro_to_bg3.json",
+    "poll_interval_ms": 100,
+    "heartbeat_interval_s": 2,
+    "heartbeat_stale_s": 10
+  },
+  "game": {
+    "name": "Baldur's Gate 3",
+    "controlledPartySize": 1
+  },
+  "actions": {
+    "result_timeout_s": 20
+  },
+  "dialogue": {
+    "mode": "confirm"
+  },
+  "state": {
+    "combat": {
+      "showQuestMarker": false
+    },
+    "dialogue": {},
+    "exploration": {
+      "showQuestMarker": true,
+      "maxVisibleObjects": 20,
+      "objectInfo": {
+        "visible": true,
+        "skillRequirements": false
+      },
+      "distanceFormat": "hybrid",
+      "showPosition": false
+    }
+  }
+}

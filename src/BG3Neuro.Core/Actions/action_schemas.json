@@ -1,0 +1,226 @@
+[
+  {
+    "name": "move_to_target",
+    "description": "Переместиться к указанной цели.",
+    "schema": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": {
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "attack_entity",
+    "description": "Атаковать указанного врага основным оружием.",
+    "schema": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": {
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "cast_spell",
+    "description": "Использовать заклинание; для AoE — указать target_id, coverage или position центра.",
+    "schema": {
+      "type": "object",
+      "required": ["spell_name"],
+      "properties": {
+        "spell_name": { "type": "string" },
+        "target_id": { "type": "string" },
+        "coverage": { "type": "array", "items": { "type": "string" } },
+        "position": {
+          "type": "object",
+          "required": ["x", "y", "z"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number" }
+          }
+        },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "use_item",
+    "description": "Использовать предмет из инвентаря (лечиться, броня, еда) на себя или указанную цель.",
+    "schema": {
+      "type": "object",
+      "required": ["item_id"],
+      "properties": {
+        "item_id": { "type": "string" },
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "throw",
+    "description": "Бросить предмет в указанную цель.",
+    "schema": {
+      "type": "object",
+      "required": ["item_id", "target_id"],
+      "properties": {
+        "item_id": { "type": "string" },
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "bonus_action",
+    "description": "Выполнить бонусное действие (offhand_attack, drink_potion, help, shove, disengage, dash, dodge).",
+    "schema": {
+      "type": "object",
+      "required": ["action_type"],
+      "properties": {
+        "action_type": {
+          "type": "string",
+          "enum": ["offhand_attack", "drink_potion", "help", "shove", "disengage", "dash", "dodge"]
+        },
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "set_reaction",
+    "description": "Выбрать реакцию на этот ход (opportunity_attack, shield, counterspell, none).",
+    "schema": {
+      "type": "object",
+      "required": ["reaction_type"],
+      "properties": {
+        "reaction_type": {
+          "type": "string",
+          "enum": ["opportunity_attack", "shield", "counterspell", "none"]
+        },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "end_turn",
+    "description": "Завершить ход текущего персонажа.",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "select_dialogue_option",
+    "description": "Выбрать один из предложенных вариантов ответа в диалоге.",
+    "schema": {
+      "type": "object",
+      "required": ["option_index"],
+      "properties": {
+        "option_index": { "type": "integer", "minimum": 1 },
+        "option_text": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "move_to_entity",
+    "description": "Переместиться к указанной осведомлённой цели.",
+    "schema": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": {
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "interact_with",
+    "description": "Взаимодействовать с объектом одним из доступных способов (см. state).",
+    "schema": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": {
+        "target_id": { "type": "string" },
+        "interaction_type": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "loot",
+    "description": "Собрать добычу с указанного трупа или контейнера.",
+    "schema": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": {
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "open_map",
+    "description": "Открыть карту (просмотр локаций).",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "open_inventory",
+    "description": "Открыть инвентарь (просмотр предметов).",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "toggle_mode",
+    "description": "Переключить режим персонажа (v1: normal).",
+    "schema": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["normal"] },
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "rest",
+    "description": "Отдохнуть (полный или лёгкий отдых).",
+    "schema": {
+      "type": "object",
+      "required": ["rest_type"],
+      "properties": {
+        "rest_type": { "type": "string", "enum": ["full", "partial"] },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "travel_to",
+    "description": "Путешествовать в локацию по названию области.",
+    "schema": {
+      "type": "object",
+      "required": ["destination"],
+      "properties": {
+        "destination": { "type": "string" },
+        "region_id": { "type": "string" },
+        "actor": { "type": "string" }
+      }
+    }
+  }
+]

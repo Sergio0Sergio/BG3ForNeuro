@@ -1,0 +1,15 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+
+# Node / Randy
+node_modules/
+
+# Logs and temp
+*.log
+*.tmp
+*.bak

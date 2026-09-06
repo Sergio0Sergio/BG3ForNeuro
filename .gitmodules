@@ -1,0 +1,3 @@
+[submodule "neuro-sdk/neuro-sdk"]
+	path = neuro-sdk/neuro-sdk
+	url = https://github.com/VedalAI/neuro-sdk.git
