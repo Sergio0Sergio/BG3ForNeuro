@@ -112,6 +112,15 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
     private void WriteStateContent(string json) =>
         File.WriteAllText(Path.Combine(_tmpDir, "bg3_to_neuro.json"), json);
 
+    // Моделируем ack Lua-мода: result_<ackId>.json. Для долгих действий Lua пишет running:true
+    // (запущено, итог — следующий state/Канал B), для instant (end_turn) — без running.
+    private void WriteAck(string id, bool running = false) =>
+        File.WriteAllText(
+            Path.Combine(_tmpDir, $"result_{id}.json"),
+            running
+                ? $$"""{"id":"{{id}}","success":true,"running":true}"""
+                : $$"""{"id":"{{id}}","success":true}""");
+
     private static string CastStateJson(string turnActor, bool farEnemy) => $$"""
     {
       "mode": "combat",
@@ -167,6 +176,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
 
             WriteState("karlach");
             WriteFreshHeartbeat();
+            WriteAck("e2e-1");
 
             var result = await RunEndTurnAsync("e2e-1", "{}");
 
@@ -267,6 +277,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 var firstForceSeen = await WaitUntilAsync(() => sent.Count(m => m.Contains("\"actions/force\"")) >= 1, TimeSpan.FromSeconds(10));
                 Assert.True(firstForceSeen, "Первый force не отправлен");
 
+                WriteAck("e2e-move-1", running: true);
                 await PostActionAsync(sent, "e2e-move-1", "move_to_target", """{"target_id":"goblin_1"}""", TimeSpan.FromSeconds(10));
 
             var actionFile = JsonNode.Parse(File.ReadAllText(Path.Combine(_tmpDir, "action_e2e-move-1.json")))!;
@@ -327,6 +338,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 var firstForceSeen = await WaitUntilAsync(() => sent.Count(m => m.Contains("\"actions/force\"")) >= 1, TimeSpan.FromSeconds(10));
                 Assert.True(firstForceSeen, "Первый force не отправлен");
 
+                WriteAck("e2e-atk-1", running: true);
                 await PostActionAsync(sent, "e2e-atk-1", "attack_entity", """{"target_id":"goblin_1"}""", TimeSpan.FromSeconds(10));
 
             var actionFile = JsonNode.Parse(File.ReadAllText(Path.Combine(_tmpDir, "action_e2e-atk-1.json")))!;
@@ -386,6 +398,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
             var firstForceSeen = await WaitUntilAsync(() => sent.Count(m => m.Contains("\"actions/force\"")) >= 1, TimeSpan.FromSeconds(10));
             Assert.True(firstForceSeen, "Первый force не отправлен");
 
+            WriteAck("e2e-fail-1", running: true);
             var firstResult = await PostActionAsync(sent, "e2e-fail-1", "attack_entity", """{"target_id":"goblin_1"}""", TimeSpan.FromSeconds(10));
             Assert.True(firstResult["data"]!["success"]!.GetValue<bool>(), "Валидация attack_entity должна пройти (Канал A)");
             Assert.True(File.Exists(Path.Combine(_tmpDir, "action_e2e-fail-1.json")));
@@ -450,6 +463,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 var firstForceSeen = await WaitUntilAsync(() => sent.Count(m => m.Contains("\"actions/force\"")) >= 1, TimeSpan.FromSeconds(10));
                 Assert.True(firstForceSeen, "Первый force не отправлен");
 
+                WriteAck("e2e-cast-1", running: true);
                 var result = await PostActionAsync(sent, "e2e-cast-1", "cast_spell", """{"spell_name":"Fireball","target_id":"goblin_1"}""", TimeSpan.FromSeconds(10));
                 Assert.True(result["data"]!["success"]!.GetValue<bool>(), "Каст известного заклинания должен пройти валидацию (Канал A)");
 
@@ -689,6 +703,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.Contains("## Диалог", firstState);
                 Assert.Contains("- [1] Да, я готов.", firstState);
 
+                WriteAck("e2e-dlg-1", running: true);
                 var result = await PostActionAsync(sent, "e2e-dlg-1", "select_dialogue_option", """{"option_index":1}""", TimeSpan.FromSeconds(10));
                 Assert.True(result["data"]!["success"]!.GetValue<bool>(), "Выбор активного диалога должен пройти валидацию (Канал A)");
                 var actionFile = JsonNode.Parse(File.ReadAllText(Path.Combine(_tmpDir, "action_e2e-dlg-1.json")))!;
@@ -774,6 +789,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.Contains("- move_to_entity: [wooden_door]", firstState);
                 Assert.Contains("## Локации (путешествие)", firstState);
 
+                WriteAck("e2e-exp-1", running: true);
                 var moveResult = await PostActionForIdAsync(sent, "e2e-exp-1", "move_to_entity", """{"target_id":"wooden_door"}""", TimeSpan.FromSeconds(10));
                 Assert.True(moveResult["data"]!["success"]!.GetValue<bool>(), "move_to_entity должен пройти валидацию (Канал A)");
                 var moveFile = JsonNode.Parse(File.ReadAllText(Path.Combine(_tmpDir, "action_e2e-exp-1.json")))!;
@@ -803,6 +819,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.Contains("- wooden_door (Деревянная дверь) 1м, закрыта: [открыть, заламать, толкнуть]", secondState);
                 Assert.Contains("- Karlach подошла к двери", secondState);
 
+                WriteAck("e2e-exp-2", running: true);
                 var interactResult = await PostActionForIdAsync(sent, "e2e-exp-2", "interact_with", """{"target_id":"wooden_door","interaction_type":"открыть"}""", TimeSpan.FromSeconds(10));
                 Assert.True(interactResult["data"]!["success"]!.GetValue<bool>(), "interact_with должен пройти валидацию (Канал A)");
                 var interactFile = JsonNode.Parse(File.ReadAllText(Path.Combine(_tmpDir, "action_e2e-exp-2.json")))!;
@@ -833,6 +850,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.Contains("закрыть, заламать, толкнуть", thirdState);
                 Assert.Contains("- Дверь открыта", thirdState);
 
+                WriteAck("e2e-exp-3", running: true);
                 var lootResult = await PostActionForIdAsync(sent, "e2e-exp-3", "loot", """{"target_id":"goblin_corpse"}""", TimeSpan.FromSeconds(10));
                 Assert.True(lootResult["data"]!["success"]!.GetValue<bool>(), "loot должен пройти валидацию (Канал A)");
                 var lootFile = JsonNode.Parse(File.ReadAllText(Path.Combine(_tmpDir, "action_e2e-exp-3.json")))!;

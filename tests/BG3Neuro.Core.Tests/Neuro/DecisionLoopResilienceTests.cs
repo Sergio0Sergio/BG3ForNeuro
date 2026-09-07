@@ -81,7 +81,15 @@ public class DecisionLoopResilienceTests : IDisposable
         }
     }
 
-    private (FakeNeuroServer Server, IpcClient Ipc, NeuroWebSocketClient Client, List<string> Sent) StartStack(FakeNeuroServer server)
+    private void WriteExecutionResult(string id, bool success)
+    {
+        var result = success
+            ? $$"""{"id":"{{id}}","success":true}"""
+            : $$"""{"id":"{{id}}","success":false,"error_code":"action_failed"}""";
+        RobustWrite(Path.Combine(_tmpDir, $"result_{id}.json"), result);
+    }
+
+    private (FakeNeuroServer Server, IpcClient Ipc, NeuroWebSocketClient Client, List<string> Sent) StartStack(FakeNeuroServer server, TimeSpan? executionResultTimeout = null)
     {
         var sent = new List<string>();
         var ipc = new IpcClient(new IpcConfig
@@ -95,7 +103,7 @@ public class DecisionLoopResilienceTests : IDisposable
         var client = new NeuroWebSocketClient(server.Url, Game, ActionRegistry.Get(), QuickReconnect);
         client.MessageSent += (_, text) => sent.Add(text);
         var router = new ActionRouter(new IpcPaths(_tmpDir), controlledPartySize: 1);
-        var loop = new DecisionLoop(client, ipc, router);
+        var loop = new DecisionLoop(client, ipc, router, executionResultTimeout: executionResultTimeout);
         client.Start();
         loop.Start();
         return (server, ipc, client, sent);
@@ -171,6 +179,7 @@ public class DecisionLoopResilienceTests : IDisposable
                 "После реконнекта не пришёл повторный force (сброс _lastForcedContent)");
 
             SendAction(server, "r1-1", "end_turn");
+            WriteExecutionResult("r1-1", success: true);
             var ok = await WaitUntilAsync(
                 () => stack.Sent.Any(m => m.Contains("\"action/result\"") && m.Contains("r1-1")),
                 TimeSpan.FromSeconds(10));
@@ -226,6 +235,7 @@ public class DecisionLoopResilienceTests : IDisposable
             Assert.True(reinitOk, "После Alive: стэнд не вычищен и/или force не переотправлен");
 
             SendAction(server, "r2-on-1", "end_turn");
+            WriteExecutionResult("r2-on-1", success: true);
             var onOk = await WaitUntilAsync(
                 () => stack.Sent.Any(m => m.Contains("\"action/result\"") && m.Contains("r2-on-1")),
                 TimeSpan.FromSeconds(10));
@@ -299,5 +309,70 @@ public class DecisionLoopResilienceTests : IDisposable
         Assert.Equal("p-2", command["id"]!.GetValue<string>());
         Assert.True(File.Exists(Path.Combine(_tmpDir, "action_p-1.json")), "Диагностический action_p-1.json должен сохраниться");
         Assert.Equal("p-1", JsonNode.Parse(File.ReadAllText(Path.Combine(_tmpDir, "action_p-1.json")))!["id"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Dispatch_ExecutionResultFailure_ForwardsRealFailureFromLuaAck()
+    {
+        await using var server = new FakeNeuroServer();
+        server.Start();
+        WriteCombatState();
+        WriteHeartbeat(0.05);
+
+        var stack = StartStack(server);
+        try
+        {
+            await server.WaitForMessagesAsync(m => m.Count(n => n["command"]?.GetValue<string>() == "actions/force") >= 1);
+
+            SendAction(server, "r-exec-1", "end_turn");
+            // Lua-мод подтвердил (result_<id>.json), но исполнение провалилось
+            RobustWrite(
+                Path.Combine(_tmpDir, "result_r-exec-1.json"),
+                """{"id":"r-exec-1","success":false,"error_code":"action_failed","error_detail":"Цель вне досягаемости"}""");
+
+            var ok = await WaitUntilAsync(
+                () => stack.Sent.Any(m =>
+                    m.Contains("\"action/result\"") &&
+                    m.Contains("r-exec-1") &&
+                    JsonNode.Parse(m)?["data"]?["success"]?.GetValue<bool>() == false &&
+                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("Цель вне досягаемости") == true),
+                TimeSpan.FromSeconds(10));
+            Assert.True(ok, "Реальный failure из result_<id>.json не передан в action/result");
+        }
+        finally
+        {
+            await StopStackAsync(stack.Ipc, stack.Client);
+        }
+    }
+
+    [Fact]
+    public async Task Dispatch_NoExecutionAck_ReturnsTimeoutFailure()
+    {
+        await using var server = new FakeNeuroServer();
+        server.Start();
+        WriteCombatState();
+        WriteHeartbeat(0.05);
+
+        // Короткий таймаут ожидания ack — без result_<id>.json (мод/игра молчат)
+        var stack = StartStack(server, TimeSpan.FromMilliseconds(500));
+        try
+        {
+            await server.WaitForMessagesAsync(m => m.Count(n => n["command"]?.GetValue<string>() == "actions/force") >= 1);
+
+            SendAction(server, "r-ack-1", "end_turn");
+
+            var ok = await WaitUntilAsync(
+                () => stack.Sent.Any(m =>
+                    m.Contains("\"action/result\"") &&
+                    m.Contains("r-ack-1") &&
+                    JsonNode.Parse(m)?["data"]?["success"]?.GetValue<bool>() == false &&
+                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("не подтвердил исполнение") == true),
+                TimeSpan.FromSeconds(10));
+            Assert.True(ok, "Не вернулся timeout при отсутствии result_<id>.json");
+        }
+        finally
+        {
+            await StopStackAsync(stack.Ipc, stack.Client);
+        }
     }
 }

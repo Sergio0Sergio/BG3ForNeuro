@@ -75,6 +75,7 @@ public class FullLoopSmokeTests : IDisposable
                 ["command"] = "action",
                 ["data"] = new JsonObject { ["id"] = "smoke-1", ["name"] = "end_turn", ["data"] = "{}" },
             });
+            WriteExecutionResult("smoke-1", success: true, running: false);
             Assert.True(
                 await WaitUntilAsync(
                     () => sent.Any(m => m.Contains("\"action/result\"") && m.Contains("smoke-1") && m.Contains("\"success\":true")),
@@ -124,6 +125,13 @@ public class FullLoopSmokeTests : IDisposable
                 seq = 1,
                 timestamp = DateTimeOffset.UtcNow.AddMilliseconds(-50).ToString("O"),
             }));
+
+    private void WriteExecutionResult(string id, bool success, bool running) =>
+        RobustWrite(
+            Path.Combine(_tmpDir, $"result_{id}.json"),
+            running
+                ? $$"""{"id":"{{id}}","success":{{(success ? "true" : "false")}},"running":true}"""
+                : $$"""{"id":"{{id}}","success":{{(success ? "true" : "false")}}}""");
 
     private static void RobustWrite(string path, string content)
     {

@@ -19,20 +19,24 @@ public sealed class DecisionLoop : IDisposable
         "open_map", "open_inventory", "toggle_mode", "rest", "travel_to",
     };
 
+    private static readonly TimeSpan ExecutionResultPollInterval = TimeSpan.FromMilliseconds(100);
+
     private readonly NeuroWebSocketClient _neuro;
     private readonly IpcClient _ipc;
     private readonly ActionRouter _router;
     private readonly ExplorationStateConfig _exploration;
+    private readonly TimeSpan _executionResultTimeout;
     private CombatState? _combatState;
     private string? _lastForcedContent;
     private bool _connected;
 
-    public DecisionLoop(NeuroWebSocketClient neuro, IpcClient ipc, ActionRouter router, ExplorationStateConfig? exploration = null)
+    public DecisionLoop(NeuroWebSocketClient neuro, IpcClient ipc, ActionRouter router, ExplorationStateConfig? exploration = null, TimeSpan? executionResultTimeout = null)
     {
         _neuro = neuro;
         _ipc = ipc;
         _router = router;
         _exploration = exploration ?? new ExplorationStateConfig();
+        _executionResultTimeout = executionResultTimeout ?? TimeSpan.FromSeconds(15);
     }
 
     public event EventHandler<string>? DebugNote;
@@ -208,9 +212,43 @@ public sealed class DecisionLoop : IDisposable
 
     private async Task DispatchAsync(string id, string name, string dataJson)
     {
-        var result = _router.ValidateAndDispatch(id, name, dataJson, _combatState, _ipc.Status);
-        var message = ErrorMapper.ToMessage(result.ErrorCode, result.ErrorDetail);
-        await _neuro.SendResultAsync(id, result.Success, result.Success ? null : message);
+        var validation = _router.ValidateAndDispatch(id, name, dataJson, _combatState, _ipc.Status);
+        if (!validation.Success)
+        {
+            var message = ErrorMapper.ToMessage(validation.ErrorCode, validation.ErrorDetail);
+            await _neuro.SendResultAsync(id, false, message);
+            return;
+        }
+
+        var execution = await WaitForExecutionResultAsync(id, name);
+        await _neuro.SendResultAsync(id, execution.Success, execution.Message);
+    }
+
+    // Канал A (§6.5): после успешной валидации результат — это ack исполнения Lua-мода
+    // (result_<id>.json). Для долгих действий Lua пишет {running:true} (принято, в работе),
+    // финальный вердикт приходит следующим state (Канал B) — здесь шлём только первый ack.
+    private async Task<(bool Success, string? Message)> WaitForExecutionResultAsync(string id, string name)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(_executionResultTimeout);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var result = _ipc.ReadExecutionResult(id);
+            if (result is not null)
+            {
+                var message = result.Success
+                    ? (string.IsNullOrWhiteSpace(result.ErrorDetail) ? null : result.ErrorDetail)
+                    : (string.IsNullOrWhiteSpace(result.ErrorDetail)
+                        ? (string.IsNullOrWhiteSpace(result.ErrorCode)
+                            ? "Ошибка исполнения модом"
+                            : $"Ошибка исполнения: {result.ErrorCode}")
+                        : result.ErrorDetail);
+                return (result.Success, message);
+            }
+
+            await Task.Delay(ExecutionResultPollInterval);
+        }
+
+        return (false, $"Мод не подтвердил исполнение '{name}' в течение {_executionResultTimeout.TotalSeconds:0} с (нет result_{id}.json)");
     }
 
     public void Dispose()

@@ -89,6 +89,9 @@ public sealed class IpcClient : IDisposable
 
     public string? LastStateContent => _lastStateContent;
 
+    public ActionExecutionResult? ReadExecutionResult(string actionId) =>
+        ActionResultFile.TryRead(_paths.ResultFile(actionId));
+
     public string? ReadState()
     {
         var content = StateFile.TryReadContent(_paths.StateFile);
