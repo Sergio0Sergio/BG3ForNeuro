@@ -7,18 +7,25 @@ namespace BG3Neuro.Core.Tests.Neuro;
 
 public class ActionRegistryTests
 {
-    private static readonly string[] Combat = { "move_to_target", "attack_entity", "cast_spell", "use_item", "throw", "bonus_action", "set_reaction", "end_turn" };
     private static readonly string[] Exploration = { "move_to_entity", "interact_with", "loot", "open_map", "open_inventory", "toggle_mode", "rest", "travel_to" };
 
     [Fact]
-    public void Get_Returns17Actions_CombatDialogueExploration()
+    public void Get_Returns18Actions_CombatDialogueExploration()
     {
         var actions = ActionRegistry.Get();
 
-        Assert.Equal(17, actions.Count);
-        Assert.Equal(Combat, actions.Take(8).Select(a => a.Name).ToArray());
-        Assert.Equal("select_dialogue_option", actions[8].Name);
-        Assert.Equal(Exploration, actions.Skip(9).Select(a => a.Name).ToArray());
+        Assert.Equal(18, actions.Count);
+        Assert.Equal("move_to_target", actions[0].Name);
+        Assert.Equal("attack_entity", actions[1].Name);
+        Assert.Equal("cast_spell", actions[2].Name);
+        Assert.Equal("use_item", actions[3].Name);
+        Assert.Equal("throw", actions[4].Name);
+        Assert.Equal("bonus_action", actions[5].Name);
+        Assert.Equal("set_reaction", actions[6].Name);
+        Assert.Equal("state_capture", actions[7].Name);
+        Assert.Equal("end_turn", actions[8].Name);
+        Assert.Equal("select_dialogue_option", actions[9].Name);
+        Assert.Equal(Exploration, actions.Skip(10).Select(a => a.Name).ToArray());
     }
 
     [Fact]
@@ -71,7 +78,7 @@ public class NeuroWebSocketClientTests
     }
 
     [Fact]
-    public async Task Connect_SendsStartupThenRegister_WithAll17Actions()
+    public async Task Connect_SendsStartupThenRegister_WithAll18Actions()
     {
         await using var server = new FakeNeuroServer();
         server.Start();
@@ -90,7 +97,7 @@ public class NeuroWebSocketClientTests
         var register = messages[1];
         Assert.Equal("actions/register", register["command"]!.GetValue<string>());
         Assert.Equal(Game, register["game"]!.GetValue<string>());
-        Assert.Equal(17, register["data"]!["actions"]!.AsArray().Count);
+        Assert.Equal(18, register["data"]!["actions"]!.AsArray().Count);
     }
 
     [Fact]
@@ -132,10 +139,10 @@ public class NeuroWebSocketClientTests
         var registers = messages.Where(m => m["command"]!.GetValue<string>() == "actions/register").ToList();
         var secondNames = ExtractActionNames(registers[1]);
 
-        Assert.Equal(17, firstNames.Length);
-        Assert.Equal(17, secondNames.Length);
+        Assert.Equal(18, firstNames.Length);
+        Assert.Equal(18, secondNames.Length);
         Assert.Equal(firstNames, secondNames);
-        Assert.Equal(17, secondNames.Distinct().Count());
+        Assert.Equal(18, secondNames.Distinct().Count());
     }
 
     [Fact]
@@ -157,7 +164,7 @@ public class NeuroWebSocketClientTests
         var afterReconnect = ExtractActionNames(registers[1]);
 
         Assert.Equal(beforeReconnect, afterReconnect);
-        Assert.Equal(17, afterReconnect.Distinct().Count());
+        Assert.Equal(18, afterReconnect.Distinct().Count());
     }
 
     [Fact]

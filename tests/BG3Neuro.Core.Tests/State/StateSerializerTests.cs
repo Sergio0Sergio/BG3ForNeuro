@@ -245,6 +245,64 @@ public class StateSerializerTests
     }
     """;
 
+    private static readonly string ExtractorCombatJson = """
+    {
+      "version": 2,
+      "mode": "combat",
+      "generated_at": "2026-09-07T12:00:00.0000000Z",
+      "trigger": "TurnStarted",
+      "turn_actor": "tav",
+      "turn_initiative_index": 1,
+      "turn_initiative_total": 4,
+      "allies": [
+        { "alias": "tav", "name": "Tav", "hp": 43, "max_hp": 60, "distance": 0, "position_x": 2.3, "position_y": 1.8, "effects": "ходит сейчас, может действовать" },
+        { "alias": "shadowheart", "name": "Shadowheart", "hp": 51, "max_hp": 51, "distance": 4.5, "position_x": 6.1, "position_y": -1.2, "effects": "может действовать" }
+      ],
+      "enemies": [
+        { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 7.2, "position_x": 8.4, "position_y": 6.5, "status": null },
+        { "alias": "goblin_2", "name": "Goblin Warrior", "hp": 0, "max_hp": 15, "distance": 9.1, "position_x": 10.2, "position_y": 3.3, "status": "повержен" }
+      ],
+      "available_actions": ["end_turn", "attack_entity: [goblin_1, goblin_2]", "move_to_target: [tav, shadowheart, goblin_1, goblin_2]"]
+    }
+    """;
+
+    [Fact]
+    public void Parse_ExtractorCombatJson_ParsesRealisticState()
+    {
+        var state = StateSerializer.Parse(ExtractorCombatJson);
+
+        Assert.NotNull(state);
+        Assert.Equal("combat", state!.Mode);
+        Assert.Equal("tav", state.TurnActor);
+        Assert.Equal(1, state.TurnInitiativeIndex);
+        Assert.Equal(4, state.TurnInitiativeTotal);
+        Assert.Equal(2, state.Allies.Count);
+        Assert.Equal("ходит сейчас, может действовать", state.Allies[0].Effects);
+        Assert.Equal(2.3, state.Allies[0].PositionX);
+        Assert.Equal(-1.2, state.Allies[1].PositionY);
+        Assert.Equal(2, state.Enemies.Count);
+        Assert.Null(state.Enemies[0].Status);
+        Assert.Equal("повержен", state.Enemies[1].Status);
+        Assert.Equal(3, state.AvailableActions.Count);
+        Assert.Contains("attack_entity: [goblin_1, goblin_2]", state.AvailableActions);
+    }
+
+    [Fact]
+    public void Parse_ExtractorCombatJson_ToMarkdownRendersStatusesAndActions()
+    {
+        var state = StateSerializer.Parse(ExtractorCombatJson)!;
+        var md = StateSerializer.ToMarkdown(state);
+
+        Assert.Contains("## Ход: Tav (инициатива 1/4)", md);
+        Assert.Contains("- Tav: HP 43/60, distance 0м, эффекты: ходит сейчас, может действовать", md);
+        Assert.Contains("- Shadowheart: HP 51/51, distance 4.5м, эффекты: может действовать", md);
+        Assert.Contains("- goblin_1 (Goblin Raider): HP 12/18, distance 7.2м, статус: —", md);
+        Assert.Contains("- goblin_2 (Goblin Warrior): HP 0/15, distance 9.1м, статус: повержен", md);
+        Assert.Contains("- attack_entity: [goblin_1, goblin_2]", md);
+        Assert.Contains("- move_to_target: [tav, shadowheart, goblin_1, goblin_2]", md);
+        Assert.Contains("- end_turn", md);
+    }
+
     [Fact]
     public void Parse_ExplorationJson_ParsesObjectsRegionsInventoryCanRest()
     {

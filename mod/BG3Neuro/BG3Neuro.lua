@@ -1,4 +1,4 @@
--- BG3Neuro v0.7.7 вЂ” С„Р°Р№Р»РѕРІС‹Р№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
+-- BG3Neuro v0.8.11 вЂ” С„Р°Р№Р»РѕРІС‹Р№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
 -- Р—Р°РґР°С‡Р°: heartbeat 2s + СЃС‚Р°СЂС‚РѕРІС‹Р№ state-С„Р°Р№Р» + РёСЃРїРѕР»РЅРµРЅРёРµ РґРµР№СЃС‚РІРёР№ РёР· action_*.json.
 -- Р”РµР№СЃС‚РІРёСЏ: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07, client-РєРѕРЅС‚РµРєСЃС‚), exploration (08:
@@ -9,7 +9,7 @@
 -- Р”РёСЂРµРєС‚РѕСЂРёСЏ IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO РїРёС€РµС‚ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.7.7"
+local MOD_VERSION = "0.8.11"
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
 local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (СЂРµР°Р»СЊРЅС‹Р№ polling)
@@ -142,6 +142,8 @@ Ext.Osiris.RegisterListener("TurnStarted", 1, "after", function(guid)
     if #turnLog > 32 then
         table.remove(turnLog, 1)
     end
+    -- StateExtractor (v0.8.11): каждый сменённый ход — новый combat-state в bg3_to_neuro.json.
+    captureCombatState("TurnStarted", false)
 end)
 
 Ext.Osiris.RegisterListener("TurnEnded", 1, "after", function(guid)
@@ -253,6 +255,17 @@ local function dumpDb(name)
     return flat
 end
 
+local function pureGuid(s)
+    -- Osi.GetCurrentCharacter returns prefixed ids (e.g. S_Player_Astarion_<uuid>),
+    -- while HandleToUuid yields the clean uuid. Normalize to the trailing hex uuid.
+    if s == nil then
+        return nil
+    end
+    s = tostring(s)
+    local m = s:match("([%x][%x][%x][%x][%x][%x][%x][%x]-[%x][%x][%x][%x]-[%x][%x][%x][%x]-[%x][%x][%x][%x]-[%x][%x][%x][%x][%x][%x][%x][%x][%x][%x][%x][%x])$")
+    return m or s
+end
+
 local function currentCharacters()
     -- РўРµРєСѓС‰РёР№ СѓРїСЂР°РІР»СЏРµРјС‹Р№(Рµ) РїРµСЂСЃРѕРЅР°Р¶(Рё): РґР»СЏ reserved user id. Р’ РѕРґРёРЅРѕС‡РєРµ host
     -- РјРѕР¶РµС‚ Р±С‹С‚СЊ user 1 (peer+1); РїРµСЂРµР±РёСЂР°РµРј С€РёСЂРµ, С‡РµРј 0..3 (v0.7.3).
@@ -265,6 +278,85 @@ local function currentCharacters()
         end
     end
     return out
+end
+
+local function partyAvatars()
+    -- Party members (server-side, robust): DB_Avatars rows plus entities that
+    -- carry the UserAvatar component. Keys are clean pure guids.
+    local out = {}
+    local ok, rows = pcall(dumpDb, "Avatars")
+    if ok and type(rows) == "table" then
+        for _, r in ipairs(rows) do
+            local s = tostring(r or "")
+            for tok in (s .. "|"):gmatch("(.-)|") do
+                local p = pureGuid(tok)
+                if p ~= nil and p ~= "" then
+                    out[p] = true
+                end
+            end
+        end
+    end
+    local ok2, hs = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("UserAvatar") end)
+    if ok2 and hs ~= nil then
+        for i = 1, #hs do
+            local okH, g = pcall(Ext.Entity.HandleToUuid, hs[i])
+            if okH and g ~= nil and g ~= "" then
+                out[pureGuid(tostring(g))] = true
+            end
+        end
+    end
+    return out
+end
+
+local function characterPartyFlags(g)
+    -- Серверный компонент Character (EsvCharacter) даёт InParty/IsPlayer/PartyFollower —
+    -- надёжный признак членов партии, независимый от DB_Avatars/UserAvatar.
+    local okE, ent = pcall(Ext.Entity.Get, g)
+    if not okE or ent == nil then
+        return nil
+    end
+    local okC, comp = pcall(function() return ent:GetComponent("ServerCharacter") end)
+    if not okC or comp == nil then
+        return nil
+    end
+    local raw = {}
+    local function grabRaw(tag, f)
+        local ok, v = pcall(function() return comp[f] end)
+        if ok then
+            raw[tag] = tostring(v) .. " (" .. type(v) .. ")"
+        else
+            raw[tag] = "ERR: " .. tostring(v)
+        end
+    end
+    grabRaw("InParty", "InParty")
+    grabRaw("IsPlayer", "IsPlayer")
+    grabRaw("PartyFollower", "PartyFollower")
+    local truthy = function(tag)
+        return raw[tag] ~= nil and raw[tag] ~= "false (boolean)" and raw[tag] ~= "0 (number)" and raw[tag] ~= "ERR"
+    end
+    return {
+        in_party = truthy("InParty"),
+        is_player = truthy("IsPlayer"),
+        party_follower = truthy("PartyFollower"),
+        raw = raw,
+    }
+end
+
+local function actingCleanOf(actor)
+    -- Deterministic clean guid for the actor: same pipeline as participant guids
+    -- (HandleToUuid on an EntityHandle), so string equality with participants
+    -- is guaranteed regardless of prefixed id formats from Osiris.
+    if actor == nil or actor == "" then
+        return ""
+    end
+    local okU, h = pcall(Ext.Entity.UuidToHandle, actor)
+    if okU and h ~= nil then
+        local ok1, g = pcall(Ext.Entity.HandleToUuid, h)
+        if ok1 and g ~= nil then
+            return tostring(g)
+        end
+    end
+    return pureGuid(actor) or ""
 end
 
 local function resolveActingCharacter(explicit)
@@ -302,6 +394,17 @@ local function probeGameState()
         local okTe, te = pcall(entityTurnComponentDump, actingResolved)
         out.turn_entity = okTe and te or { error = tostring(te) }
     end
+    -- combat-state сущности: сколько боёв активно и участников (v0.8.11)
+    local okCs, cs = pcall(function()
+        local list = Ext.Entity.GetAllEntitiesWithComponent("CombatState") or {}
+        local res = {}
+        for i = 1, #list do
+            local uuid = tostring(Ext.Entity.HandleToUuid(list[i]) or "")
+            res[#res + 1] = { index = i, uuid = uuid }
+        end
+        return res
+    end)
+    out.combat_states = okCs and cs or nil
     for _, cc in ipairs(currentCharacters()) do
         local name = nil
         if type(Osi.GetDisplayName) == "function" then
@@ -396,6 +499,551 @@ function entityTurnComponentDump(guid)
         end
     end
     return out
+end
+
+-- ============================================================
+-- StateExtractor (v0.8.11): Канал B — наблюдение.
+-- На каждый TurnStarted (или по действию state_capture) строит combat-state
+-- по схеме C# CombatState (snake_case) и пишет его в bg3_to_neuro.json:
+--   turn_actor + инициатива, allies/enemies (alias, name, hp, max_hp, distance,
+--   position_x/y, effects/status), available_actions.
+-- Дополнительно регистрирует alias→guid в ENTITY_BY_ALIAS, чтобы
+-- move_to_target/attack_entity/cast_spell резолвили цели по коротким именам;
+-- псевдонимы стабильны в рамках одного боя (один и тот же враг — один и тот же alias).
+-- Классификация команды: партийные (reserved user id) + участники с тем же
+-- CombatTeam, что и у партии; все остальные участники — враги.
+-- ============================================================
+
+local STATE_VERSION = 2
+
+local translitMap = {
+    ["а"] = "a", ["б"] = "b", ["в"] = "v", ["г"] = "g", ["д"] = "d", ["е"] = "e",
+    ["ё"] = "e", ["ж"] = "zh", ["з"] = "z", ["и"] = "i", ["й"] = "y", ["к"] = "k",
+    ["л"] = "l", ["м"] = "m", ["н"] = "n", ["о"] = "o", ["п"] = "p", ["р"] = "r",
+    ["с"] = "s", ["т"] = "t", ["у"] = "u", ["ф"] = "f", ["х"] = "h", ["ц"] = "ts",
+    ["ч"] = "ch", ["ш"] = "sh", ["щ"] = "sch", ["ъ"] = "", ["ы"] = "y", ["ь"] = "",
+    ["э"] = "e", ["ю"] = "yu", ["я"] = "ya",
+}
+do
+    -- string.lower не обрабатывает многобайтовую кириллицу, поэтому заглавные
+    -- ключи добавляем явно (код-поинт заглавной = строчная - 0x20).
+    local function uchar(cp)
+        if utf8 ~= nil and utf8.char ~= nil then
+            return utf8.char(cp)
+        end
+        return string.char(0xC0 | (cp >> 6), 0x80 | (cp & 0x3F))
+    end
+    for k, v in pairs(translitMap) do
+        local b1, b2 = k:byte(1, 2)
+        if b1 and b2 and b1 >= 0xD0 then
+            local cp = ((b1 & 0x1F) << 6) | (b2 & 0x3F)
+            local up
+            if cp >= 0x430 and cp <= 0x44F then
+                up = cp - 0x20
+            elseif cp == 0x451 then
+                up = 0x401
+            end
+            if up ~= nil then
+                translitMap[uchar(up)] = v
+            end
+        end
+    end
+end
+
+local function translit(s)
+    -- Побайтовый UTF-8-декодер: строки здесь всегда валидный UTF-8 (DisplayName),
+    -- без зависимости от модуля utf8. Кириллица → латиница через translitMap.
+    s = tostring(s or "")
+    local out = {}
+    local i = 1
+    local n = #s
+    while i <= n do
+        local b1 = s:byte(i)
+        if b1 == nil then
+            break
+        end
+        local c
+        if b1 < 0x80 then
+            c = string.char(b1)
+            i = i + 1
+        elseif b1 < 0xE0 then
+            c = string.char(b1, s:byte(i + 1))
+            i = i + 2
+        elseif b1 < 0xF0 then
+            c = string.char(b1, s:byte(i + 1), s:byte(i + 2))
+            i = i + 3
+        else
+            c = string.char(b1, s:byte(i + 1), s:byte(i + 2), s:byte(i + 3))
+            i = i + 4
+        end
+        out[#out + 1] = translitMap[c] or c
+    end
+    return table.concat(out):lower()
+end
+
+local function slug(s)
+    s = translit(s)
+    s = s:gsub("[^%a%d]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+    return (#s == 0) and "entity" or s
+end
+
+local function round1(v)
+    if type(v) ~= "number" then
+        return nil
+    end
+    local sign = v >= 0 and 0.5 or -0.5
+    return math.floor(v * 10 + sign) / 10
+end
+
+local function positionOf(guid)
+    local ok, x, y, z = pcall(Osi.GetPosition, guid)
+    if not ok or x == nil then
+        return nil, nil, nil
+    end
+    return x, y, z
+end
+
+local function distance3(x1, y1, z1, x2, y2, z2)
+    if x1 == nil or x2 == nil then
+        return nil
+    end
+    return math.sqrt((x1 - x2) ^ 2 + (y1 - y2) ^ 2 + (z1 - z2) ^ 2)
+end
+
+local function displayName(guid)
+    -- Human-readable (localized) name from the DisplayName component, when present.
+    if guid ~= nil and guid ~= "" then
+        local okE, ent = pcall(Ext.Entity.Get, guid)
+        if okE and ent ~= nil then
+            local okC, dnc = pcall(function() return ent:GetComponent("DisplayName") end)
+            if okC and dnc ~= nil then
+                local okN, dname = pcall(function() return dnc.Name end)
+                if okN and dname ~= nil and tostring(dname) ~= "" then
+                    local okG, s = pcall(function() return dname:Get() end)
+                    if okG and s ~= nil and tostring(s) ~= "" then
+                        return tostring(s)
+                    end
+                end
+            end
+        end
+    end
+    if type(Osi.GetDisplayName) == "function" then
+        local ok, n = pcall(Osi.GetDisplayName, guid)
+        if ok and n ~= nil then
+            return tostring(n)
+        end
+    end
+    return tostring(guid)
+end
+
+local function fieldOf(comp, f)
+    -- Чтение поля компонента без падения: отсутствующее поле бросает
+    -- "Property does not exist" — pcall и nil.
+    if comp == nil then
+        return nil
+    end
+    local ok, v = pcall(function() return comp[f] end)
+    if ok then
+        return v
+    end
+    return nil
+end
+
+local function turnComponent(ent)
+    if ent == nil then
+        return nil
+    end
+    local ok, comp = pcall(function() return ent:GetComponent("TurnBased") end)
+    if ok and comp ~= nil then
+        return comp
+    end
+    return nil
+end
+
+local function healthOf(ent)
+    if ent == nil then
+        return 0, 0
+    end
+    local ok, comp = pcall(function() return ent:GetComponent("Health") end)
+    if ok and comp ~= nil then
+        return fieldOf(comp, "Hp") or 0, fieldOf(comp, "MaxHp") or 0
+    end
+    return 0, 0
+end
+
+-- guid → alias: устойчиво в рамках одного боя, чтобы Neuro и router работали с
+-- одними и теми же короткими именами на каждом тике state.
+local combatAliases = {}
+local lastCombatGuid = nil
+
+local function registerAlias(guid, isControlled, taken)
+    local existing = combatAliases[guid]
+    if existing then
+        taken[existing] = true
+        return existing
+    end
+    local base = slug(displayName(guid))
+    local alias
+    if isControlled then
+        -- партийные: имя как есть (karlach / shadowheart / tav), при коллизии — суффикс
+        alias = base
+        local i = 1
+        while taken[alias] do
+            i = i + 1
+            alias = base .. "_" .. i
+        end
+    else
+        -- враги: имя с номером (goblin_1, goblin_2, ...)
+        local i = 0
+        repeat
+            i = i + 1
+            alias = base .. "_" .. i
+        until not taken[alias]
+    end
+    taken[alias] = true
+    combatAliases[guid] = alias
+    ENTITY_BY_ALIAS[alias] = guid
+    return alias
+end
+
+local function participantGuids(combatComp)
+    -- CombatState.Participants — Array<EntityHandle> (SE array-like: userdata с #/ipairs);
+    -- HandleToUuid → guid строкой.
+    local out = {}
+    if combatComp == nil then
+        return out
+    end
+    local okP, parts = pcall(function() return combatComp.Participants end)
+    if not okP or parts == nil then
+        return out
+    end
+    local okN, n = pcall(function() return #parts end)
+    local count = okN and n or 0
+    for i = 1, count do
+        local okH, guid = pcall(Ext.Entity.HandleToUuid, parts[i])
+        if okH and guid ~= nil and guid ~= "" then
+            out[#out + 1] = tostring(guid)
+        end
+    end
+    return out
+end
+
+local function teamOf(guid, cache, covered)
+    -- CombatTeam участника (Guid) с кэшем по закешированным в этом тике сущностям.
+    if cache ~= nil and cache[guid] ~= nil then
+        return cache[guid]
+    end
+    local okE, ent = pcall(Ext.Entity.Get, guid)
+    if okE and ent ~= nil then
+        local tb = turnComponent(ent)
+        local tg = fieldOf(tb, "CombatTeam") or fieldOf(tb, "Combat")
+        if cache ~= nil then
+            cache[guid] = (tg ~= nil and tg ~= "") and tostring(tg) or nil
+        end
+        if covered ~= nil then
+            covered[guid] = true
+        end
+        return cache ~= nil and cache[guid] or nil
+    end
+    return nil
+end
+
+local function writeStateFile(payload)
+    local ok, err = pcall(Ext.IO.SaveFile, STATE_FILE, Ext.Json.Stringify(payload))
+    if not ok then
+        _P("[BG3Neuro] state: " .. tostring(err))
+    end
+    return ok
+end
+
+local function combatStateComponentOf(combatGuid, acting, diag)
+    -- Достать CombatState для combat-сущности.
+    -- Прямой путь (v0.7.7 end_turn): TurnBased.CombatTeam — Guid (объект) сущности боя,
+    -- Ext.Entity.UuidToHandle(Guid) → EntityHandle. В некоторых боях этот guid не
+    -- резолвится (UuidToHandle→nil, Ext.Entity.Get→nil), поэтому основной путь —
+    -- сканирование: Ext.Entity.GetAllEntitiesWithComponent("CombatState") и выбор
+    -- боя, в Participants которого есть ходящий персонаж.
+    local foundComp = nil
+    local scan = {}
+    if diag ~= nil then
+        diag.scans = scan
+    end
+    local okH, combatHandle = pcall(Ext.Entity.UuidToHandle, combatGuid)
+    if diag ~= nil then
+        diag.uuid_to_handle_ok = okH
+        diag.uuid_to_handle_nil = not okH or combatHandle == nil
+    end
+    if okH and combatHandle ~= nil then
+        local okS, comp = pcall(function() return combatHandle:GetComponent("CombatState") end)
+        scan.direct_comp_ok = okS
+        scan.direct_comp_nil = okS and comp == nil or not okS
+        if okS and comp ~= nil then
+            local parts = participantGuids(comp)
+            scan.direct_participants = #parts
+            if #parts > 0 then
+                foundComp = comp
+                if diag ~= nil then
+                    diag.combat_path = "uuid_to_handle"
+                end
+            end
+        end
+    end
+
+    local okAll, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("CombatState") end)
+    if diag ~= nil then
+        scan.get_all_ok = okAll
+    end
+    if foundComp == nil and okAll and handles ~= nil then
+        local n = #handles
+        scan.candidates = n
+        for i = 1, n do
+            local okS, comp = pcall(function() return handles[i]:GetComponent("CombatState") end)
+            local parts = okS and comp ~= nil and participantGuids(comp) or {}
+            if diag ~= nil then
+                -- uuid боевой сущности может отсутствовать (нет UuidComponent) —
+                -- он нужен только для справки, участники берутся из Participants.
+                local okU, hGuid = pcall(Ext.Entity.HandleToUuid, handles[i])
+                scan["cand_" .. i .. "_uuid"] = okU and tostring(hGuid) or nil
+                scan["cand_" .. i .. "_participants"] = #parts
+            end
+            if okS and comp ~= nil and #parts > 0 then
+                if foundComp == nil then
+                    foundComp = comp
+                    if diag ~= nil then
+                        diag.combat_path = "scan"
+                        scan["chosen"] = "cand_" .. i
+                    end
+                end
+                local hasActing = false
+                for _, pGuid in ipairs(parts) do
+                    if pGuid == acting then
+                        hasActing = true
+                        break
+                    end
+                end
+                if hasActing then
+                    foundComp = comp
+                    if diag ~= nil then
+                        diag.combat_path = "scan_has_acting"
+                        scan["chosen"] = "cand_" .. i
+                    end
+                    break
+                end
+            end
+        end
+    end
+    return foundComp
+end
+
+function captureCombatState(event, force)
+    -- Полный combat-state: глобальная функция, чтобы её мог вызвать уже
+    -- зарегистрированный listener TurnStarted (резолвится в runtime).
+    local diag = { stage = "start", acting = "" }
+    local state = {
+        version = STATE_VERSION,
+        mode = "combat",
+        generated_at = nowIso(),
+        trigger = event or "manual",
+        turn_actor = "",
+        turn_initiative_index = 0,
+        turn_initiative_total = 0,
+        allies = {},
+        enemies = {},
+        available_actions = {},
+        events = {},
+    }
+    local acting = resolveActingCharacter("")
+    local actingClean = actingCleanOf(acting)
+    diag.acting = acting or ""
+    diag.stage = "acting"
+    if Ext == nil or Ext.Entity == nil or acting == nil or acting == "" then
+        if force then writeStateFile(state) end
+        return state, diag
+    end
+    diag.stage = "entity"
+    local okE, actingEnt = pcall(Ext.Entity.Get, acting)
+    if not okE or actingEnt == nil then
+        if force then writeStateFile(state) end
+        return state, diag
+    end
+    diag.stage = "turnbased"
+    local actingTb = turnComponent(actingEnt)
+    local combatGuid = fieldOf(actingTb, "CombatTeam") or fieldOf(actingTb, "Combat")
+    diag.combat_guid = combatGuid ~= nil and tostring(combatGuid) or nil
+    local combatGuidStr = combatGuid ~= nil and tostring(combatGuid) or ""
+    if lastCombatGuid ~= nil and lastCombatGuid ~= combatGuidStr then
+        -- смена боя: алиасы и их guid-маппинг сброс, чтобы не копились суффиксы
+        combatAliases = {}
+        ENTITY_BY_ALIAS = {}
+    end
+    lastCombatGuid = combatGuidStr
+    if combatGuid == nil or combatGuid == "" then
+        if force then writeStateFile(state) end
+        return state, diag
+    end
+    -- CombatState живёт на combat-сущности. CombatTeam — Guid (userdata); для
+    -- Ext.Entity.Get нужно строковое представление.
+    local combatComp = combatStateComponentOf(combatGuid, actingClean, diag)
+    if combatComp == nil then
+        if force then writeStateFile(state) end
+        return state, diag
+    end
+    diag.stage = "participants"
+    local parts = participantGuids(combatComp)
+    diag.participants = #parts
+    if #parts == 0 then
+        if force then writeStateFile(state) end
+        return state, diag
+    end
+    diag.stage = "team"
+
+    -- party from DB_Avatars + controlled (reserved user id)
+    local avatars = partyAvatars()
+    local controlled = {}
+    for _, cc in ipairs(currentCharacters()) do
+        local p = pureGuid(cc.character)
+        if p ~= nil and p ~= "" then
+            controlled[p] = true
+        end
+    end
+
+    -- команда партии: CombatTeam первого партийца-участника, fallback — команда ходящего
+    local teamCache = {}
+    local alliesTeam = nil
+    for _, g in ipairs(parts) do
+        if avatars[g] or controlled[g] then
+            alliesTeam = teamOf(g, teamCache)
+            if alliesTeam ~= nil then
+                break
+            end
+        end
+    end
+    if alliesTeam == nil then
+        alliesTeam = teamOf(actingClean, teamCache)
+    end
+    if diag ~= nil then
+        diag.acting_clean = actingClean
+        diag.party_avatars = nil
+        local nA = 0
+        for _ in pairs(avatars) do
+            nA = nA + 1
+        end
+        diag.party_avatars = nA
+        local teams = {}
+        for _, g in ipairs(parts) do
+            local t = teamOf(g, teamCache)
+            local k = t ~= nil and t or "nil"
+            teams[k] = (teams[k] or 0) + 1
+        end
+        diag.teams = teams
+        diag.allies_team = alliesTeam or nil
+    end
+
+    -- партия по серверному Character-компоненту (InParty/IsPlayer/PartyFollower)
+    local partyFlag = {}
+    local pfDiag = { in_party = 0, is_player = 0, party_follower = 0, total_party = 0 }
+    for _, g in ipairs(parts) do
+        local pf = characterPartyFlags(g)
+        if pf ~= nil then
+            if pf.in_party then pfDiag.in_party = pfDiag.in_party + 1 end
+            if pf.is_player then pfDiag.is_player = pfDiag.is_player + 1 end
+            if pf.party_follower then pfDiag.party_follower = pfDiag.party_follower + 1 end
+            if pf.in_party or pf.is_player or pf.party_follower then
+                partyFlag[g] = true
+                pfDiag.total_party = pfDiag.total_party + 1
+            end
+        end
+    end
+    if diag ~= nil then
+        diag.party_flags = pfDiag
+        local rawPf = characterPartyFlags(actingClean)
+        diag.party_flags_raw = rawPf ~= nil and rawPf.raw or { note = "no char component" }
+    end
+
+    state.turn_initiative_total = #parts
+    local actingPosX, actingPosY, actingPosZ = positionOf(acting)
+    local taken = {}
+    for _, g in ipairs(parts) do
+        local existing = combatAliases[g]
+        if existing then
+            taken[existing] = true
+        end
+    end
+
+    for i, g in ipairs(parts) do
+        local isControlled = controlled[g] or false
+        local team = teamOf(g, teamCache)
+        local isAlly = isControlled or avatars[g] or partyFlag[g] or (team ~= nil and team == alliesTeam)
+        local alias = registerAlias(g, isControlled or avatars[g] or partyFlag[g], taken)
+        local ent
+        local okG, e = pcall(Ext.Entity.Get, g)
+        ent = okG and e or nil
+        local hp, maxHp = healthOf(ent)
+        local tb = turnComponent(ent)
+        local canAct = fieldOf(tb, "CanActInCombat")
+        local px, py, pz = positionOf(g)
+        local dist = nil
+        if px ~= nil and actingPosX ~= nil then
+            dist = round1(distance3(actingPosX, actingPosY, actingPosZ, px, py, pz))
+        end
+        local combatant = {
+            alias = alias,
+            name = displayName(g),
+            hp = hp or 0,
+            max_hp = maxHp or 0,
+            distance = dist or 0,
+            position_x = round1(px or 0),
+            position_y = round1(py or 0),
+        }
+        if isAlly then
+            local fx = {}
+            if g == actingClean then
+                fx[#fx + 1] = "ходит сейчас"
+            end
+            fx[#fx + 1] = canAct and "может действовать" or "не может действовать"
+            combatant.effects = table.concat(fx, ", ")
+        else
+            if hp ~= nil and hp <= 0 then
+                combatant.status = "повержен"
+            elseif canAct == false then
+                combatant.status = "не может действовать"
+            end
+        end
+        if isAlly then
+            state.allies[#state.allies + 1] = combatant
+        else
+            state.enemies[#state.enemies + 1] = combatant
+        end
+        if g == actingClean then
+            state.turn_actor = alias
+            state.turn_initiative_index = i
+        end
+    end
+
+    state.available_actions[#state.available_actions + 1] = "end_turn"
+    if #state.enemies > 0 then
+        local enemyAliases = {}
+        for _, e in ipairs(state.enemies) do
+            enemyAliases[#enemyAliases + 1] = e.alias
+        end
+        state.available_actions[#state.available_actions + 1] =
+            "attack_entity: [" .. table.concat(enemyAliases, ", ") .. "]"
+    end
+    local allAliases = {}
+    for _, c in ipairs(state.allies) do
+        allAliases[#allAliases + 1] = c.alias
+    end
+    for _, e in ipairs(state.enemies) do
+        allAliases[#allAliases + 1] = e.alias
+    end
+    if #allAliases > 0 then
+        state.available_actions[#state.available_actions + 1] =
+            "move_to_target: [" .. table.concat(allAliases, ", ") .. "]"
+    end
+
+    writeStateFile(state)
+    diag.stage = "done"
+    return state, diag
 end
 
 -- ============================================================
@@ -935,6 +1583,28 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
             .. " current=" .. #p.current_characters
             .. (p.probe_error and (" error=" .. p.probe_error) or ""))
         return true, nil, nil, nil, { debug = p }
+    end
+
+    if name == "state_capture" then
+        -- StateExtractor (v0.8.11): принудительный combat-state прямо сейчас
+        -- (диагностика; полный state уже ушёл в bg3_to_neuro.json).
+        local okC, p, diag = pcall(captureCombatState, "state_capture", true)
+        if okC then
+            _P("[BG3Neuro] state_capture: turn=" .. tostring(p.turn_actor)
+                .. " allies=" .. #p.allies .. " enemies=" .. #p.enemies
+                .. " stage=" .. tostring(diag and diag.stage or "?"))
+            return true, nil, nil, nil, {
+                version = p.version,
+                trigger = p.trigger,
+                turn_actor = p.turn_actor,
+                turn_initiative_index = p.turn_initiative_index,
+                turn_initiative_total = p.turn_initiative_total,
+                allies = #p.allies,
+                enemies = #p.enemies,
+                diag = diag,
+            }
+        end
+        return false, nil, "action_failed", tostring(p)
     end
 
     if name == "move_to_target" then

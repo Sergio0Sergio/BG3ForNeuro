@@ -104,6 +104,17 @@
     }
   },
   {
+    "name": "state_capture",
+    "description": "Диагностика: принудительно снять текущее состояние игры (бой/локация) и обновить state-файл.",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
     "name": "end_turn",
     "description": "Завершить ход текущего персонажа.",
     "schema": {
