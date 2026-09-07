@@ -319,3 +319,39 @@ Recommended executor flow per command (maps ticket 07 Q1/Q2/Q3/Q5):
 3. Decide `toggle_mode` (stealth): accept `unsupported` in v1 or budget a status-based experiment.
 4. Movement speeds: freeze `"Run"` for combat / `"Walk"` for exploration and exposed in [config](map.md).
 5. Where equipped items + spell ids come from: settle SpellId normalization (§13) before state extractor schema (03) is finalized.
+---
+
+## Addendum (2026-09-06): эмпирика live-прогона на SE v32 (Patch 8 + HotFix 9)
+
+Проверено в живой сессии (bootstrap server-контекста, `Ext.Utils.GameVersion()="v4.73.98.727"`).
+
+### Реальные сигнатуры событий (источник: `Story\RawFiles\Goals\*.txt` из `Shared.pak`+`Patch8_HotFix9.pak`)
+
+| Событие | Сигнатура | Подтверждение |
+| --- | --- | --- |
+| `CharacterMoveToCancelled` | 2 (`_Char,_ID`) | `__PROC.txt` |
+| `CastSpell` / `CastedSpell` | 5 (`_Caster,_Spell,_SpellType,_SpellElement,_StoryActionID`) | `__PROC.txt` + live capture `@5` |
+| `CastSpellFailed` | 5 (та же сигнатура, что CastedSpell) | `__PROC.txt` |
+| `DialogStarted` / `DialogEnded` | 2 (`_Dialog,_Inst`) | `__GLOBAL_Dialogs.txt` + live capture `@2` |
+| `DialogStarting` | **не событие** | отсутствует в raws; регистрация молча фейлится |
+| `LongRestFinished` / `LongRestCancelled` / `LongRestStartFailed` | **0** | `GLO_Camp.txt` (`LongRestCancelled()`, `LongRestStartFailed()`, `LongRestStarted()`, `LongRestFinished()`) |
+
+### Поведение `Ext.Osiris.RegisterListener` в SE v32
+
+- Сигнатура: `RegisterListener(name, arity, "after"/"before", handler)`. Долгоживущие листенеры из
+  bootstrap не требуют id-стрint; лишний 3-й аргумент в старых примерах — не id, а фаза события.
+- Регистрация с арностью, отличной от объявления события, **молча не регистрирует**: в логе
+  `Couldn't register Osiris subscriber for <Name>/<arity>: Symbol not found in story`.
+- `pcall(RegisterListener(...))` при этом возвращает `true` — **ошибку видно только в логе
+  `Script Extender Logs\Extender Runtime …log`**; по имени с неверной arity «Symbol not found»
+  появляется на любой арности, включая 0.
+- Вывод в лог: `_P(...)` работает, `Ext.Print`/`Ext.PrintError` в этом билде = `nil`.
+
+### Песочница: что чего нет
+
+- `os` — `nil` (нет `os.date`/`os.time`); время — `Ext.Timer.ClockTime()` = `"YYYY-MM-DD HH:MM:SS.fffffff"`
+  (UTC, пробел, без `Z`) → нормировка `(s):gsub(" ", "T") .. "Z"` даёт ISO-8601, читаемый
+  `DateTimeOffset` на C#; есть `Ext.Timer.ClockEpoch()` (секунды).
+- `Ext.IO.SaveFile/LoadFile` — относительно `<профиль>\Script Extender\` (подкаталог `BG3Neuro\` —
+  файлы `heartbeat.json`, `bg3_to_neuro.json`, `neuro_to_bg3.json`, `result_*.json`).
+- `math` есть; `Ext.Json.Stringify/Parse` работают.

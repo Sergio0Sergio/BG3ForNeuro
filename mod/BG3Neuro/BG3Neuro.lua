@@ -22,8 +22,10 @@ local seq = 0
 local activeMove = nil -- { id, event, moveId } — движение в полёте (interruption/cancel)
 
 local function nowIso()
-    -- UTC ISO-8601 для сравнения с DateTimeOffset.UtcNow на C#-стороне
-    return os.date("!%Y-%m-%dT%H:%M:%SZ")
+    -- UTC: Ext.Timer.ClockTime() даёт "YYYY-MM-DD HH:MM:SS.fffffff" (UTC);
+    -- нормируем в ISO-8601 для сравнения с DateTimeOffset.UtcNow на C#-стороне.
+    -- (os недоступен в песочнице SE — os.date использовать нельзя)
+    return (Ext.Timer.ClockTime() or ""):gsub(" ", "T") .. "Z"
 end
 
 local function writeHeartbeat()
@@ -36,7 +38,7 @@ local function writeHeartbeat()
     }
     local ok, err = pcall(Ext.IO.SaveFile, HEARTBEAT_FILE, Ext.Json.Stringify(payload))
     if not ok then
-        Ext.PrintError("[BG3Neuro] heartbeat: " .. tostring(err))
+        _P("[BG3Neuro] heartbeat: " .. tostring(err))
     end
 end
 
@@ -55,7 +57,7 @@ local function writeInitialState()
     }
     local ok, err = pcall(Ext.IO.SaveFile, STATE_FILE, Ext.Json.Stringify(state))
     if not ok then
-        Ext.PrintError("[BG3Neuro] initial state: " .. tostring(err))
+        _P("[BG3Neuro] initial state: " .. tostring(err))
     end
 end
 
@@ -91,7 +93,7 @@ local function writeResult(actionId, success, running, errorCode, errorDetail)
     local path = RESULT_DIR .. "/result_" .. actionId .. ".json"
     local ok, err = pcall(Ext.IO.SaveFile, path, Ext.Json.Stringify(payload))
     if not ok then
-        Ext.PrintError("[BG3Neuro] write result " .. actionId .. ": " .. tostring(err))
+        _P("[BG3Neuro] write result " .. actionId .. ": " .. tostring(err))
     end
     return ok
 end
@@ -119,8 +121,9 @@ end
 -- Long actions: intermediate running:true + final by game event
 -- ============================================================
 
-Ext.Osiris.RegisterListener("CharacterMoveToCancelled", function(event, character, moveID)
-end, "BG3NeuroMoveCancelAck")
+Ext.Osiris.RegisterListener("CharacterMoveToCancelled", 2, "after", function(character, moveID)
+    -- ack: финал cancel уже пишет cancelActiveMove (interruption path)
+end)
 
 function cancelActiveMove(reason, detail)
     if activeMove == nil then
@@ -195,16 +198,16 @@ local function finalizeCast(caster, spellName, cancelled)
     end
 end
 
-Ext.Osiris.RegisterListener("CastSpell", function(caster, spell, spellType, spellElement, storyActionID)
-end, "BG3NeuroCastStart")
+Ext.Osiris.RegisterListener("CastSpell", 5, "after", function(caster, spell, spellType, spellElement, storyActionID)
+end)
 
-Ext.Osiris.RegisterListener("CastedSpell", function(caster, spell, spellType, spellElement, storyActionID)
+Ext.Osiris.RegisterListener("CastedSpell", 5, "after", function(caster, spell, spellType, spellElement, storyActionID)
     finalizeCast(caster, spell, false)
-end, "BG3NeuroCastDone")
+end)
 
-Ext.Osiris.RegisterListener("CastSpellFailed", function(caster, spell, reason)
+Ext.Osiris.RegisterListener("CastSpellFailed", 5, "after", function(caster, spell, spellType, spellElement, storyActionID)
     finalizeCast(caster, spell, true)
-end, "BG3NeuroCastFail")
+end)
 
 local function executeCast(action)
     local data = action.data
@@ -264,15 +267,12 @@ local function finalizeDialogueOption(dialog)
     end
 end
 
-Ext.Osiris.RegisterListener("DialogStarting", function(dialog, instanceID)
-end, "BG3NeuroDialogStart")
+Ext.Osiris.RegisterListener("DialogStarted", 2, "after", function(dialog, instanceID)
+end)
 
-Ext.Osiris.RegisterListener("DialogStarted", function(dialog, instanceID)
-end, "BG3NeuroDialogStarted")
-
-Ext.Osiris.RegisterListener("DialogEnded", function(dialog, instanceID)
+Ext.Osiris.RegisterListener("DialogEnded", 2, "after", function(dialog, instanceID)
     finalizeDialogueOption(dialog)
-end, "BG3NeuroDialogEnd")
+end)
 
 local function executeDialogueOption(action)
     local data = action.data
@@ -368,17 +368,17 @@ local function finalizeRest(success, detail)
     writeResult(pending.id, success, false, success and nil or "action_failed", success and nil or detail)
 end
 
-Ext.Osiris.RegisterListener("LongRestFinished", function(character)
+Ext.Osiris.RegisterListener("LongRestFinished", 0, "after", function()
     finalizeRest(true, nil)
-end, "BG3NeuroRestDone")
+end)
 
-Ext.Osiris.RegisterListener("LongRestCancelled", function(character)
+Ext.Osiris.RegisterListener("LongRestCancelled", 0, "after", function()
     finalizeRest(false, "Отдых прерван/отменён")
-end, "BG3NeuroRestCancelled")
+end)
 
-Ext.Osiris.RegisterListener("LongRestStartFailed", function(character)
+Ext.Osiris.RegisterListener("LongRestStartFailed", 0, "after", function()
     finalizeRest(false, "Отдых не начался (нет лагеря/припасов)")
-end, "BG3NeuroRestFailed")
+end)
 
 local function executeInteract(action)
     local data = action.data
@@ -548,7 +548,7 @@ local function clearInFlight()
     -- вернёт "" и readInFlightAction() отклонит его как нет действия.
     local ok, err = pcall(Ext.IO.SaveFile, NEURO_TO_BG3_FILE, "")
     if not ok then
-        Ext.PrintError("[BG3Neuro] clear in-flight: " .. tostring(err))
+        _P("[BG3Neuro] clear in-flight: " .. tostring(err))
     end
 end
 
@@ -568,4 +568,4 @@ clearInFlight()
 writeInitialState()
 startHeartbeatLoop()
 pollActions()
-Ext.Print("[BG3Neuro] файловый IPC-мост поднят: " .. HEARTBEAT_FILE)
+_P("[BG3Neuro] файловый IPC-мост поднят: " .. HEARTBEAT_FILE)
