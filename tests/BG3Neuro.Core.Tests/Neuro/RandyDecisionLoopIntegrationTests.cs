@@ -746,6 +746,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
     {
         var stack = StartStackRawAsync(IpcConfigFor(_tmpDir));
         await WaitUntilAsync(() => stack.Ipc.Status == ModStatus.Alive && stack.Ipc.LastStateContent is not null, TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(() => stack.Sent.Any(m => m.Contains("\"command\":\"startup\"")), TimeSpan.FromSeconds(10));
         return stack;
     }
 
@@ -934,20 +935,29 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
 
     private async Task<JsonNode> PostActionAsync(List<string> sent, string id, string name, string dataJson, TimeSpan timeout)
     {
-        var resultTcs = new TaskCompletionSource<JsonNode>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _ = Task.Run(() => ListenForResultAsync(sent, resultTcs));
-
-        var client = new HttpClient(new HttpClientHandler { UseProxy = false, Proxy = null });
-        using (client)
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        using (var client = new HttpClient(new HttpClientHandler { UseProxy = false, Proxy = null }))
         {
-            var payload = new StringContent(
-                $"{{\"command\":\"action\",\"data\":{{\"id\":\"{id}\",\"name\":\"{name}\",\"data\":\"{dataJson.Replace("\"", "\\\"")}\"}}}}",
-                Encoding.UTF8,
-                "application/json");
-            await client.PostAsync($"http://localhost:{_httpPort}/", payload);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                var payload = new StringContent(
+                    $"{{\"command\":\"action\",\"data\":{{\"id\":\"{id}\",\"name\":\"{name}\",\"data\":\"{dataJson.Replace("\"", "\\\"")}\"}}}}",
+                    Encoding.UTF8,
+                    "application/json");
+                await client.PostAsync($"http://localhost:{_httpPort}/", payload);
+
+                var node = await WaitForResultAsync(sent, id, TimeSpan.FromMilliseconds(2000));
+                if (node is not null)
+                {
+                    return node;
+                }
+
+                await Task.Delay(200);
+            }
         }
 
-        return await resultTcs.Task.WaitAsync(timeout);
+        Assert.Fail($"action/result для '{id}' не получен за {timeout.TotalSeconds:0} с");
+        return null!;
     }
 
     private async Task<JsonNode> RunEndTurnAsync(string id, string dataJson)
@@ -957,21 +967,6 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
         using (ipc)
         {
             return await PostActionAsync(sent, id, "end_turn", dataJson, TimeSpan.FromSeconds(10));
-        }
-    }
-
-    private static async Task ListenForResultAsync(List<string> sent, TaskCompletionSource<JsonNode> tcs)
-    {
-        while (true)
-        {
-            var result = sent.LastOrDefault(m => m.Contains("\"action/result\""));
-            if (result is not null)
-            {
-                tcs.TrySetResult(JsonNode.Parse(result)!);
-                return;
-            }
-
-            await Task.Delay(20);
         }
     }
 
