@@ -126,6 +126,40 @@
     }
   },
   {
+    "name": "end_turn_ecs",
+    "description": "Диагностика: закончить ход через ECS/engine-каналы с подробным отчётом (mode: system/ecs/probe).",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "mode": { "type": "string", "enum": ["system", "ecs", "probe"] },
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "probe",
+    "description": "Диагностика: кто ходит, кто в бою, состояние партии/боя (debug-отчёт, не меняет игру).",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "diag_skip",
+    "description": "Диагностика: проверить DB_CharacterSkipTurn (добавить/удалить строку флага скипа хода).",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
     "name": "select_dialogue_option",
     "description": "Выбрать один из предложенных вариантов ответа в диалоге.",
     "schema": {

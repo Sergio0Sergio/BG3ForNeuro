@@ -125,7 +125,7 @@ public class RandyIntegrationTests
     }
 
     [Fact]
-    public async Task ConnectToRandy_Registers18Actions_AndHandlesReregister()
+    public async Task ConnectToRandy_Registers21Actions_AndHandlesReregister()
     {
         Assert.True(_randyStarted, $"Randy не готов: {_randyStartupError}");
 
@@ -151,8 +151,8 @@ public class RandyIntegrationTests
             {
                 var node = JsonNode.Parse(msg);
                 var names = node!["data"]!["actions"]!.AsArray().Select(a => a!["name"]!.GetValue<string>()).ToArray();
-                Assert.Equal(18, names.Length);
-                Assert.Equal(18, names.Distinct().Count());
+                Assert.Equal(21, names.Length);
+                Assert.Equal(21, names.Distinct().Count());
             }
 
             using var http = new HttpClient(new HttpClientHandler { UseProxy = false, Proxy = null });
