@@ -18,19 +18,19 @@ public static class ActionRegistry
     private static IReadOnlyList<ActionDefinition> Load()
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourceName)
-            ?? throw new InvalidOperationException($"Встраиваемый ресурс не найден: {ResourceName}");
+            ?? throw new InvalidOperationException($"Embedded resource not found: {ResourceName}");
         using var reader = new StreamReader(stream);
         var json = reader.ReadToEnd();
 
         var nodes = JsonSerializer.Deserialize<List<JsonNode>>(json, JsonOptions)
-            ?? throw new InvalidOperationException("Не удалось распарсить реестр действий");
+            ?? throw new InvalidOperationException("Failed to parse the action registry");
 
         var result = new List<ActionDefinition>(nodes.Count);
         foreach (var node in nodes)
         {
             result.Add(new ActionDefinition
             {
-                Name = node["name"]?.GetValue<string>() ?? throw new InvalidOperationException("Действие без name"),
+                Name = node["name"]?.GetValue<string>() ?? throw new InvalidOperationException("Action without name"),
                 Description = node["description"]?.GetValue<string>() ?? "",
                 Schema = node["schema"]?.AsObject() ?? new JsonObject(),
             });

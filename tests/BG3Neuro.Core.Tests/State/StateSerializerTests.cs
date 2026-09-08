@@ -62,14 +62,14 @@ public class StateSerializerTests
         var state = StateSerializer.Parse(SampleJson)!;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## Ход: Karlach (инициатива 3/5)", md);
-        Assert.Contains("## Контролируемые персонажи", md);
-        Assert.Contains("Karlach: HP 45/60, distance 6м, эффекты: Rage (3 раунда)", md);
-        Assert.Contains("## Враги", md);
-        Assert.Contains("goblin_1 (Goblin Raider): HP 12/18, distance 6м, статус: —", md);
-        Assert.Contains("## Заклинания (Karlach)", md);
-        Assert.Contains("Fireball: слот 3, радиус 18м, AoE 4м → в радиусе: покрывает: [goblin_1] (1 целей)", md);
-        Assert.Contains("## Доступные действия (Karlach)", md);
+        Assert.Contains("## Turn: Karlach (initiative 3/5)", md);
+        Assert.Contains("## Allied characters", md);
+        Assert.Contains("Karlach: HP 45/60, distance 6m, effects: Rage (3 раунда)", md);
+        Assert.Contains("## Enemies", md);
+        Assert.Contains("goblin_1 (Goblin Raider): HP 12/18, distance 6m, status: —", md);
+        Assert.Contains("## Spells (Karlach)", md);
+        Assert.Contains("Fireball: slot 3, range 18m, AoE 4m → in range: covers: [goblin_1] (1 targets)", md);
+        Assert.Contains("## Available actions (Karlach)", md);
         Assert.Contains("- end_turn", md);
     }
 
@@ -80,7 +80,7 @@ public class StateSerializerTests
         state.Spells.Clear();
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.DoesNotContain("## Заклинания", md);
+        Assert.DoesNotContain("## Spells", md);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class StateSerializerTests
         state.TurnActor = "shadowheart";
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## Ход: shadowheart", md);
+        Assert.Contains("## Turn: shadowheart", md);
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public class StateSerializerTests
         state.Events.Add("атака цели goblin_1 нанесла 7 урона");
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## События", md);
+        Assert.Contains("## Events", md);
         Assert.Contains("- атака цели goblin_1 нанесла 7 урона", md);
     }
 
@@ -136,7 +136,7 @@ public class StateSerializerTests
         var state = StateSerializer.Parse(SampleJson)!;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.DoesNotContain("## События", md);
+        Assert.DoesNotContain("## Events", md);
     }
 
     [Fact]
@@ -147,8 +147,8 @@ public class StateSerializerTests
         state.Allies[0].Distance = 3.25;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("distance 6.5м", md);
-        Assert.Contains("distance 3.25м", md);
+        Assert.Contains("distance 6.5m", md);
+        Assert.Contains("distance 3.25m", md);
     }
 
     [Fact]
@@ -159,8 +159,8 @@ public class StateSerializerTests
         state.Spells[0].OnCooldown = true;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("зарядов осталось: 2", md);
-        Assert.Contains("на кулдауне", md);
+        Assert.Contains("charges left: 2", md);
+        Assert.Contains("on cooldown", md);
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public class StateSerializerTests
         state.Spells[0].Aoe = 4;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("покрывает: [goblin_1] (1 целей)", md);
+        Assert.Contains("covers: [goblin_1] (1 targets)", md);
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public class StateSerializerTests
         state.Spells[0].Aoe = 0;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("→ в радиусе: (нет целей в радиусе)", md);
+        Assert.Contains("→ in range: (no targets in range)", md);
     }
 
     [Fact]
@@ -216,13 +216,13 @@ public class StateSerializerTests
 
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## Диалог", md);
-        Assert.Contains("Собеседник: Withers", md);
-        Assert.Contains("Реплика: Ты принял свою смерть?", md);
+        Assert.Contains("## Dialogue", md);
+        Assert.Contains("Speaker: Withers", md);
+        Assert.Contains("Line: Ты принял свою смерть?", md);
         Assert.Contains("- [1] Да, я готов.", md);
         Assert.Contains("- [2] Расскажи мне ещё.", md);
-        Assert.DoesNotContain("## Контролируемые персонажи", md);
-        Assert.DoesNotContain("## Ход:", md);
+        Assert.DoesNotContain("## Allied characters", md);
+        Assert.DoesNotContain("## Turn:", md);
     }
 
     private static readonly string ExplorationJson = """
@@ -255,12 +255,12 @@ public class StateSerializerTests
       "turn_initiative_index": 1,
       "turn_initiative_total": 4,
       "allies": [
-        { "alias": "tav", "name": "Tav", "hp": 43, "max_hp": 60, "distance": 0, "position_x": 2.3, "position_y": 1.8, "effects": "ходит сейчас, может действовать" },
-        { "alias": "shadowheart", "name": "Shadowheart", "hp": 51, "max_hp": 51, "distance": 4.5, "position_x": 6.1, "position_y": -1.2, "effects": "может действовать" }
+        { "alias": "tav", "name": "Tav", "hp": 43, "max_hp": 60, "distance": 0, "position_x": 2.3, "position_y": 1.8, "effects": "acting now, can act" },
+        { "alias": "shadowheart", "name": "Shadowheart", "hp": 51, "max_hp": 51, "distance": 4.5, "position_x": 6.1, "position_y": -1.2, "effects": "can act" }
       ],
       "enemies": [
         { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 7.2, "position_x": 8.4, "position_y": 6.5, "status": null },
-        { "alias": "goblin_2", "name": "Goblin Warrior", "hp": 0, "max_hp": 15, "distance": 9.1, "position_x": 10.2, "position_y": 3.3, "status": "повержен" }
+        { "alias": "goblin_2", "name": "Goblin Warrior", "hp": 0, "max_hp": 15, "distance": 9.1, "position_x": 10.2, "position_y": 3.3, "status": "defeated" }
       ],
       "available_actions": ["end_turn", "attack_entity: [goblin_1, goblin_2]", "move_to_target: [tav, shadowheart, goblin_1, goblin_2]"]
     }
@@ -277,12 +277,12 @@ public class StateSerializerTests
         Assert.Equal(1, state.TurnInitiativeIndex);
         Assert.Equal(4, state.TurnInitiativeTotal);
         Assert.Equal(2, state.Allies.Count);
-        Assert.Equal("ходит сейчас, может действовать", state.Allies[0].Effects);
+        Assert.Equal("acting now, can act", state.Allies[0].Effects);
         Assert.Equal(2.3, state.Allies[0].PositionX);
         Assert.Equal(-1.2, state.Allies[1].PositionY);
         Assert.Equal(2, state.Enemies.Count);
         Assert.Null(state.Enemies[0].Status);
-        Assert.Equal("повержен", state.Enemies[1].Status);
+        Assert.Equal("defeated", state.Enemies[1].Status);
         Assert.Equal(3, state.AvailableActions.Count);
         Assert.Contains("attack_entity: [goblin_1, goblin_2]", state.AvailableActions);
     }
@@ -293,11 +293,11 @@ public class StateSerializerTests
         var state = StateSerializer.Parse(ExtractorCombatJson)!;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## Ход: Tav (инициатива 1/4)", md);
-        Assert.Contains("- Tav: HP 43/60, distance 0м, эффекты: ходит сейчас, может действовать", md);
-        Assert.Contains("- Shadowheart: HP 51/51, distance 4.5м, эффекты: может действовать", md);
-        Assert.Contains("- goblin_1 (Goblin Raider): HP 12/18, distance 7.2м, статус: —", md);
-        Assert.Contains("- goblin_2 (Goblin Warrior): HP 0/15, distance 9.1м, статус: повержен", md);
+        Assert.Contains("## Turn: Tav (initiative 1/4)", md);
+        Assert.Contains("- Tav: HP 43/60, distance 0m, effects: acting now, can act", md);
+        Assert.Contains("- Shadowheart: HP 51/51, distance 4.5m, effects: can act", md);
+        Assert.Contains("- goblin_1 (Goblin Raider): HP 12/18, distance 7.2m, status: —", md);
+        Assert.Contains("- goblin_2 (Goblin Warrior): HP 0/15, distance 9.1m, status: defeated", md);
         Assert.Contains("- attack_entity: [goblin_1, goblin_2]", md);
         Assert.Contains("- move_to_target: [tav, shadowheart, goblin_1, goblin_2]", md);
         Assert.Contains("- end_turn", md);
@@ -328,17 +328,17 @@ public class StateSerializerTests
         var state = StateSerializer.Parse(ExplorationJson)!;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## Режим: обычный", md);
-        Assert.Contains("## Объекты (видит игрок, 2)", md);
-        Assert.Contains("## Объекты (видит shadowheart, 1)", md);
-        Assert.Contains("- wooden_door (Деревянная дверь) 3м, закрыта: [открыть, заламать, толкнуть]", md);
-        Assert.Contains("область: Роща", md);
-        Assert.Contains("- goblin_corpse (Труп гоблина) 5м: [забрать]", md);
-        Assert.Contains("## Локации (путешествие)", md);
-        Assert.Contains("- Роща (id: grove_east): 3м", md);
-        Assert.Contains("- rest: [full (полный отдых), partial (лёгкий отдых)]", md);
+        Assert.Contains("## Mode: exploration", md);
+        Assert.Contains("## Objects (seen by player, 2)", md);
+        Assert.Contains("## Objects (seen by shadowheart, 1)", md);
+        Assert.Contains("- wooden_door (Деревянная дверь) 3m, закрыта: [открыть, заламать, толкнуть]", md);
+        Assert.Contains("region: Роща", md);
+        Assert.Contains("- goblin_corpse (Труп гоблина) 5m: [take]", md);
+        Assert.Contains("## Locations (travel)", md);
+        Assert.Contains("- Роща (id: grove_east): 3m", md);
+        Assert.Contains("- rest: [full, partial]", md);
         Assert.Contains("- move_to_entity: [wooden_door]", md);
-        Assert.DoesNotContain("## Ход:", md);
+        Assert.DoesNotContain("## Turn:", md);
     }
 
     [Fact]
@@ -348,10 +348,10 @@ public class StateSerializerTests
         state.Mode = "map";
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## Экран: карта", md);
-        Assert.Contains("- Роща (id: grove_east): 3м", md);
-        Assert.Contains("- Разрушенное селение (id: villages): область: Разрушенное селение", md);
-        Assert.DoesNotContain("## Объекты", md);
+        Assert.Contains("## Screen: map", md);
+        Assert.Contains("- Роща (id: grove_east): 3m", md);
+        Assert.Contains("- Разрушенное селение (id: villages): region: Разрушенное селение", md);
+        Assert.DoesNotContain("## Objects", md);
     }
 
     [Fact]
@@ -361,8 +361,8 @@ public class StateSerializerTests
         state.Mode = "inventory";
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("## Экран: инвентарь", md);
-        Assert.Contains("## Предметы", md);
+        Assert.Contains("## Screen: inventory", md);
+        Assert.Contains("## Items", md);
         Assert.Contains("- Малый эликсир лечения (potion_healing) ×2, Зелье", md);
     }
 
@@ -373,7 +373,7 @@ public class StateSerializerTests
         state.CanRest = false;
         var md = StateSerializer.ToMarkdown(state);
 
-        Assert.Contains("- Недоступен: нет лагеря или припасов (no_camp)", md);
+        Assert.Contains("- Unavailable: no camp or supplies (no_camp)", md);
     }
 
     [Fact]
@@ -383,8 +383,8 @@ public class StateSerializerTests
         state.Objects.Add(new ExplorationObject { Alias = "barrel_1", Name = "Бочка", Distance = 6 });
         var md = StateSerializer.ToMarkdown(state, new ExplorationStateConfig { MaxVisibleObjects = 2 });
 
-        Assert.Contains("- … и ещё 1", md);
-        Assert.Contains("(видит игрок, 3)", md);
+        Assert.Contains("- … and 1 more", md);
+        Assert.Contains("(seen by player, 3)", md);
     }
 
     [Fact]

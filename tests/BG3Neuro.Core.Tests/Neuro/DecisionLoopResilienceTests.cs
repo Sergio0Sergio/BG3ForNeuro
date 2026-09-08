@@ -219,7 +219,7 @@ public class DecisionLoopResilienceTests : IDisposable
                 () => stack.Sent.Any(m =>
                     m.Contains("\"action/result\"") &&
                     m.Contains("r2-off-1") &&
-                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("Мод недоступен") == true),
+                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("Mod unavailable") == true),
                 TimeSpan.FromSeconds(10));
             Assert.True(offOk, "В Stale не вернулся mod_unavailable");
             Assert.False(File.Exists(Path.Combine(_tmpDir, "action_r2-off-1.json")), "action не должен писаться при mod_unavailable");
@@ -328,14 +328,14 @@ public class DecisionLoopResilienceTests : IDisposable
             // Lua-мод подтвердил (result_<id>.json), но исполнение провалилось
             RobustWrite(
                 Path.Combine(_tmpDir, "result_r-exec-1.json"),
-                """{"id":"r-exec-1","success":false,"error_code":"action_failed","error_detail":"Цель вне досягаемости"}""");
+                """{"id":"r-exec-1","success":false,"error_code":"action_failed","error_detail":"Target out of range"}""");
 
             var ok = await WaitUntilAsync(
                 () => stack.Sent.Any(m =>
                     m.Contains("\"action/result\"") &&
                     m.Contains("r-exec-1") &&
                     JsonNode.Parse(m)?["data"]?["success"]?.GetValue<bool>() == false &&
-                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("Цель вне досягаемости") == true),
+                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("Target out of range") == true),
                 TimeSpan.FromSeconds(10));
             Assert.True(ok, "Реальный failure из result_<id>.json не передан в action/result");
         }
@@ -366,7 +366,7 @@ public class DecisionLoopResilienceTests : IDisposable
                     m.Contains("\"action/result\"") &&
                     m.Contains("r-ack-1") &&
                     JsonNode.Parse(m)?["data"]?["success"]?.GetValue<bool>() == false &&
-                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("не подтвердил исполнение") == true),
+                    JsonNode.Parse(m)?["data"]?["message"]?.GetValue<string>()?.Contains("Mod did not confirm") == true),
                 TimeSpan.FromSeconds(10));
             Assert.True(ok, "Не вернулся timeout при отсутствии result_<id>.json");
         }

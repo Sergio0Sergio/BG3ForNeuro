@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.11 вЂ” С„Р°Р№Р»РѕРІС‹Р№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
+-- BG3Neuro v0.8.12 вЂ” С„Р°Р№Р»РѕРІС‹Р№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
 -- Р—Р°РґР°С‡Р°: heartbeat 2s + СЃС‚Р°СЂС‚РѕРІС‹Р№ state-С„Р°Р№Р» + РёСЃРїРѕР»РЅРµРЅРёРµ РґРµР№СЃС‚РІРёР№ РёР· action_*.json.
 -- Р”РµР№СЃС‚РІРёСЏ: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07, client-РєРѕРЅС‚РµРєСЃС‚), exploration (08:
@@ -9,7 +9,7 @@
 -- Р”РёСЂРµРєС‚РѕСЂРёСЏ IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO РїРёС€РµС‚ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.11"
+local MOD_VERSION = "0.8.12"
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
 local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (СЂРµР°Р»СЊРЅС‹Р№ polling)
@@ -134,26 +134,119 @@ end
 -- Р»РёС€СЊ РЅР°Р±Р»СЋРґР°РµС‚ (Osiris-Р»РѕРі: TurnEnded РїСЂРёС…РѕРґРёС‚ Р±РµР· РІС‹Р·РѕРІР° EndTurn). Р­С‚Рѕ Рё РµСЃС‚СЊ
 -- Р±Р°Р·Р° Рё РґР»СЏ СЃР°РјРѕРїСЂРѕРІРµСЂРєРё СЌС„С„РµРєС‚Р° end_turn (ended: true/false).
 local actingChar = nil
-local turnLog = {}   -- { t = "S"|"E", g = guid } вЂ” Р»РµРЅС‚Р° РїРѕСЃР»РµРґРЅРёС… СЃРјРµРЅ С…РѕРґР°
+local turnLog = {}   -- { t = "S"|"E", g = clean_guid } вЂ” Р»РµРЅС‚Р° РїРѕСЃР»РµРґРЅРёС… СЃРјРµРЅ С…РѕРґР°
+
+-- end_turn verification (v0.8.12): the result is written only when the engine
+-- actually confirms the turn change (TurnStarted of another combatant or
+-- TurnEnded of the requested actor), not on a fixed timer. Timers misreport
+-- ended:false when the engine moves the turn slower than the old 1.2s window.
+local pendingEndTurn = nil -- { id, acting, actingBefore, marker }
+
+local function finalizeEndTurn(p, ended)
+    if pendingEndTurn ~= p then
+        return
+    end
+    pendingEndTurn = nil
+    local result = {
+        ended = ended,
+        acting_before = tostring(p.actingBefore),
+        acting_after = tostring(actingChar),
+        turn_delta = turnLogSlice(p.marker, 8),
+    }
+    if not ended then
+        writeResult(p.id, false, false, "action_failed",
+            "Turn did not change within the deadline (30 s)", result)
+    else
+        writeResult(p.id, true, false, nil, nil, result)
+    end
+    _P("[BG3Neuro] end_turn verify: ended=" .. tostring(ended))
+end
+
+local function turnLogShowsEnded(p)
+    for i = p.marker + 1, #turnLog do
+        if turnLog[i].t == "E" and turnLog[i].g == p.acting then
+            return true
+        end
+        if turnLog[i].t == "S" and turnLog[i].g ~= p.acting then
+            return true
+        end
+    end
+    return false
+end
+
+local function armEndTurn(p)
+    pendingEndTurn = p
+    -- The engine may have already moved the turn between Osi.EndTurn and arming:
+    -- re-scan the log before relying on the event listeners.
+    if turnLogShowsEnded(p) then
+        finalizeEndTurn(p, true)
+        return
+    end
+    Ext.Timer.WaitForRealtime(30000, function()
+        finalizeEndTurn(p, turnLogShowsEnded(p))
+    end)
+end
+
+-- v0.7.7 proven channel: Osi.EndTurn (story) and the RequestedEndTurn flag alone are
+-- no-ops (the engine does not move the turn outside a client net message). The working
+-- route in live combat: RequestedEndTurn=true on the actor's TurnBased component plus
+-- pushing the combat entity into Ext.System.ServerTurnOrder.EndTurn (the same queue
+-- the client NETMSG_TURNBASED_ENDTURN_REQUEST feeds). Osi.EndTurn is kept as a cheap
+-- extra attempt.
+local function requestEngineEndTurn(acting)
+    local ok, err = pcall(function()
+        local okE, ent = pcall(Ext.Entity.Get, acting)
+        if okE and ent ~= nil then
+            local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
+            if okC and comp ~= nil then
+                pcall(function() comp.RequestedEndTurn = true end)
+                local combatGuid = nil
+                pcall(function() combatGuid = comp.CombatTeam or comp.Combat end)
+                if combatGuid ~= nil then
+                    local okH, combatHandle = pcall(Ext.Entity.UuidToHandle, combatGuid)
+                    if okH and combatHandle ~= nil then
+                        local sys = Ext.System and Ext.System.ServerTurnOrder
+                        if sys ~= nil and sys.EndTurn ~= nil then
+                            sys.EndTurn[#sys.EndTurn + 1] = combatHandle
+                        else
+                            error("Ext.System.ServerTurnOrder.EndTurn not found")
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    if not ok then
+        return false, tostring(err)
+    end
+    local okS, errS = pcall(Osi.EndTurn, acting)
+    return true, (not okS) and tostring(errS) or nil
+end
 
 Ext.Osiris.RegisterListener("TurnStarted", 1, "after", function(guid)
     actingChar = guid
-    turnLog[#turnLog + 1] = { t = "S", g = tostring(guid) }
+    turnLog[#turnLog + 1] = { t = "S", g = pureGuid(tostring(guid)) }
     if #turnLog > 32 then
         table.remove(turnLog, 1)
+    end
+    if pendingEndTurn ~= nil and pureGuid(tostring(guid)) ~= pendingEndTurn.acting then
+        finalizeEndTurn(pendingEndTurn, true)
     end
     -- StateExtractor (v0.8.11): каждый сменённый ход — новый combat-state в bg3_to_neuro.json.
     captureCombatState("TurnStarted", false)
 end)
 
 Ext.Osiris.RegisterListener("TurnEnded", 1, "after", function(guid)
-    turnLog[#turnLog + 1] = { t = "E", g = tostring(guid) }
+    turnLog[#turnLog + 1] = { t = "E", g = pureGuid(tostring(guid)) }
     if #turnLog > 32 then
         table.remove(turnLog, 1)
     end
+    if pendingEndTurn ~= nil and pureGuid(tostring(guid)) == pendingEndTurn.acting then
+        finalizeEndTurn(pendingEndTurn, true)
+    end
 end)
 
-local function turnLogSlice(marker, n)
+function turnLogSlice(marker, n)
     -- n РїРѕСЃР»РµРґРЅРёС… Р·Р°РїРёСЃРµР№ Р»РµРЅС‚С‹ РЅР°С‡РёРЅР°СЏ РїРѕСЃР»Рµ marker (РґР»СЏ СЃР°РјРѕРїСЂРѕРІРµСЂРєРё end_turn)
     local out = {}
     for i = marker + 1, math.min(#turnLog, marker + (n or 16)) do
@@ -255,7 +348,7 @@ local function dumpDb(name)
     return flat
 end
 
-local function pureGuid(s)
+function pureGuid(s)
     -- Osi.GetCurrentCharacter returns prefixed ids (e.g. S_Player_Astarion_<uuid>),
     -- while HandleToUuid yields the clean uuid. Normalize to the trailing hex uuid.
     if s == nil then
@@ -373,6 +466,17 @@ local function resolveActingCharacter(explicit)
         return cc[1].character
     end
     return ""
+end
+
+-- Normalize the actor for end_turn: alias -> entity guid -> clean uuid, so the
+-- id given to Osi.EndTurn and the id stored in turnLog (pureGuid) are comparable.
+local function resolveEndTurnActor(explicit)
+    local raw = resolveActingCharacter(explicit or "")
+    if raw == nil or raw == "" then
+        return ""
+    end
+    local viaAlias = resolveEntity(raw)
+    return actingCleanOf(viaAlias or raw)
 end
 
 local entityTurnComponentDump
@@ -998,15 +1102,15 @@ function captureCombatState(event, force)
         if isAlly then
             local fx = {}
             if g == actingClean then
-                fx[#fx + 1] = "ходит сейчас"
+                fx[#fx + 1] = "acting now"
             end
-            fx[#fx + 1] = canAct and "может действовать" or "не может действовать"
+            fx[#fx + 1] = canAct and "can act" or "cannot act"
             combatant.effects = table.concat(fx, ", ")
         else
             if hp ~= nil and hp <= 0 then
-                combatant.status = "повержен"
+                combatant.status = "defeated"
             elseif canAct == false then
-                combatant.status = "не может действовать"
+                combatant.status = "cannot act"
             end
         end
         if isAlly then
@@ -1143,10 +1247,10 @@ local function executeCast(action)
     local actor = resolveEntity(data.actor or "")
     local spellName = data.spell_name
     if actor == nil then
-        return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ РєР°СЃС‚Р°"
+        return false, nil, "action_failed", "Could not resolve the caster"
     end
     if spellName == nil or spellName == "" then
-        return false, nil, "action_failed", "spell_name РѕР±СЏР·Р°С‚РµР»РµРЅ"
+        return false, nil, "action_failed", "spell_name is required"
     end
 
     -- РџСЂРµСЂС‹РІР°РµРј Р°РєС‚РёРІРЅРѕРµ РґРІРёР¶РµРЅРёРµ (РєР°СЃС‚ Рё РґРІРёР¶РµРЅРёРµ РЅРµ РїРµСЂРµСЃРµРєР°СЋС‚СЃСЏ)
@@ -1207,13 +1311,13 @@ local function executeDialogueOption(action)
     local data = action.data
     local index = data.option_index
     if index == nil then
-        return false, nil, "not_supported", "option_index РѕР±СЏР·Р°С‚РµР»РµРЅ"
+        return false, nil, "not_supported", "option_index is required"
     end
 
     -- РљРЅРѕРїРєР° РґРёР°Р»РѕРіР° РЅР°С…РѕРґРёС‚СЃСЏ РІ РєР»РёРµРЅС‚СЃРєРѕРј UI (Noesis); РєР»РёРє вЂ” С‚РѕР»СЊРєРѕ РёР· client-РєРѕРЅС‚РµРєСЃС‚Р°.
     if Ext == nil or Ext.UI == nil then
         return false, nil, "not_supported",
-            "ClientAutoselectExecutor РЅРµРґРѕСЃС‚СѓРїРµРЅ: РЅРµС‚ client-РєРѕРЅС‚РµРєСЃС‚Р° РґР»СЏ РїРѕРґСЃРІРµС‚РєРё Рё РєР»РёРєР° РІР°СЂРёР°РЅС‚Р°"
+            "ClientAutoselectExecutor unavailable: no client context for option highlight/click"
     end
 
     -- Р”РѕР»РіРёР№ С…РѕРґ: РєР»РёРє РїСЂРѕРёСЃС…РѕРґРёС‚ РІ UI, РёС‚РѕРі вЂ” СЃРѕР±С‹С‚РёРµ DialogEnded/DialogClosed.
@@ -1228,10 +1332,10 @@ local function executeMoveToTarget(action)
     local actor = resolveEntity(data.actor or "")
     local target = resolveEntity(data.target_id or "")
     if actor == nil then
-        return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ РґРІРёР¶РµРЅРёСЏ"
+        return false, nil, "action_failed", "Could not resolve the movement actor"
     end
     if target == nil and not data.position then
-        return false, nil, "action_failed", "Р¦РµР»СЊ РґРІРёР¶РµРЅРёСЏ РЅРµ РЅР°Р№РґРµРЅР°"
+        return false, nil, "action_failed", "Movement target not found"
     end
 
     -- РџСЂРµСЂС‹РІР°РµРј РїСЂРµРґС‹РґСѓС‰РµРµ РґРІРёР¶РµРЅРёРµ (interruption path, СЃРѕР±С‹С‚РёРµ cancel)
@@ -1260,10 +1364,10 @@ local function executeAttack(action)
     local actor = resolveEntity(data.actor or "")
     local target = resolveEntity(data.target_id or "")
     if actor == nil then
-        return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ Р°С‚Р°РєРё"
+        return false, nil, "action_failed", "Could not resolve the attacker"
     end
     if target == nil then
-        return false, nil, "action_failed", "Р¦РµР»СЊ Р°С‚Р°РєРё РЅРµ РЅР°Р№РґРµРЅР°"
+        return false, nil, "action_failed", "Attack target not found"
     end
 
     -- РџСЂРµСЂС‹РІР°РµРј Р°РєС‚РёРІРЅРѕРµ РґРІРёР¶РµРЅРёРµ (РґРІРёР¶РµРЅРёРµ Рё Р°С‚Р°РєР° РЅРµ РїРµСЂРµСЃРµРєР°СЋС‚СЃСЏ)
@@ -1314,10 +1418,10 @@ local function executeInteract(action)
     local actor = resolveEntity(data.actor or "")
     local target = resolveEntity(data.target_id or "")
     if actor == nil then
-        return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёСЏ"
+        return false, nil, "action_failed", "Could not resolve the interaction actor"
     end
     if target == nil then
-        return false, nil, "action_failed", "Р¦РµР»СЊ РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёСЏ РЅРµ РЅР°Р№РґРµРЅР°"
+        return false, nil, "action_failed", "Interaction target not found"
     end
 
     -- РњРёСЂРЅРѕРµ РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёРµ СЃ РѕР±СЉРµРєС‚РѕРј (В§8 research): useItem=0, isInteraction=1.
@@ -1335,10 +1439,10 @@ local function executeLoot(action)
     local actor = resolveEntity(data.actor or "")
     local target = resolveEntity(data.target_id or "")
     if actor == nil then
-        return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ Р»СѓС‚Р°"
+        return false, nil, "action_failed", "Could not resolve the looter"
     end
     if target == nil then
-        return false, nil, "action_failed", "Р¦РµР»СЊ Р»СѓС‚Р° РЅРµ РЅР°Р№РґРµРЅР°"
+        return false, nil, "action_failed", "Loot target not found"
     end
 
     -- РЎРµСЂРІРµСЂРЅС‹Р№ Р°РІС‚РѕРїРѕРґР±РѕСЂ: MoveAllLootableItemsTo(from, to, equipArmor=0, equipWeapons=0,
@@ -1356,7 +1460,7 @@ local function executeRest(action)
     local data = action.data
     local actor = resolveEntity(data.actor or "")
     if actor == nil then
-        return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ РѕС‚РґС‹С…Р°"
+        return false, nil, "action_failed", "Could not resolve the resting actor"
     end
 
     -- РџРѕР»РЅС‹Р№ РѕС‚РґС‹С… вЂ” Osi.RequestLongRest (research В§9) + РіРµР№С‚ CanAllPartiesLongRest (C#-РІР°Р»РёРґР°С‚РѕСЂ).
@@ -1379,7 +1483,7 @@ local function executeTravel(action)
     local data = action.data
     local actor = resolveEntity(data.actor or "")
     if actor == nil then
-        return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ РїСѓС‚РµС€РµСЃС‚РІРёСЏ"
+        return false, nil, "action_failed", "Could not resolve the traveler"
     end
 
     -- РџСѓР±Р»РёС‡РЅРѕРіРѕ fast-travel Osiris-РІС‹Р·РѕРІР° РІ research РЅРµС‚ (В§0/В§15): СЃС‚СЂСѓРєС‚СѓСЂРЅС‹Р№ ack.
@@ -1418,42 +1522,26 @@ local function executeAction(action)
         -- success Р·РґРµСЃСЊ РќР• Р·РЅР°С‡РёС‚ "С…РѕРґ СЃРјРµРЅРёР»СЃСЏ": С„РёРЅР°Р» С‡РµСЂРµР· ~1.2СЃ СЃРѕРѕР±С‰Р°РµС‚
         -- ended:true/false РїРѕ С„Р°РєС‚Сѓ РЅР°СЃС‚СѓРїР»РµРЅРёСЏ TurnEnded(actor) РёР»Рё TurnStarted
         -- РґСЂСѓРіРѕРіРѕ РїРµСЂСЃРѕРЅР°Р¶Р°. Р•СЃР»Рё C# РЅРµ Р·РЅР°РµС‚ Р°РєС‚СѓР°Р»СЊРЅС‹Р№ GUID вЂ” story-Р»Р°С‚С‡.
-        local acting = resolveActingCharacter(data.actor or "")
+        local raw = resolveActingCharacter(data.actor or "")
+        local acting = resolveEndTurnActor(data.actor or "")
         _P("[BG3Neuro] end_turn: explicit=" .. tostring(data.actor or "")
             .. " resolved=" .. tostring(acting)
+            .. " raw=" .. tostring(raw)
             .. " latch=" .. tostring(actingChar)
             .. " mode=" .. tostring(data.mode or "end"))
         if acting == nil or acting == "" then
-            return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РґРµР№СЃС‚РІСѓСЋС‰РµРіРѕ РїРµСЂСЃРѕРЅР°Р¶Р°"
+            return false, nil, "action_failed", "Could not determine the acting character"
         end
 
         local marker = #turnLog
         local actingBefore = actingChar
-        local ok, err = pcall(Osi.EndTurn, acting)
-        if not ok then
-            return false, nil, "action_failed", tostring(err)
+        local okE, errE = requestEngineEndTurn(raw)
+        if not okE then
+            return false, nil, "action_failed", tostring(errE)
         end
 
-        -- Р¤РёРЅР°Р»: СЃР°РјРѕРїСЂРѕРІРµСЂРєР° РїРѕ story-Р»РµРЅС‚Рµ (TurnEnded/TurnStarted).
-        local function verifyEndTurn()
-            local ended = false
-            for i = marker + 1, #turnLog do
-                if turnLog[i].t == "E" and turnLog[i].g == acting then
-                    ended = true
-                end
-                if turnLog[i].t == "S" and turnLog[i].g ~= acting then
-                    ended = true
-                end
-            end
-            writeResult(action.id, true, false, nil, nil, {
-                ended = ended,
-                acting_before = tostring(actingBefore),
-                acting_after = tostring(actingChar),
-                turn_delta = turnLogSlice(marker, 8),
-            })
-            _P("[BG3Neuro] end_turn verify: ended=" .. tostring(ended))
-        end
-        Ext.Timer.WaitForRealtime(1200, verifyEndTurn)
+        -- Р¤РёРЅР°Р» вЂ” СЃРѕР±С‹С‚РёР№РЅР°СЏ СЃР°РјРѕРїСЂРѕРІРµСЂРєР° (TurnEnded/TurnStarted) + fallback-таймер.
+        armEndTurn({ id = action.id, acting = acting, actingBefore = actingBefore, marker = marker })
 
         return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” verifyEndTurn)
     end
@@ -1467,19 +1555,20 @@ local function executeAction(action)
         --    Array<EntityHandle>) вЂ” С‚РѕС‚ Р¶Рµ РєР°РЅР°Р», С‡С‚Рѕ Рё РєР»РёРµРЅС‚СЃРєРѕРµ
         --    NETMSG_TURNBASED_ENDTURN_REQUEST; РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚СЃСЏ СЃРёСЃС‚РµРјРѕР№ РґРІРёР¶РєР°
         --    РєР°Р¶РґС‹Р№ РєР°РґСЂ. Р¤Р»Р°Рі С‚РѕР¶Рµ СЃС‚Р°РІРёРј (РІРµСЃСЊ СЃС‚РµРє РєР»РёРµРЅС‚Р°).
-        local acting = resolveActingCharacter(data.actor or "")
+        local raw = resolveActingCharacter(data.actor or "")
+        local acting = resolveEndTurnActor(data.actor or "")
         local mode = data.mode or "system"
         local onlyProbe = mode == "probe"
         if acting == nil or acting == "" then
-            return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РґРµР№СЃС‚РІСѓСЋС‰РµРіРѕ РїРµСЂСЃРѕРЅР°Р¶Р°"
+            return false, nil, "action_failed", "Could not determine the acting character"
         end
-        local before = entityTurnComponentDump(acting)
+        local before = entityTurnComponentDump(raw)
         local marker = #turnLog
         local actingBefore = actingChar
         local payload = { actor = acting, mode = mode, before = before }
         if not onlyProbe then
             local stepOk, stepErr = pcall(function()
-                local okE, ent = pcall(Ext.Entity.Get, acting)
+                local okE, ent = pcall(Ext.Entity.Get, raw)
                 if okE and ent ~= nil then
                     local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
                     if okC and comp ~= nil then
@@ -1507,18 +1596,18 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
                                 payload.queue_after = #sys.EndTurn
                             else
                                 payload.queue_push = false
-                                payload.queue_push_error = "РЅРµС‚ Ext.System.ServerTurnOrder.EndTurn"
+                                payload.queue_push_error = "Ext.System.ServerTurnOrder.EndTurn not found"
                             end
                         end
                     else
                         payload.write_requested = false
-                        payload.write_error = "РЅРµС‚ РєРѕРјРїРѕРЅРµРЅС‚Р° TurnBased"
+                        payload.write_error = "no TurnBased component"
                     end
                 else
-                    payload.write_error = "РЅРµС‚ СЃСѓС‰РЅРѕСЃС‚Рё"
+                    payload.write_error = "entity not found"
                 end
                 -- РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РїСЂРѕР±СѓРµРј story-РєР°РЅР°Р» (РІ BG3 РѕРЅ no-op, РЅРѕ РґС‘С€РµРІ)
-                pcall(Osi.EndTurn, acting)
+                pcall(Osi.EndTurn, raw)
             end)
             if not stepOk then
                 payload.step_error = tostring(stepErr)
@@ -1554,7 +1643,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         -- СЃС‚СЂРѕРєСѓ РѕР±СЂР°С‚РЅРѕ (С‡С‚РѕР±С‹ РЅРµ Р»РѕРјР°С‚СЊ Р±СѓРґСѓС‰РёРµ С…РѕРґС‹ РёРіСЂРѕРєР°).
         local acting = resolveActingCharacter(data.actor or "")
         if acting == nil or acting == "" then
-            return false, nil, "action_failed", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РґРµР№СЃС‚РІСѓСЋС‰РµРіРѕ РїРµСЂСЃРѕРЅР°Р¶Р°"
+            return false, nil, "action_failed", "Could not determine the acting character"
         end
         local payload = { actor = acting }
         local okAdd, errAdd = pcall(Osi.DB_CharacterSkipTurn, acting)
@@ -1653,7 +1742,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
     end
 
     -- РћСЃС‚Р°Р»СЊРЅС‹Рµ РґРµР№СЃС‚РІРёСЏ С‚РёРєРµС‚С‹ 03/04 РЅРµ РёСЃРїРѕР»РЅСЏСЋС‚ (РІР°Р»РёРґР°С†РёСЏ СѓР¶Рµ РїСЂРѕС€Р»Р° РЅР° C#; РёСЃРїРѕР»РЅРµРЅРёРµ вЂ” РїРѕР·Р¶Рµ).
-    return false, nil, "not_supported", "Р”РµР№СЃС‚РІРёРµ '" .. name .. "' РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ РјРѕРґРѕРј РІ v1"
+    return false, nil, "not_supported", "Action '" .. name .. "' is not supported by the mod in v1"
 end
 
 local function clearInFlight()
@@ -1696,4 +1785,4 @@ clearInFlight()
 writeInitialState()
 startHeartbeatLoop()
 pollActions()
-_P("[BG3Neuro] С„Р°Р№Р»РѕРІС‹Р№ IPC-РјРѕСЃС‚ РїРѕРґРЅСЏС‚: " .. HEARTBEAT_FILE)
+_P("[BG3Neuro] file IPC bridge up: " .. HEARTBEAT_FILE)

@@ -37,11 +37,11 @@ public static class ConfigLoader
         }
         catch (JsonException ex)
         {
-            throw new ConfigException($"Некорректный config.json: {ex.Message}", ex);
+            throw new ConfigException($"Malformed config.json: {ex.Message}", ex);
         }
         catch (IOException ex)
         {
-            throw new ConfigException($"Не удалось прочитать config.json: {ex.Message}", ex);
+            throw new ConfigException($"Failed to read config.json: {ex.Message}", ex);
         }
     }
 

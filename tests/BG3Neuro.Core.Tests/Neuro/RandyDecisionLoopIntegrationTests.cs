@@ -240,7 +240,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
             Assert.True(firstForceSeen, "Первый force (ход Karlach) не отправлен");
             var firstForce = sent.First(m => m.Contains("\"actions/force\""));
             var firstForceNode = JsonNode.Parse(firstForce)!;
-            Assert.Contains("## Ход: Karlach", firstForceNode["data"]!["state"]!.GetValue<string>());
+            Assert.Contains("## Turn: Karlach", firstForceNode["data"]!["state"]!.GetValue<string>());
 
             // Игра исполнила end_turn: следующий актор — Shadowheart, state перезаписан
             WriteState("shadowheart");
@@ -249,7 +249,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
             var secondForceSeen = await WaitUntilAsync(() => sent.Count(m => m.Contains("\"actions/force\"")) >= 2, TimeSpan.FromSeconds(10));
             Assert.True(secondForceSeen, "Force после смены хода не отправлен");
             var secondForce = JsonNode.Parse(sent.Where(m => m.Contains("\"actions/force\"")).Skip(1).First())!;
-            Assert.Contains("## Ход: Shadowheart", secondForce["data"]!["state"]!.GetValue<string>());
+            Assert.Contains("## Turn: Shadowheart", secondForce["data"]!["state"]!.GetValue<string>());
         }
         finally
         {
@@ -307,8 +307,8 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
             Assert.True(secondForceSeen, "Force после изменения позиции не отправлен");
             var secondForce = JsonNode.Parse(sent.Where(m => m.Contains("\"actions/force\"")).Skip(1).First())!;
             var state = secondForce["data"]!["state"]!.GetValue<string>();
-            Assert.Contains("distance 2м", state);
-            Assert.Contains("## События", state);
+            Assert.Contains("distance 2m", state);
+            Assert.Contains("## Events", state);
             Assert.Contains("- Karlach сместилась к goblin_1", state);
             }
         }
@@ -500,7 +500,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.True(secondForceSeen, "Force после изменения ресурсов не отправлен");
                 var secondForce = JsonNode.Parse(sent.Where(m => m.Contains("\"actions/force\"")).Skip(1).First())!;
                 var state = secondForce["data"]!["state"]!.GetValue<string>();
-                Assert.Contains("зарядов осталось: 1", state);
+                Assert.Contains("charges left: 1", state);
                 Assert.Contains("- Огненный шар попал по goblin_1: 10 урона", state);
             }
         }
@@ -597,7 +597,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
 
             Assert.Equal("action/result", result["command"]!.GetValue<string>());
             Assert.False(result["data"]!["success"]!.GetValue<bool>());
-            Assert.Contains("Сейчас не ход контролируемого", result["data"]!["message"]!.GetValue<string>());
+            Assert.Contains("It is not the controlled character", result["data"]!["message"]!.GetValue<string>());
             Assert.False(File.Exists(actionFile), "action_<id>.json не должен быть записан при wrong_phase");
         }
         finally
@@ -656,7 +656,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.NotNull(result);
                 Assert.Equal("action/result", result!["command"]!.GetValue<string>());
                 Assert.False(result["data"]!["success"]!.GetValue<bool>());
-                Assert.Contains("Мод недоступен", result["data"]!["message"]!.GetValue<string>());
+                Assert.Contains("Mod unavailable", result["data"]!["message"]!.GetValue<string>());
                 Assert.False(File.Exists(Path.Combine(_tmpDir, "action_e2e-modoff-1.json")), "action_<id>.json не пишется при mod_unavailable (игра не запускается)");
             }
         }
@@ -700,7 +700,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.True(firstForceSeen, "Force диалога не отправлен");
                 var firstForce = JsonNode.Parse(sent.First(m => m.Contains("\"actions/force\"")).ToString())!;
                 var firstState = firstForce["data"]!["state"]!.GetValue<string>();
-                Assert.Contains("## Диалог", firstState);
+                Assert.Contains("## Dialogue", firstState);
                 Assert.Contains("- [1] Да, я готов.", firstState);
 
                 WriteAck("e2e-dlg-1", running: true);
@@ -732,7 +732,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.True(secondForceSeen, "Force после закрытия диалога не отправлен");
                 var secondForce = JsonNode.Parse(sent.Where(m => m.Contains("\"actions/force\"")).Skip(1).First())!;
                 var secondState = secondForce["data"]!["state"]!.GetValue<string>();
-                Assert.Contains("## Ход: Karlach", secondState);
+                Assert.Contains("## Turn: Karlach", secondState);
                 Assert.Contains("Диалог с Withers завершён", secondState);
             }
         }
@@ -785,9 +785,9 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.True(firstForceSeen, "Force режима исследования не отправлен");
                 var firstForce = JsonNode.Parse(sent.First(m => m.Contains("\"actions/force\"")))!;
                 var firstState = firstForce["data"]!["state"]!.GetValue<string>();
-                Assert.Contains("## Режим: обычный", firstState);
+                Assert.Contains("## Mode: exploration", firstState);
                 Assert.Contains("- move_to_entity: [wooden_door]", firstState);
-                Assert.Contains("## Локации (путешествие)", firstState);
+                Assert.Contains("## Locations (travel)", firstState);
 
                 WriteAck("e2e-exp-1", running: true);
                 var moveResult = await PostActionForIdAsync(sent, "e2e-exp-1", "move_to_entity", """{"target_id":"wooden_door"}""", TimeSpan.FromSeconds(10));
@@ -816,7 +816,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.True(secondForceSeen, "Force после перемещения не отправлен");
                 var secondForce = JsonNode.Parse(sent.Where(m => m.Contains("\"actions/force\"")).Skip(1).First())!;
                 var secondState = secondForce["data"]!["state"]!.GetValue<string>();
-                Assert.Contains("- wooden_door (Деревянная дверь) 1м, закрыта: [открыть, заламать, толкнуть]", secondState);
+                Assert.Contains("- wooden_door (Деревянная дверь) 1m, закрыта: [открыть, заламать, толкнуть]", secondState);
                 Assert.Contains("- Karlach подошла к двери", secondState);
 
                 WriteAck("e2e-exp-2", running: true);
@@ -873,7 +873,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
                 Assert.True(fourthForceSeen, "Force инвентаря не отправлен");
                 var fourthForce = JsonNode.Parse(sent.Where(m => m.Contains("\"actions/force\"")).Skip(3).First())!;
                 var fourthState = fourthForce["data"]!["state"]!.GetValue<string>();
-                Assert.Contains("## Экран: инвентарь", fourthState);
+                Assert.Contains("## Screen: inventory", fourthState);
                 Assert.Contains("- Малый эликсир лечения (potion_healing) ×2, Зелье", fourthState);
                 Assert.Contains("- У трупа найдено: Малый эликсир лечения", fourthState);
             }

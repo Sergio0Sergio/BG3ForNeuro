@@ -88,7 +88,7 @@ public sealed class DecisionLoop : IDisposable
         _combatState = StateSerializer.Parse(content);
         if (_combatState is null)
         {
-            DebugNote?.Invoke(this, "state: не удалось распарсить боевой state");
+            DebugNote?.Invoke(this, "state: failed to parse combat state");
             return;
         }
 
@@ -111,8 +111,8 @@ public sealed class DecisionLoop : IDisposable
             }
 
             _lastForcedContent = dialogueMarkdown;
-            await _neuro.SendForceAsync(dialogueMarkdown, "Идёт диалог. Выбери вариант ответа — укажи option_index.", new[] { "select_dialogue_option" });
-            DebugNote?.Invoke(this, "force: диалог");
+            await _neuro.SendForceAsync(dialogueMarkdown, "Dialogue is active. Choose a reply option — provide option_index.", new[] { "select_dialogue_option" });
+            DebugNote?.Invoke(this, "force: dialogue");
             return;
         }
 
@@ -127,9 +127,9 @@ public sealed class DecisionLoop : IDisposable
             _lastForcedContent = explorationMarkdown;
             var explorationQuery = state.Mode switch
             {
-                "map" => "Карта открыта. Выбери локацию для travel_to или закрой карту.",
-                "inventory" => "Инвентарь открыт. Выбери действие.",
-                _ => "Исследуй местность: перемещение, взаимодействие, лут, отдых или путешествие.",
+                "map" => "Map is open. Choose a location for travel_to or close the map.",
+                "inventory" => "Inventory is open. Choose an action.",
+                _ => "Explore the area: move, interact, loot, rest, or travel.",
             };
             await _neuro.SendForceAsync(explorationMarkdown, explorationQuery, ForceActions(state.AvailableActions, state.Mode));
             DebugNote?.Invoke(this, $"force: {state.Mode}");
@@ -156,9 +156,9 @@ public sealed class DecisionLoop : IDisposable
 
         _lastForcedContent = markdown;
         var controlledName = state.Allies.First(a => a.Alias == state.TurnActor).Name;
-        var query = $"Сейчас твой ход ({controlledName}). Выбери действие.";
+        var query = $"It's your turn ({controlledName}). Choose an action.";
         await _neuro.SendForceAsync(markdown, query, CombatActionNames);
-        DebugNote?.Invoke(this, $"force: ход {controlledName}");
+        DebugNote?.Invoke(this, $"force: turn {controlledName}");
     }
 
     private static string[] ForceActions(List<string> available, string mode)
@@ -197,7 +197,7 @@ public sealed class DecisionLoop : IDisposable
         _combatState = StateSerializer.Parse(content);
         if (_combatState is null)
         {
-            DebugNote?.Invoke(this, "state: не удалось распарсить боевой state");
+            DebugNote?.Invoke(this, "state: failed to parse combat state");
             return;
         }
 
@@ -239,8 +239,8 @@ public sealed class DecisionLoop : IDisposable
                     ? (string.IsNullOrWhiteSpace(result.ErrorDetail) ? null : result.ErrorDetail)
                     : (string.IsNullOrWhiteSpace(result.ErrorDetail)
                         ? (string.IsNullOrWhiteSpace(result.ErrorCode)
-                            ? "Ошибка исполнения модом"
-                            : $"Ошибка исполнения: {result.ErrorCode}")
+                            ? "Mod execution error"
+                            : $"Mod execution error: {result.ErrorCode}")
                         : result.ErrorDetail);
                 return (result.Success, message);
             }
@@ -248,7 +248,7 @@ public sealed class DecisionLoop : IDisposable
             await Task.Delay(ExecutionResultPollInterval);
         }
 
-        return (false, $"Мод не подтвердил исполнение '{name}' в течение {_executionResultTimeout.TotalSeconds:0} с (нет result_{id}.json)");
+        return (false, $"Mod did not confirm execution of '{name}' within {_executionResultTimeout.TotalSeconds:0} s (no result_{id}.json)");
     }
 
     public void Dispose()

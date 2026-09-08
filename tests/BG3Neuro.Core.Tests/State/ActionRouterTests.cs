@@ -75,7 +75,7 @@ public class ActionRouterTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Equal(ErrorCode.WrongPhase, result.ErrorCode);
-        Assert.DoesNotContain("Сейчас ход", result.ErrorDetail);
+        Assert.DoesNotContain("turn now, not", result.ErrorDetail);
         Assert.False(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
     }
 
@@ -89,7 +89,7 @@ public class ActionRouterTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Equal(ErrorCode.WrongPhase, result.ErrorCode);
-        Assert.Contains("Сейчас ход 'shadowheart', а не 'karlach'", result.ErrorDetail);
+        Assert.Contains("It is 'shadowheart' turn now, not 'karlach'", result.ErrorDetail);
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public class ActionRouterTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Equal(ErrorCode.InvalidParameters, result.ErrorCode);
-        Assert.Contains("Неизвестное действие", result.ErrorDetail);
+        Assert.Contains("Unknown action", result.ErrorDetail);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public class ActionRouterTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Equal(ErrorCode.NoSpell, result.ErrorCode);
-        Assert.Contains("кулдауне", result.ErrorDetail);
+        Assert.Contains("is on cooldown", result.ErrorDetail);
     }
 
     [Fact]
@@ -280,7 +280,7 @@ public class ActionRouterTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Equal(ErrorCode.NoSpell, result.ErrorCode);
-        Assert.Contains("зарядов", result.ErrorDetail);
+        Assert.Contains("has no charges left", result.ErrorDetail);
     }
 
     [Fact]

@@ -53,27 +53,27 @@ public static class ErrorMapper
     public static string DefaultMessage(ErrorCode code) => code switch
     {
         ErrorCode.TargetMissing =>
-            "Цель не найдена. Укажи target_id одного из персонажей из раздела «Враги»/«Контролируемые персонажи» state.",
+            "Target not found. Provide the target_id of one of the characters listed under Enemies/Allied Characters in the state.",
         ErrorCode.NotInCombat =>
-            "Действие требует боя, но бой не идёт. Дождись начала боя (появится боевой state с ходом контролируемого).",
+            "This action requires combat, but no combat is running. Wait for combat to start (combat state will appear with a controlled character's turn).",
         ErrorCode.NoSpell =>
-            "Заклинание недоступно: его нет в SpellBook, на кулдауне или нет ресурсов. Выбери заклинание из раздела «Заклинания» state.",
+            "Spell unavailable: not in the spellbook, on cooldown, or no resources left. Pick a spell from the Spells section of the state.",
         ErrorCode.NoCamp =>
-            "Нельзя отдохнуть: нет лагеря или валидной точки отдыха. Подойди к точке отдыха и повтори.",
+            "Cannot rest: no camp or valid rest point nearby. Move to a rest point and try again.",
         ErrorCode.NotSupported =>
-            "Действие не поддерживается в v1. Выбери одно из действий из списка «Доступные действия» state.",
+            "Action not supported in v1. Pick one of the actions from the Available Actions section of the state.",
         ErrorCode.TargetNotInRange =>
-            "Цель вне радиуса действия. Выбери цель, перечисленную в state как достижимая (в радиусе/покрытии).",
+            "Target out of range. Choose a target listed in the state as reachable (within range/coverage).",
         ErrorCode.InvalidParameters =>
-            "Некорректные параметры действия. Проверь обязательные поля и допустимые значения согласно схеме действия.",
+            "Invalid action parameters. Check the required fields and allowed values in the action schema.",
         ErrorCode.WrongPhase =>
-            "Сейчас не твой ход. Дождись хода контролируемого персонажа (сообщение укажет, чей ход).",
+            "It is not your turn yet. Wait for a controlled character's turn (the message will say whose turn it is).",
         ErrorCode.DialogueClosed =>
-            "Нет активного диалога: окно диалога закрылось. Начни диалог снова и повтори выбор варианта.",
+            "No active dialogue: the dialogue window closed. Start the dialogue again and repeat your choice.",
         ErrorCode.ModUnavailable =>
-            "Мод недоступен (heartbeat устарел). Подожди восстановления мода и повтори действие.",
+            "Mod unavailable (heartbeat is stale). Wait for the mod to recover and repeat the action.",
         ErrorCode.ActionFailed =>
-            "Действие провалилось при исполнении в игре. Что именно — в error_detail; картина мира — в следующем state.",
-        _ => "Неизвестная ошибка.",
+            "Action failed while executing in the game. Details are in error_detail; the world state is in the next state.",
+        _ => "Unknown error.",
     };
 }

@@ -29,13 +29,13 @@ public sealed class ActionRouter
     {
         if (modStatus == ModStatus.Stale)
         {
-            return ValidationResult.Fail(ErrorCode.ModUnavailable, "Мод недоступен (heartbeat устарел)");
+            return ValidationResult.Fail(ErrorCode.ModUnavailable, "Mod unavailable (heartbeat is stale)");
         }
 
         var definition = Actions.ActionRegistry.Find(actionName);
         if (definition is null)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, $"Неизвестное действие: {actionName}");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, $"Unknown action: {actionName}");
         }
 
         JsonNode? data = null;
@@ -47,7 +47,7 @@ public sealed class ActionRouter
             }
             catch (JsonException)
             {
-                return ValidationResult.Fail(ErrorCode.InvalidParameters, "Некорректный JSON параметров действия");
+                return ValidationResult.Fail(ErrorCode.InvalidParameters, "Malformed JSON in action parameters");
             }
         }
         else
@@ -57,7 +57,7 @@ public sealed class ActionRouter
 
         if (data is not JsonObject dataObj)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметры действия должны быть объектом JSON");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Action parameters must be a JSON object");
         }
 
         var schemaResult = ValidateSchema(definition, dataObj);
@@ -100,7 +100,7 @@ public sealed class ActionRouter
                 var key = item?.GetValue<string>();
                 if (key is not null && !data.ContainsKey(key))
                 {
-                    return ValidationResult.Fail(ErrorCode.InvalidParameters, $"Отсутствует обязательный параметр: {key}");
+                    return ValidationResult.Fail(ErrorCode.InvalidParameters, $"Missing required parameter: {key}");
                 }
             }
         }
@@ -126,7 +126,7 @@ public sealed class ActionRouter
                     {
                         return ValidationResult.Fail(
                             ErrorCode.InvalidParameters,
-                            $"Параметр {propName} содержит недопустимое значение '{actual}'. Допустимо: {string.Join(", ", allowed)}");
+                            $"Parameter {propName} has invalid value '{actual}'. Allowed: {string.Join(", ", allowed)}");
                     }
                 }
             }
@@ -145,18 +145,18 @@ public sealed class ActionRouter
         if (!_dialogue.IsEnabled)
         {
             return ValidationResult.Fail(ErrorCode.NotSupported,
-                $"ClientAutoselectExecutor недоступен: dialogue.mode='{_dialogue.Mode}'. Включи 'autoselect'/'confirm' в config.json");
+                $"ClientAutoselectExecutor unavailable: dialogue.mode='{_dialogue.Mode}'. Enable 'autoselect'/'confirm' in config.json");
         }
 
         if (combatState is null || combatState.Mode != "dialogue" || combatState.Dialogue is null)
         {
             return ValidationResult.Fail(ErrorCode.DialogueClosed,
-                "Нет активного диалога: диалог закрылся или не начинался. Начни диалог заново и повтори выбор.");
+                "No active dialogue: the dialogue closed or never started. Start the dialogue again and repeat your choice.");
         }
 
         if (combatState.Dialogue.Options.Count == 0)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "В диалоге нет вариантов ответа (option_index не к чему применить).");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Dialogue has no reply options (option_index has nothing to apply to).");
         }
 
         int index;
@@ -166,13 +166,13 @@ public sealed class ActionRouter
         }
         catch (JsonException)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметр option_index должен быть числом.");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter option_index must be a number.");
         }
 
         if (index < 1 || index > combatState.Dialogue.Options.Count)
         {
             return ValidationResult.Fail(ErrorCode.InvalidParameters,
-                $"Вариант ответа {index} вне диапазона: доступны 1..{combatState.Dialogue.Options.Count}. Укажи номер из списка вариантов.");
+                $"Reply option {index} out of range: available 1..{combatState.Dialogue.Options.Count}. Provide a number from the reply list.");
         }
 
         return null;
@@ -187,24 +187,24 @@ public sealed class ActionRouter
 
         if (combatState is null)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Нет данных о состоянии игры");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "No game state data");
         }
 
         if (combatState.Mode is not ("exploration" or "map" or "inventory"))
         {
             return ValidationResult.Fail(ErrorCode.WrongPhase,
-                $"Действие '{actionName}' доступно только вне боя. Сейчас режим '{combatState.Mode}' — используй действие этого режима.");
+                $"Action '{actionName}' is only available outside combat. Current mode '{combatState.Mode}' — use an action of that mode.");
         }
 
         if (_multiParty && data["actor"] is null)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметр actor обязателен при партии более одного персонажа");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter actor is required when party size is greater than one");
         }
 
         var actor = data["actor"]?.GetValue<string>();
         if (actor is not null && !combatState.Allies.Any(a => a.Alias == actor))
         {
-            return ValidationResult.Fail(ErrorCode.WrongPhase, $"Персонаж '{actor}' не в партии");
+            return ValidationResult.Fail(ErrorCode.WrongPhase, $"Character '{actor}' is not in the party");
         }
 
         if (actionName is "move_to_entity" or "interact_with" or "loot")
@@ -222,7 +222,7 @@ public sealed class ActionRouter
             if (!combatState.CanRest)
             {
                 return ValidationResult.Fail(ErrorCode.NoCamp,
-                    "Нельзя отдохнуть: нет лагеря/валидной точки отдыха или не хватает припасов. Подойди к лагерю и повтори (rest full/partial).");
+                    "Cannot rest: no camp/valid rest point or insufficient supplies. Move to the camp and try again (rest full/partial).");
             }
         }
 
@@ -234,7 +234,7 @@ public sealed class ActionRouter
         var targetId = data["target_id"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(targetId))
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметр target_id обязателен");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter target_id is required");
         }
 
         var target = state.Objects.FirstOrDefault(o => o.Alias == targetId);
@@ -242,7 +242,7 @@ public sealed class ActionRouter
         {
             var known = state.Objects.Select(o => o.Alias).OrderBy(a => a, StringComparer.Ordinal).ToList();
             return ValidationResult.Fail(ErrorCode.TargetMissing,
-                $"Объект '{targetId}' не найден. Видимые объекты: {string.Join(", ", known)}");
+                $"Object '{targetId}' not found. Visible objects: {string.Join(", ", known)}");
         }
 
         if (actionName == "interact_with")
@@ -252,7 +252,7 @@ public sealed class ActionRouter
             {
                 if (target.Interactions.Count == 0)
                 {
-                    return ValidationResult.Fail(ErrorCode.InvalidParameters, $"У объекта '{target.Name}' нет доступных взаимодействий.");
+                    return ValidationResult.Fail(ErrorCode.InvalidParameters, $"Object '{target.Name}' has no available interactions.");
                 }
 
                 data["interaction_type"] = target.Interactions[0];
@@ -261,7 +261,7 @@ public sealed class ActionRouter
 
             if (target.Interactions.Count == 0)
             {
-                return ValidationResult.Fail(ErrorCode.InvalidParameters, $"У объекта '{target.Name}' нет доступных взаимодействий.");
+                return ValidationResult.Fail(ErrorCode.InvalidParameters, $"Object '{target.Name}' has no available interactions.");
             }
 
             var match = target.Interactions.FirstOrDefault(i =>
@@ -269,7 +269,7 @@ public sealed class ActionRouter
             if (match is null)
             {
                 return ValidationResult.Fail(ErrorCode.InvalidParameters,
-                    $"Взаимодействие '{interaction}' недоступно у '{target.Name}'. Доступны: {string.Join(", ", target.Interactions)}");
+                    $"Interaction '{interaction}' is not available for '{target.Name}'. Available: {string.Join(", ", target.Interactions)}");
             }
 
             data["interaction_type"] = match;
@@ -277,7 +277,7 @@ public sealed class ActionRouter
 
         if (actionName == "loot" && !target.Lootable)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, $"У '{target.Name}' нет добычи: объект не содержит инвентаря.");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, $"'{target.Name}' has no loot: the object has no inventory.");
         }
 
         return null;
@@ -288,12 +288,12 @@ public sealed class ActionRouter
         var destination = data["destination"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(destination))
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметр destination обязателен");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter destination is required");
         }
 
         if (state.Regions.Count == 0)
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Нет известных локаций для путешествия");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "No known locations to travel to");
         }
 
         var regionId = data["region_id"]?.GetValue<string>();
@@ -316,7 +316,7 @@ public sealed class ActionRouter
                 .Select(r => r.Name + (string.IsNullOrWhiteSpace(r.RegionId) ? "" : $" (id: {r.RegionId})"))
                 .ToList();
             return ValidationResult.Fail(ErrorCode.InvalidParameters,
-                $"Локация '{destination}'{(string.IsNullOrWhiteSpace(regionId) ? "" : $" (region_id: {regionId})")} не найдена. Доступно: {string.Join(", ", available)}");
+                $"Location '{destination}'{(string.IsNullOrWhiteSpace(regionId) ? "" : $" (region_id: {regionId})")} not found. Available: {string.Join(", ", available)}");
         }
 
         return null;
@@ -331,12 +331,12 @@ public sealed class ActionRouter
         {
             if (combatState is null || string.IsNullOrEmpty(combatState.TurnActor))
             {
-                return ValidationResult.Fail(ErrorCode.NotInCombat, "Нет активного боя");
+                return ValidationResult.Fail(ErrorCode.NotInCombat, "No active combat");
             }
 
             if (_multiParty && data["actor"] is null)
             {
-                return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметр actor обязателен при партии более одного персонажа");
+                return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter actor is required when party size is greater than one");
             }
 
             var actor = data["actor"]?.GetValue<string>() ?? combatState.TurnActor;
@@ -344,12 +344,12 @@ public sealed class ActionRouter
             var isControlled = combatState.Allies.Any(a => a.Alias == actor);
             if (!isControlled)
             {
-                return ValidationResult.Fail(ErrorCode.WrongPhase, $"Сейчас не ход контролируемого персонажа '{actor}'. Чей ход: {combatState.TurnActor}");
+                return ValidationResult.Fail(ErrorCode.WrongPhase, $"It is not the controlled character '{actor}' turn. It is: {combatState.TurnActor}");
             }
 
             if (actor != combatState.TurnActor)
             {
-                return ValidationResult.Fail(ErrorCode.WrongPhase, $"Сейчас ход '{combatState.TurnActor}', а не '{actor}'");
+                return ValidationResult.Fail(ErrorCode.WrongPhase, $"It is '{combatState.TurnActor}' turn now, not '{actor}'");
             }
         }
 
@@ -370,7 +370,7 @@ public sealed class ActionRouter
 
         if (actionName == "throw")
         {
-            return ValidationResult.Fail(ErrorCode.NotSupported, "Действие throw не поддерживается в v1");
+            return ValidationResult.Fail(ErrorCode.NotSupported, "Action throw is not supported in v1");
         }
 
         return null;
@@ -381,12 +381,12 @@ public sealed class ActionRouter
         var spellName = data["spell_name"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(spellName))
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметр spell_name обязателен");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter spell_name is required");
         }
 
         if (combatState is null || combatState.Spells is null || combatState.Spells.Count == 0)
         {
-            return ValidationResult.Fail(ErrorCode.NoSpell, "Список заклинаний пуст: нет известных заклинаний");
+            return ValidationResult.Fail(ErrorCode.NoSpell, "Spell list is empty: no known spells");
         }
 
         var spell = combatState.Spells.FirstOrDefault(s =>
@@ -394,17 +394,17 @@ public sealed class ActionRouter
         if (spell is null)
         {
             var known = combatState.Spells.Select(s => s.SpellName).OrderBy(n => n, StringComparer.Ordinal).ToList();
-            return ValidationResult.Fail(ErrorCode.NoSpell, $"Заклинание '{spellName}' недоступно. Известные: {string.Join(", ", known)}");
+            return ValidationResult.Fail(ErrorCode.NoSpell, $"Spell '{spellName}' unavailable. Known: {string.Join(", ", known)}");
         }
 
         if (spell.OnCooldown)
         {
-            return ValidationResult.Fail(ErrorCode.NoSpell, $"Заклинание '{spellName}' на кулдауне");
+            return ValidationResult.Fail(ErrorCode.NoSpell, $"Spell '{spellName}' is on cooldown");
         }
 
         if (spell.CastsLeft is 0)
         {
-            return ValidationResult.Fail(ErrorCode.NoSpell, $"Заклинание '{spellName}' без зарядов");
+            return ValidationResult.Fail(ErrorCode.NoSpell, $"Spell '{spellName}' has no charges left");
         }
 
         var actor = data["actor"]?.GetValue<string>() ?? combatState.TurnActor;
@@ -416,12 +416,12 @@ public sealed class ActionRouter
             var target = combatState.Enemies.FirstOrDefault(e => e.Alias == targetId);
             if (target is null)
             {
-                return ValidationResult.Fail(ErrorCode.TargetMissing, $"Цель '{targetId}' не найдена среди врагов");
+                return ValidationResult.Fail(ErrorCode.TargetMissing, $"Target '{targetId}' not found among enemies");
             }
 
             if (caster is not null && !CoverageAuto.IsInRange(caster, target, spell.Range))
             {
-                return ValidationResult.Fail(ErrorCode.TargetNotInRange, $"Цель '{targetId}' вне радиуса действия '{spellName}'");
+                return ValidationResult.Fail(ErrorCode.TargetNotInRange, $"Target '{targetId}' is out of range of '{spellName}'");
             }
         }
         else if (spell.Aoe > 0 && data["coverage"] is not null)
@@ -438,7 +438,7 @@ public sealed class ActionRouter
                 if (missing.Count > 0)
                 {
                     return ValidationResult.Fail(ErrorCode.TargetNotInRange,
-                        $"Не все цели покрываются: {string.Join(", ", missing)}. Покрывается: [{string.Join(", ", coverage.Covered)}]");
+                        $"Not all targets are covered: {string.Join(", ", missing)}. Covered: [{string.Join(", ", coverage.Covered)}]");
                 }
             }
         }
@@ -456,7 +456,7 @@ public sealed class ActionRouter
         var targetId = data["target_id"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(targetId))
         {
-            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Параметр target_id обязателен");
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter target_id is required");
         }
 
         if (combatState is null)
@@ -470,7 +470,7 @@ public sealed class ActionRouter
         var targetIsKnown = actionName == "attack_entity" ? enemyAlias : enemyAlias || allyAlias;
         if (!targetIsKnown)
         {
-            return ValidationResult.Fail(ErrorCode.TargetMissing, $"Цель '{targetId}' не найдена среди врагов");
+            return ValidationResult.Fail(ErrorCode.TargetMissing, $"Target '{targetId}' not found among enemies");
         }
 
         return null;

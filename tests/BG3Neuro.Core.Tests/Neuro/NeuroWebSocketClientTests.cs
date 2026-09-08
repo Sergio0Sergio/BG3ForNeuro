@@ -286,14 +286,14 @@ public class NeuroWebSocketClientTests
         client.Start();
         await server.WaitForCountAsync(2);
 
-        await client.SendForceAsync("## Ход: Karlach", "Сейчас твой ход. Выбери действие.", new[] { "end_turn" });
+        await client.SendForceAsync("## Turn: Karlach", "It's your turn. Choose an action.", new[] { "end_turn" });
 
         var messages = await server.WaitForMessagesAsync(m =>
             m.Count >= 3 && m[2]["command"]?.GetValue<string>() == "actions/force");
         var force = messages[2];
         Assert.Equal("actions/force", force["command"]!.GetValue<string>());
         Assert.Equal(Game, force["game"]!.GetValue<string>());
-        Assert.Equal("## Ход: Karlach", force["data"]!["state"]!.GetValue<string>());
+        Assert.Equal("## Turn: Karlach", force["data"]!["state"]!.GetValue<string>());
         Assert.Equal("low", force["data"]!["priority"]!.GetValue<string>());
         Assert.True(force["data"]!["ephemeral_context"]!.GetValue<bool>());
         Assert.Equal("end_turn", force["data"]!["action_names"]![0]!.GetValue<string>());
