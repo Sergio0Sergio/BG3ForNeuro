@@ -187,42 +187,6 @@ local function armEndTurn(p)
     end)
 end
 
--- v0.7.7 proven channel: Osi.EndTurn (story) and the RequestedEndTurn flag alone are
--- no-ops (the engine does not move the turn outside a client net message). The working
--- route in live combat: RequestedEndTurn=true on the actor's TurnBased component plus
--- pushing the combat entity into Ext.System.ServerTurnOrder.EndTurn (the same queue
--- the client NETMSG_TURNBASED_ENDTURN_REQUEST feeds). Osi.EndTurn is kept as a cheap
--- extra attempt.
-local function requestEngineEndTurn(acting)
-    local ok, err = pcall(function()
-        local okE, ent = pcall(Ext.Entity.Get, acting)
-        if okE and ent ~= nil then
-            local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
-            if okC and comp ~= nil then
-                pcall(function() comp.RequestedEndTurn = true end)
-                local combatGuid = nil
-                pcall(function() combatGuid = comp.CombatTeam or comp.Combat end)
-                if combatGuid ~= nil then
-                    local okH, combatHandle = pcall(Ext.Entity.UuidToHandle, combatGuid)
-                    if okH and combatHandle ~= nil then
-                        local sys = Ext.System and Ext.System.ServerTurnOrder
-                        if sys ~= nil and sys.EndTurn ~= nil then
-                            sys.EndTurn[#sys.EndTurn + 1] = combatHandle
-                        else
-                            error("Ext.System.ServerTurnOrder.EndTurn not found")
-                        end
-                    end
-                end
-            end
-        end
-    end)
-    if not ok then
-        return false, tostring(err)
-    end
-    local okS, errS = pcall(Osi.EndTurn, acting)
-    return true, (not okS) and tostring(errS) or nil
-end
-
 Ext.Osiris.RegisterListener("TurnStarted", 1, "after", function(guid)
     actingChar = guid
     turnLog[#turnLog + 1] = { t = "S", g = pureGuid(tostring(guid)) }
@@ -830,6 +794,77 @@ local function participantGuids(combatComp)
         end
     end
     return out
+end
+
+-- v0.7.7 proven channel: Osi.EndTurn (story) and the RequestedEndTurn flag alone are
+-- no-ops (the engine does not move the turn outside a client net message). The working
+-- route in live combat: RequestedEndTurn=true on the actor's TurnBased component plus
+-- pushing the combat entity into Ext.System.ServerTurnOrder.EndTurn (the same queue
+-- the client NETMSG_TURNBASED_ENDTURN_REQUEST feeds). Osi.EndTurn is kept as a cheap
+-- extra attempt.
+--
+-- v0.8.12+ (Tav fix): combatGuid = TurnBased.CombatTeam is a Guid userdata that, for
+-- some combat entities (notably the player's own combat via Tav), does NOT resolve via
+-- Ext.Entity.UuidToHandle -> nil. The old code then silently skipped the queue push, so
+-- end_turn did nothing on the controlled character. Now: resolve the combat handle
+-- directly (UuidToHandle) first, else scan all CombatState entities and pick the one
+-- that has the acting character among its Participants (same fallback as StateExtractor).
+local function combatHandleForEndTurn(acting)
+    if acting == nil or acting == "" then
+        return nil
+    end
+    local okE, ent = pcall(Ext.Entity.Get, acting)
+    if not okE or ent == nil then
+        return nil
+    end
+    local tb = turnComponent(ent)
+    local combatGuid = fieldOf(tb, "CombatTeam") or fieldOf(tb, "Combat")
+    if combatGuid ~= nil then
+        local okH, h = pcall(Ext.Entity.UuidToHandle, combatGuid)
+        if okH and h ~= nil then
+            return h
+        end
+    end
+    local actingClean = actingCleanOf(acting)
+    local okAll, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("CombatState") end)
+    if okAll and handles ~= nil then
+        for i = 1, #handles do
+            local okS, comp = pcall(function() return handles[i]:GetComponent("CombatState") end)
+            local parts = okS and comp ~= nil and participantGuids(comp) or {}
+            for _, pGuid in ipairs(parts) do
+                if pGuid == actingClean then
+                    return handles[i]
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function requestEngineEndTurn(acting)
+    local ok, err = pcall(function()
+        local combatHandle = combatHandleForEndTurn(acting)
+        local okE, ent = pcall(Ext.Entity.Get, acting)
+        if okE and ent ~= nil then
+            local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
+            if okC and comp ~= nil then
+                pcall(function() comp.RequestedEndTurn = true end)
+            end
+        end
+        if combatHandle ~= nil then
+            local sys = Ext.System and Ext.System.ServerTurnOrder
+            if sys ~= nil and sys.EndTurn ~= nil then
+                sys.EndTurn[#sys.EndTurn + 1] = combatHandle
+            else
+                error("Ext.System.ServerTurnOrder.EndTurn not found")
+            end
+        end
+    end)
+    if not ok then
+        return false, tostring(err)
+    end
+    local okS, errS = pcall(Osi.EndTurn, acting)
+    return true, (not okS) and tostring(errS) or nil
 end
 
 local function teamOf(guid, cache, covered)
