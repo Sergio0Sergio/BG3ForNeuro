@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.13 вЂ” С„Р°Р№Р»РѕРІРѕР№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
+-- BG3Neuro v0.8.14 вЂ” С„Р°Р№Р»РѕРІРѕР№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
 -- Р—Р°РґР°С‡Р°: heartbeat 2s + СЃС‚Р°СЂС‚РѕРІС‹Р№ state-С„Р°Р№Р» + РёСЃРїРѕР»РЅРµРЅРёРµ РґРµР№СЃС‚РІРёР№ РёР· action_*.json.
 -- Р”РµР№СЃС‚РІРёСЏ: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07, client-РєРѕРЅС‚РµРєСЃС‚), exploration (08:
@@ -9,7 +9,7 @@
 -- Р”РёСЂРµРєС‚РѕСЂРёСЏ IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO РїРёС€РµС‚ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.13"
+local MOD_VERSION = "0.8.14"
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
 local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (СЂРµР°Р»СЊРЅС‹Р№ polling)
@@ -441,6 +441,32 @@ local function resolveEndTurnActor(explicit)
     end
     local viaAlias = resolveEntity(raw)
     return actingCleanOf(viaAlias or raw)
+end
+
+-- v0.8.13: Find the id that Ext.Entity.Get actually resolves. It does NOT
+-- resolve clean uuids ("c7c13742-...") returned by actingCleanOf — only the
+-- prefixed Osiris form ("S_Player_Astarion_c7c13742-..."). Prefer raw if it
+-- already resolves, else map the clean guid onto the acting latch or onto a
+-- controlled character (GetCurrentCharacter returns prefixed ids).
+local function endTurnEntityId(raw, acting)
+    if raw ~= nil and raw ~= "" then
+        local okE, ent = pcall(Ext.Entity.Get, raw)
+        if okE and ent ~= nil then
+            return raw
+        end
+    end
+    local clean = pureGuid(acting or "") or ""
+    if clean ~= "" then
+        if actingChar ~= nil and pureGuid(actingChar) == clean then
+            return actingChar
+        end
+        for _, cc in ipairs(currentCharacters()) do
+            if pureGuid(tostring(cc.character)) == clean then
+                return tostring(cc.character)
+            end
+        end
+    end
+    return acting or raw or ""
 end
 
 local entityTurnComponentDump
@@ -1362,9 +1388,27 @@ local function executeDialogueOption(action)
     return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” DialogEnded)
 end
 
+-- v0.8.14: actor для move/attack без explicit — story-лэтч (resolveActingCharacter),
+-- как в end_turn: пустой actor резолвился в nil (resolveEntity("") = nil) и действия
+-- падали с "Could not resolve the movement/attacker actor".
+local function resolveCombatActor(explicit)
+    if explicit ~= nil and explicit ~= "" then
+        local via = resolveEntity(explicit)
+        if via ~= nil then
+            return via
+        end
+        return explicit
+    end
+    local raw = resolveActingCharacter("")
+    if raw ~= nil and raw ~= "" then
+        return raw
+    end
+    return nil
+end
+
 local function executeMoveToTarget(action)
     local data = action.data
-    local actor = resolveEntity(data.actor or "")
+    local actor = resolveCombatActor(data.actor)
     local target = resolveEntity(data.target_id or "")
     if actor == nil then
         return false, nil, "action_failed", "Could not resolve the movement actor"
@@ -1396,7 +1440,7 @@ end
 
 local function executeAttack(action)
     local data = action.data
-    local actor = resolveEntity(data.actor or "")
+    local actor = resolveCombatActor(data.actor)
     local target = resolveEntity(data.target_id or "")
     if actor == nil then
         return false, nil, "action_failed", "Could not resolve the attacker"
@@ -1550,6 +1594,10 @@ local function executeAction(action)
     if data == nil then
         data = {}
     end
+    -- Действия-делегаты (attack_entity/cast_spell/move_to_target и пр.) читают
+    -- action.data как таблицу; раньше здесь оставалась строка JSON, и
+    -- data.actor/... давал nil. Подменяем action.data распарсенной таблицей.
+    action.data = data
 
     if name == "end_turn" then
         -- v0.7.3: РґРІСѓС…С„Р°Р·РЅС‹Р№ end_turn СЃ СЃР°РјРѕРїСЂРѕРІРµСЂРєРѕР№ СЂРµР°Р»СЊРЅРѕРіРѕ СЌС„С„РµРєС‚Р°.
@@ -1570,7 +1618,14 @@ local function executeAction(action)
 
         local marker = #turnLog
         local actingBefore = actingChar
-        local okE, errE = requestEngineEndTurn(raw)
+        -- end_turn прерывает незавершённое движение: иначе EndTurn ждёт
+        -- движения и ход не переключается (ended=false). Движение уже
+        -- завершилось событием CharacterMoveToFinished — activeMove null, no-op.
+        cancelActiveMove("Ход завершён, движение прервано", action.id)
+        -- v0.8.13: передаём id, который Ext.Entity.Get находит (prefixed), а не
+        -- чистый guid: чистый ("c7c13742-...") Ext.Entity.Get НЕ находит, и тогда
+        -- флаг RequestedEndTurn не выставится и очередь EndTurn не пушится.
+        local okE, errE = requestEngineEndTurn(endTurnEntityId(raw, acting))
         if not okE then
             return false, nil, "action_failed", tostring(errE)
         end
