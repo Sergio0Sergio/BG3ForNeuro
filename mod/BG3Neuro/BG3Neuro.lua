@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.14 вЂ” С„Р°Р№Р»РѕРІРѕР№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
+-- BG3Neuro v0.8.17 вЂ” С„Р°Р№Р»РѕРІРѕР№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
 -- Р—Р°РґР°С‡Р°: heartbeat 2s + СЃС‚Р°СЂС‚РѕРІС‹Р№ state-С„Р°Р№Р» + РёСЃРїРѕР»РЅРµРЅРёРµ РґРµР№СЃС‚РІРёР№ РёР· action_*.json.
 -- Р”РµР№СЃС‚РІРёСЏ: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07, client-РєРѕРЅС‚РµРєСЃС‚), exploration (08:
@@ -9,7 +9,7 @@
 -- Р”РёСЂРµРєС‚РѕСЂРёСЏ IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO РїРёС€РµС‚ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.14"
+local MOD_VERSION = "0.8.22"
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
 local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (СЂРµР°Р»СЊРЅС‹Р№ polling)
@@ -95,7 +95,7 @@ local function writeResult(actionId, success, running, errorCode, errorDetail, e
             payload[k] = v
         end
     end
-    local path = RESULT_DIR .. "/result_" .. actionId .. ".json"
+    local path = RESULT_DIR .. "/result_" .. (actionId or "unknown") .. ".json"
     local ok, err = pcall(Ext.IO.SaveFile, path, Ext.Json.Stringify(payload))
     if not ok then
         _P("[BG3Neuro] write result " .. actionId .. ": " .. tostring(err))
@@ -1229,6 +1229,17 @@ function cancelActiveMove(reason, detail)
     writeResult(pending.id, true, false, nil, reason .. (detail and (": " .. tostring(detail)) or ""))
 end
 
+-- v0.8.19: финал движения. Osi.CharacterMoveTo(..., event, moveID) бросает
+-- EntityEvent(character, event) по завершении перемещения — ловим и закрываем
+-- running. Раньше листенера не было: move успешно стартовал, но running висел вечно.
+Ext.Osiris.RegisterListener("EntityEvent", 2, "after", function(character, event)
+    if activeMove ~= nil and tostring(event) == tostring(activeMove.event) then
+        local pending = activeMove
+        activeMove = nil
+        writeResult(pending.id, true, false, nil, nil)
+    end
+end)
+
 -- ============================================================
 -- РЎРѕРІРјРµСЃС‚РЅС‹Р№ РїР°Р№РїР»Р°Р№РЅ РєР°СЃС‚Р°/Р°С‚Р°РєРё (В§6.4): ServerCastRequest.
 -- Р”Р»СЏ РёРіСЂРѕРєРѕРІ CastOptions {"FromClient", ...} в†’ СЂРµСЃСѓСЂСЃС‹/РєСѓР»РґР°СѓРЅС‹
@@ -1237,23 +1248,460 @@ end
 
 local pendingCasts = {} -- { id = action.id, spell = name, caster = uuid }
 
-local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, posZ, spellType)
-    if Ext == nil or Ext.System == nil or Ext.System.ServerCastRequest == nil then
-        return nil, "ServerCastRequest РЅРµРґРѕСЃС‚СѓРїРµРЅ РЅР° СЌС‚РѕР№ СЃР±РѕСЂРєРµ BG3SE"
+-- v0.8.18: полный снимок очередей CastRequestSystem (общий для q_cast/q_sys и автоснимков).
+local CAST_QUEUE_NAMES = {
+    "OsirisCastRequests", "NetworkStartRequests", "AnubisCastRequests",
+    "ReactionStartRequests", "ItemStartRequests", "ActiveRollNodeStartRequests",
+    "JumpStartRequests", "CommandProtocolStartRequests", "PlanCancelRequests",
+    "field_A8", "OsirisCancelRequests", "NetworkCancelRequests",
+    "AnubisCancelRequests", "field_E8", "GameplayControllerCancelRequests",
+    "ReactionCancelRequests", "CharacterCancelRequests", "TeleportCancelRequests",
+    "NetworkPreviewUpdateRequests", "ConfirmRequests",
+}
+
+local function readCastQueues()
+    local sys
+    local sysOk, sysErr = pcall(function() return Ext.System.ServerCastRequest end)
+    if not sysOk or sysErr == nil then
+        return { error = "ServerCastRequest недоступен (" .. tostring(sysErr) .. ")" }
+    end
+    sys = sysErr
+    local queues = {}
+    for _, n in ipairs(CAST_QUEUE_NAMES) do
+        local entry = { size = -1, error = nil, entries = nil }
+        local ok, arr = pcall(function() return sys[n] end)
+        if ok and arr ~= nil then
+            local lenOk, len = pcall(function() return #arr end)
+            if lenOk then
+                entry.size = len
+                if len > 0 then
+                    local list = {}
+                    local maxRead = math.min(len, 8)
+                    for i = 1, maxRead do
+                        local fOk, f = pcall(function() return arr[i] end)
+                        if fOk and f ~= nil then
+                            local it = {}
+                            local cOk, caster = pcall(function() return f.Caster end)
+                            if cOk and caster ~= nil then
+                                it.caster = tostring(caster)
+                            end
+                            local sOk, spell = pcall(function()
+                                return f.Spell and f.Spell.Prototype
+                            end)
+                            if sOk then it.spell = tostring(spell) end
+                            local gOk, guid = pcall(function() return f.RequestGuid end)
+                            if gOk then it.requestGuid = tostring(guid) end
+                            local foOk, forced = pcall(function() return f.Forced end)
+                            if foOk then it.forced = forced end
+                            local sgOk, sg = pcall(function() return f.SpellCastGuid end)
+                            if sgOk then it.spellCastGuid = tostring(sg) end
+                            -- v0.8.18+: полные поля реального CastStartRequest (NetGuid, CastOptions,
+                            -- Targets, Originator, Item, CastPosition, StoryActionId, field_A8).
+                            local ngOk, ng = pcall(function() return f.NetGuid end)
+                            if ngOk then it.netGuid = tostring(ng) end
+                            local fA8Ok, fA8 = pcall(function() return f.field_A8 end)
+                            if fA8Ok then it.field_A8 = fA8 end
+                            local saOk, sa = pcall(function() return f.StoryActionId end)
+                            if saOk then it.storyActionId = sa end
+                            local orOk, ori = pcall(function() return f.Originator end)
+                            if orOk and ori ~= nil then
+                                it.originator = tostring(ori)
+                            end
+                            local imOk, im = pcall(function() return f.Item end)
+                            if imOk and im ~= nil then it.item = tostring(im) end
+                            local cpOk, cp = pcall(function() return f.CastPosition end)
+                            if cpOk and cp then it.castPosition = { cp[1], cp[2], cp[3] } end
+                            local coOk2, co = pcall(function() return f.CastOptions end)
+                            if coOk2 and co ~= nil then it.castOptions = co end
+                            local tgOk2, tg = pcall(function() return f.Targets end)
+                            if tgOk2 and tg then
+                                local tl = {}
+                                for _, t in ipairs(tg) do
+                                    local ti = { TargetingType = t.TargetingType }
+                                    local tOk, th = pcall(function() return t.Target end)
+                                    if tOk then ti.targetHandle = tostring(th) end
+                                    local pOk2, tp = pcall(function() return t.Position end)
+                                    if pOk2 and tp then ti.position = { tp[1], tp[2], tp[3] } end
+                                    tl[#tl + 1] = ti
+                                end
+                                it.targets = tl
+                            end
+                            list[#list + 1] = it
+                        end
+                    end
+                    entry.entries = list
+                end
+            else
+                entry.error = tostring(len)
+            end
+        else
+            entry.error = ok and "nil" or tostring(arr)
+        end
+        queues[n] = entry
+    end
+    return queues
+end
+
+-- v0.8.17: диагностика доступности каст-API на текущей сборке BG3SE.
+-- В v0.8.16 cast падал с "attempt to call a nil value" — вероятная причина:
+-- Ext.System.ServerCastRequest / Ext.Entity.Get / Osi.UseSpell недоступны.
+local function castApiDiag()
+    local function present(f)
+        local ok, v = pcall(f)
+        return ok and v == true
+    end
+    local function typeSummary(typeName)
+        local ok, ti = pcall(function() return Ext.Types.GetTypeInfo(typeName) end)
+        if not ok or ti == nil then
+            return nil
+        end
+        local members = {}
+        if ti.Members ~= nil then
+            for memberName, memberInfo in pairs(ti.Members) do
+                local t = type(memberInfo) == "table" and memberInfo.NativeName or tostring(memberInfo)
+                members[#members + 1] = { name = memberName, type = t }
+            end
+            table.sort(members, function(a, b) return a.name < b.name end)
+        end
+        return { name = ti.NativeName, kind = ti.Kind, members = members }
+    end
+    local queueType
+    local qOk, q = pcall(function()
+        local s = Ext.System.ServerCastRequest
+        return s and s.OsirisCastRequests
+    end)
+    if qOk and q ~= nil then
+        local tOk, t = pcall(function() return Ext.Types.TypeOf(q) end)
+        if tOk and t ~= nil then
+            queueType = { name = t.NativeName, kind = t.Kind }
+            if t.ElementType ~= nil then
+                queueType.element = (type(t.ElementType) == "table" and t.ElementType.NativeName)
+                    or tostring(t.ElementType)
+            end
+        end
+    end
+    local castStartRequest
+    if qOk and q ~= nil then
+        local tOk, t = pcall(function() return Ext.Types.TypeOf(q) end)
+        if tOk and t ~= nil and t.ElementType ~= nil and type(t.ElementType) == "table" then
+            local ti = t.ElementType
+            local members = {}
+            if ti.Members ~= nil then
+                for memberName, memberInfo in pairs(ti.Members) do
+                    local mt = type(memberInfo) == "table" and memberInfo.NativeName or tostring(memberInfo)
+                    members[#members + 1] = { name = memberName, type = mt }
+                end
+                table.sort(members, function(a, b) return a.name < b.name end)
+            end
+            castStartRequest = { name = ti.NativeName, kind = ti.Kind, members = members }
+        end
+    end
+    return {
+        serverCastRequest = present(function() return Ext.System.ServerCastRequest ~= nil end),
+        osiUseSpell = present(function() return Osi.UseSpell ~= nil end),
+        osiUseSpellAtPosition = present(function() return Osi.UseSpellAtPosition ~= nil end),
+        extEntityGet = present(function() return Ext.Entity ~= nil and type(Ext.Entity.Get) == "function" end),
+        extStats = present(function() return Ext.Stats ~= nil end),
+        extTypes = present(function() return Ext.Types ~= nil and Ext.Types.GetTypeInfo ~= nil end),
+        osiIsPlayer = { present = present(function() return Ext.Osi ~= nil and Ext.Osi.IsPlayer ~= nil end), type = type(Ext.Osi and Ext.Osi.IsPlayer) },
+        queueType = queueType,
+        castStartRequest = castStartRequest or typeSummary("EsvSpellCastCastStartRequest"),
+        spellId = typeSummary("spell_cast::SpellId"),
+        initialTarget = typeSummary("spell_cast::InitialTarget"),
+    }
+end
+
+-- v0.8.18: бисекция — на каком поле падает маппинг `request` в CastStartRequest.
+local function newGuidString()
+    -- v0.8.17: RequestGuid требует строку в формате GUID (не число!). math.random
+    -- возвращал number -> "String expected for argument 5". Генерируем RFC4122-подобный.
+    local function h4()
+        return string.format("%04x", math.random(0, 0xffff))
+    end
+    local r = math.random(0, 0x0fff)
+    local r2 = math.random(0, 0x0fff)
+    return h4() .. h4() .. "-" .. h4() .. "-4" .. string.format("%03x", r) .. "-"
+        .. string.format("%x", 8 + math.random(0, 3)) .. string.format("%03x", r2) .. "-"
+        .. h4() .. h4() .. h4()
+end
+
+local NULL_UUID = "00000000-0000-0000-0000-000000000000"
+
+-- Поля добавляются по одному; первый вариант, у которого push кинул ошибку, и
+-- есть виновник. Возвращает таблицу { variant => { ok = bool, err = string? } }.
+local function probeCastVariants(actorUuid, spellName, targetUuid)
+    local out = {}
+    local casterEntity
+    local getOk, getErr = pcall(function() return Ext.Entity.Get(actorUuid) end)
+    if getOk and getErr then
+        casterEntity = getErr
+    end
+    local targetEntity
+    if targetUuid and targetUuid ~= "" then
+        local tOk, tErr = pcall(function() return Ext.Entity.Get(targetUuid) end)
+        if tOk and tErr then
+            targetEntity = tErr
+        end
+    end
+    if casterEntity == nil then
+        out.getCaster = { ok = false, err = "caster entity nil" }
+        return out
     end
 
-    local casterEntity = Ext.Entity.Get(actorUuid)
+    local spellType = "Target"
+    local sOk, stats = pcall(function() return Ext.Stats.Get(spellName) end)
+    if sOk and stats ~= nil then
+        spellType = stats.SpellType or "Target"
+    end
+
+    -- v0.8.18: реальный OriginatorPrototype (как в brawl getOriginatorPrototype):
+    -- "Fire Bolt" -> "Projectile_FireBolt", "Piercing Thrust" -> "Target_PiercingThrust".
+    -- Игра НЕ резолвит голое имя заклинания в originator - каст молча отбрасывается.
+    local originatorPrototype
+    if stats and stats.SpellType ~= nil and stats.SpellType ~= "" then
+        originatorPrototype = stats.SpellType .. "_" .. spellName:gsub("%s+", "")
+    else
+        originatorPrototype = spellName
+    end
+    -- Уточнение по книге кастера: берём реальный OriginatorPrototype, если префиксная
+    -- форма не совпала с книгой (rare прототипы, например "Projectile_FireBolt").
+    local opsOk, opExtra = pcall(function()
+        if casterEntity.SpellBookPrepares and casterEntity.SpellBookPrepares.PreparedSpells then
+            local suffix = spellName:gsub("%s+", "")
+            for _, ps in ipairs(casterEntity.SpellBookPrepares.PreparedSpells) do
+                local o = ps.OriginatorPrototype
+                if o then
+                    if o == originatorPrototype then
+                        return nil
+                    end
+                    if o:sub(-#suffix) == suffix then
+                        return o
+                    end
+                end
+            end
+        end
+        return nil
+    end)
+    if opsOk and opExtra then
+        originatorPrototype = opExtra
+    end
+
+    local spell = {
+        OriginatorPrototype = originatorPrototype,
+        ProgressionSource = NULL_UUID,
+        Prototype = spellName,
+        Source = NULL_UUID,
+        SourceType = "Osiris",
+    }
+    local targets = {}
+    if targetEntity then
+        targets[#targets + 1] = { Target = targetEntity, TargetingType = spellType }
+    end
+
+    -- v0.8.18: варианты, повторяющие ют-запрос enqueueCastRequest побайтово.
+    -- (1) spell из PreparedSpells без Position; (2) osiris-spell с Position;
+    -- (3) prepared-spell + Position — виновник виден по первому появившемуся err.
+    local preparedSpell
+    local preparedErr
+    local pOk2, pErr2 = pcall(function()
+        if casterEntity.SpellBookPrepares and casterEntity.SpellBookPrepares.PreparedSpells then
+            local suffix = spellName:gsub("%s+", "")
+            for _, ps in ipairs(casterEntity.SpellBookPrepares.PreparedSpells) do
+                local o = ps.OriginatorPrototype
+                if o and o:sub(-#suffix) == suffix then
+                    preparedSpell = {
+                        OriginatorPrototype = o,
+                        ProgressionSource = ps.ProgressionSource,
+                        Prototype = spellName,
+                        Source = ps.Source,
+                        SourceType = ps.SourceType,
+                    }
+                    break
+                end
+            end
+        end
+    end)
+    if not pOk2 then
+        preparedErr = tostring(pErr2)
+    end
+    local preparedTargets = {}
+    if targetEntity then
+        local t2 = { Target = targetEntity, TargetingType = spellType }
+        if targetEntity.Transform and targetEntity.Transform.Transform and targetEntity.Transform.Transform.Translate then
+            local tp = targetEntity.Transform.Transform.Translate
+            t2.Position = { tp[1], tp[2], tp[3] }
+        end
+        preparedTargets[#preparedTargets + 1] = t2
+    end
+
+    local variants = {
+        step_1_caster_only = { Caster = casterEntity },
+        step_2_castoptions = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity },
+        step_3_guid = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString() },
+        step_4_spell = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = spell },
+        step_5_targets = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = spell, Targets = targets },
+        step_6_full = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = spell, Targets = targets, field_A8 = 1 },
+        step_7_prepared_spell = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = preparedSpell or spell, Targets = targets, field_A8 = 1 },
+        step_8_position = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = spell, Targets = preparedTargets, field_A8 = 1 },
+        step_9_prepared_position = { CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = preparedSpell or spell, Targets = preparedTargets, field_A8 = 1 },
+        -- v0.8.18: зеркала NPC-ветки из enqueueCastRequest (IgnoreHasSpell + Osiris Fallback,
+        -- как для ShadowHeart при isPlayer=false). Probe раньше не тестировал NPC-набор.
+        step_10_npc_osiris = { CastOptions = { "IgnoreHasSpell", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = spell, Targets = targets, field_A8 = 1 },
+        step_11_npc_prepared = { CastOptions = { "IgnoreHasSpell", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = preparedSpell or spell, Targets = targets, field_A8 = 1 },
+        step_12_npc_prepared_pos = { CastOptions = { "IgnoreHasSpell", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = preparedSpell or spell, Targets = preparedTargets, field_A8 = 1 },
+        -- v0.8.18: точное зеркало enqueue для NPC: Osiris-fallback Spell + Position.
+        step_13_npc_osiris_pos = { CastOptions = { "IgnoreHasSpell", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement" }, Caster = casterEntity, RequestGuid = newGuidString(), Spell = spell, Targets = preparedTargets, field_A8 = 1 },
+    }
+
+    local queue
+    local qOk, qErr = pcall(function() return Ext.System.ServerCastRequest.OsirisCastRequests end)
+    if qOk and qErr then
+        queue = qErr
+    end
+    for label, request in pairs(variants) do
+        if queue then
+            local ok, err = pcall(function() queue[#queue + 1] = request end)
+            if ok then
+                pcall(function() if #queue > 0 then queue[#queue] = nil end end)
+                out[label] = { ok = true }
+            else
+                out[label] = { ok = false, err = tostring(err) }
+            end
+        else
+            out[label] = { ok = false, err = "queue nil" }
+        end
+    end
+    if preparedErr then
+        out.preparedErr = preparedErr
+    end
+    return out
+end
+
+local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, posZ, spellType, insertAtFront, queueName, forceFlags)
+    local apiOk, serverCastRequest = pcall(function() return Ext.System.ServerCastRequest end)
+    if not apiOk or serverCastRequest == nil then
+        return nil, "ServerCastRequest недоступен на этой сборке BG3SE"
+    end
+
+    local casterEntity
+    local getOk, getErr = pcall(function() return Ext.Entity.Get(actorUuid) end)
+    if getOk and getErr then
+        casterEntity = getErr
+    end
     if casterEntity == nil then
-        return nil, "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ СЃСѓС‰РЅРѕСЃС‚СЊ РєР°СЃС‚РµСЂР°"
+        return nil, "Не удалось получить сущность кастера"
+    end
+
+    -- v0.8.18: buildSpell как в brawl — для игроков берём источник из
+    -- SpellBookPrepares.PreparedSpells (ресурсы/кулдауны нативно), для NPC —
+    -- Osiris Source. Иначе каст ставится в очередь, но молча не происходит.
+    -- OriginatorPrototype - реальный прототип (SpellType_SpellName), иначе игра
+    -- не резолвит голое имя ("Fire Bolt" vs "Projectile_FireBolt").
+    local isPlayer = false
+    -- v0.8.18: IsPlayer живёт в глобальном Osi (Osi.lua), не только в Ext.Osi.
+    -- В рантайме это userdata (C-функция), поэтому тип проверяем через ~= nil,
+    -- а не через "function".
+    local ipDetail
+    local ipOk, ipRes = pcall(function()
+        if Ext.Osi and Ext.Osi.IsPlayer ~= nil then
+            local r = Ext.Osi.IsPlayer(actorUuid)
+            ipDetail = "ext:" .. tostring(r)
+            return r == 1
+        end
+        if Osi and Osi.IsPlayer ~= nil then
+            local r = Osi.IsPlayer(actorUuid)
+            ipDetail = "global:" .. tostring(r)
+            return r == 1
+        end
+        ipDetail = "no-api"
+        return false
+    end)
+    if ipOk and ipRes then
+        isPlayer = true
+    end
+    if not ipOk then
+        ipDetail = "err:" .. tostring(ipRes)
+    end
+    -- v0.8.18: Osi.IsPlayer в рантайме — userdata-заглушка, вызов даёт
+    -- "attempt to call a nil value". Для игрока детект по имени сущности
+    -- (UUID содержит "Player": S_Player_Astarion_..., HalfElves_Player_Strong...).
+    -- Без этого каст для игрока шлётся NPC-вариантом и молча игнорится.
+    if not isPlayer and actorUuid and actorUuid:find("Player") then
+        isPlayer = true
+        ipDetail = (ipDetail or "") .. "|name:Player"
+    end
+    local originatorPrototype = spellType .. "_" .. spellName:gsub("%s+", "")
+    local bookPrefix = originatorPrototype
+    -- v0.8.18: реальный прототип из книги кастера (суффикс имени) — префиксная формула
+    -- (SpellType_Name) НЕТОЧНА: у Fire Bolt SpellType=="Target", реальный прототип
+    -- "Projectile_FireBolt". Берём книжный прототип, но только для Speller'а — для NPC
+    -- brawl всё равно использует Osiris-Spell (SRC/OSIRIS) и NULL_UUID.
+    if casterEntity.SpellBookPrepares and casterEntity.SpellBookPrepares.PreparedSpells then
+        local sOk, sRes = pcall(function()
+            local suffix = spellName:gsub("%s+", "")
+            for _, ps in ipairs(casterEntity.SpellBookPrepares.PreparedSpells) do
+                local o = ps.OriginatorPrototype
+                if o and o:sub(-#suffix) == suffix then
+                    return o
+                end
+            end
+        end)
+        if sOk and sRes then
+            originatorPrototype = sRes
+        end
+    end
+
+    local spell
+    -- v0.8.18: buildSpell как в brawl — для игроков источник из PreparedSpells
+    -- (ресурсы/кулдауны нативно), для NPC — Osiris Source (NULL_UUID).
+    if isPlayer and casterEntity.SpellBookPrepares and casterEntity.SpellBookPrepares.PreparedSpells then
+        local pbOk, pbErr = pcall(function()
+            local suffix = spellName:gsub("%s+", "")
+            for _, preparedSpell in ipairs(casterEntity.SpellBookPrepares.PreparedSpells) do
+                local o = preparedSpell.OriginatorPrototype
+                if o and o:sub(-#suffix) == suffix then
+                    spell = {
+                        OriginatorPrototype = o,
+                        ProgressionSource = preparedSpell.ProgressionSource,
+                        Prototype = spellName,
+                        Source = preparedSpell.Source,
+                        SourceType = preparedSpell.SourceType,
+                    }
+                    break
+                end
+            end
+        end)
+        if not pbOk then
+            _P("[BG3Neuro] PreparedSpells read failed: " .. tostring(pbErr))
+        end
+    end
+    if spell == nil then
+        spell = {
+            OriginatorPrototype = originatorPrototype or bookPrefix,
+            ProgressionSource = NULL_UUID,
+            Prototype = spellName,
+            Source = NULL_UUID,
+            SourceType = "Osiris",
+        }
     end
 
     local targets = {}
     if targetUuid and targetUuid ~= "" then
-        local targetEntity = Ext.Entity.Get(targetUuid)
-        if targetEntity == nil then
-            return nil, "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ СЃСѓС‰РЅРѕСЃС‚СЊ С†РµР»Рё"
+        local targetEntity
+        local tOk, tErr = pcall(function() return Ext.Entity.Get(targetUuid) end)
+        if tOk and tErr then
+            targetEntity = tErr
         end
-        targets[#targets + 1] = { Target = targetEntity, TargetingType = spellType }
+        if targetEntity == nil then
+            return nil, "Не удалось получить сущность цели"
+        end
+        -- v0.8.18: как brawl — позиция цели всегда добавляется в Target.
+        local target = { Target = targetEntity, TargetingType = spellType }
+        if targetEntity.Transform and targetEntity.Transform.Transform and targetEntity.Transform.Transform.Translate then
+            local tp = targetEntity.Transform.Transform.Translate
+            target.Position = { tp[1], tp[2], tp[3] }
+        end
+        targets[#targets + 1] = target
     elseif posX then
         targets[#targets + 1] = {
             Position = { posX, posY, posZ },
@@ -1261,21 +1709,133 @@ local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, 
         }
     end
 
+    -- v0.8.18+: выбор очереди. "network" -> NetworkStartRequests (канал, через который
+    -- игра принимает каст игрока в его ход), иначе OsirisCastRequests.
+    local queueId = queueName or "osiris"
+    local queue
+    local qOk, qErr = pcall(function() return serverCastRequest[queueId == "network" and "NetworkStartRequests" or "OsirisCastRequests"] end)
+    if qOk and qErr then
+        queue = qErr
+    end
+    if queue == nil then
+        return nil, (queueId == "network" and "NetworkStartRequests" or "OsirisCastRequests") .. " недоступен"
+    end
+
+    local castOptions
+    if isPlayer then
+        castOptions = { "FromClient", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement" }
+    else
+        castOptions = { "IgnoreHasSpell", "ShowPrepareAnimation", "AvoidDangerousAuras", "NoMovement" }
+    end
+    -- v0.8.18+: hogwild force-флаги (диагностика FTB-паузы, когда движок молча глотает
+    -- запрос из OsirisCastRequests). Не ставим "Immediate" для сетевой очереди.
+    if forceFlags then
+        local add = {}
+        for _, f in ipairs({ "IgnoreHasSpell", "IgnoreCastChecks", "IgnoreSpellRolls", "IgnoreTargetChecks", "Forced", "Immediate" }) do
+            if not (queueId == "network" and f == "Immediate") then
+                add[#add + 1] = f
+            end
+        end
+        castOptions = add
+    end
     local request = {
-        CastOptions = { "FromClient", "ShowPrepareAnimation", "NoMovement" },
+        CastOptions = castOptions,
         Caster = casterEntity,
-        RequestGuid = math.random(1, 2147483647),
-        Spell = {
-            OriginatorPrototype = spellName,
-            Prototype = spellName,
-            SourceType = "Osiris",
-        },
+        RequestGuid = newGuidString(),
+        Spell = spell,
         Targets = targets,
         field_A8 = 1,
     }
-    local queue = Ext.System.ServerCastRequest.OsirisCastRequests
-    queue[#queue + 1] = request
-    return true, nil
+
+    -- v0.8.18: debug-дамп ДО push — что собираемся пушить (отладка "молча игнорится" стр. ниже).
+    local preparedList = {}
+    if casterEntity.SpellBookPrepares and casterEntity.SpellBookPrepares.PreparedSpells then
+        local plOk, plErr = pcall(function()
+            for _, ps in ipairs(casterEntity.SpellBookPrepares.PreparedSpells) do
+                preparedList[#preparedList + 1] = {
+                    OriginatorPrototype = ps.OriginatorPrototype,
+                    ProgressionSource = ps.ProgressionSource,
+                    Source = ps.Source,
+                    SourceType = ps.SourceType,
+                }
+            end
+        end)
+        if not plOk then
+            _P("[BG3Neuro] PreparedSpells dump failed: " .. tostring(plErr))
+        end
+    end
+    local debugInfo = {
+        actor = actorUuid,
+        actorHandle = tostring(casterEntity),
+        isPlayer = isPlayer,
+        isPlayerDetail = ipDetail or "<unset>",
+        osiPlayerApi = { ext = type(Ext.Osi and Ext.Osi.IsPlayer), global = type(Osi and Osi.IsPlayer) },
+        spellName = spellName,
+        spell = {
+            OriginatorPrototype = request.Spell.OriginatorPrototype,
+            ProgressionSource = request.Spell.ProgressionSource,
+            Prototype = request.Spell.Prototype,
+            Source = request.Spell.Source,
+            SourceType = request.Spell.SourceType,
+        },
+        castOptions = request.CastOptions,
+        queue = queueId,
+        forceFlags = forceFlags == true,
+        targetUuid = targetUuid,
+        targetPos = targets[1] and targets[1].Position or nil,
+        preparedSpells = preparedList,
+        queueSize = queue and #queue or -1,
+        requestGuid = request.RequestGuid,
+    }
+    local saveOk, saveErr = pcall(Ext.IO.SaveFile, RESULT_DIR .. "/cast_debug.json", Ext.Json.Stringify(debugInfo))
+    if not saveOk then
+        _P("[BG3Neuro] cast_debug save failed: " .. tostring(saveErr))
+    end
+
+    -- v0.8.18: pcall на само присвоение в очередь — "String expected for argument 5, got nil"
+    -- бросается маппингом Lua-таблицы в CastStartRequest, а не нашими return-внутренностями.
+    local failTrace = {}
+    local enqPushOk, enqPushErr
+    if insertAtFront then
+        -- v0.8.18: brawl вставляет НАЧАЛО при TruePause+isInFTB (пошаговый бой на паузе).
+        enqPushOk, enqPushErr = pcall(function()
+            for i = #queue, 1, -1 do
+                queue[i + 1] = queue[i]
+            end
+            queue[1] = request
+        end)
+    else
+        enqPushOk, enqPushErr = pcall(function() queue[#queue + 1] = request end)
+    end
+    if enqPushOk then
+        -- v0.8.18: мгновенный снимок очередей СРАЗУ после пуша (до того, как движок
+        -- разберёт запрос в том же кадре) — видим запрос в OsirisCastRequests и его поля.
+        local snap = readCastQueues()
+        if not snap.error then
+            pcall(Ext.IO.SaveFile, RESULT_DIR .. "/cast_queues_" .. tostring(request.RequestGuid or "x") .. "_0ms.json",
+                Ext.Json.Stringify({ tag = "post-push-0ms", queues = snap }))
+        end
+        return true, nil
+    end
+    -- Локализация: если полный request упал, пробуем урезанные варианты (как probe),
+    -- чтобы понять, какое поле триггерит ошибку маппера.
+    local function pushVariant(label, v)
+        local ok, e = pcall(function() queue[#queue + 1] = v end)
+        if ok then
+            pcall(function() queue[#queue] = nil end)
+            failTrace[label] = "ok"
+        else
+            failTrace[label] = tostring(e)
+        end
+    end
+    pushVariant("spell_only", { Spell = request.Spell })
+    pushVariant("targets_only", { Targets = request.Targets })
+    pushVariant("spell_targets", { Spell = request.Spell, Targets = request.Targets })
+    pushVariant("options_cast", { CastOptions = request.CastOptions, Caster = request.Caster, RequestGuid = request.RequestGuid, Spell = request.Spell, Targets = request.Targets })
+    pushVariant("full_no_a8", { CastOptions = request.CastOptions, Caster = request.Caster, RequestGuid = request.RequestGuid, Spell = request.Spell, Targets = request.Targets, field_A8 = nil })
+    local traceInfo = { enqueue_error = tostring(enqPushErr), fail_trace = failTrace }
+    pcall(Ext.IO.SaveFile, RESULT_DIR .. "/cast_trace.json", Ext.Json.Stringify(traceInfo))
+    return nil, tostring(enqPushErr)
 end
 
 -- Р¤РёРЅР°Р» РєР°СЃС‚Р° РїРѕ РёРіСЂРѕРІС‹Рј СЃРѕР±С‹С‚РёСЏРј (РґРѕР»РіРёРµ/РєР°РЅР°Р»СЊРЅС‹Рµ Р·Р°РєР»РёРЅР°РЅРёСЏ): running:false.
@@ -1283,7 +1843,19 @@ end
 local function finalizeCast(caster, spellName, cancelled)
     for i = 1, #pendingCasts do
         local pc = pendingCasts[i]
-        if pc.caster == caster and pc.spell == spellName then
+        -- v0.8.19: событие CastedSpell приходит с прототипным именем
+        -- ("Projectile_FireBolt"), а в pendingCasts записано "FireBolt" — матчим все три.
+        local spellMatch = pc.spell == spellName
+            or pc.spell == "Projectile_" .. spellName
+            or pc.spell == "Target_" .. spellName
+            or spellName == "Projectile_" .. pc.spell
+            or spellName == "Target_" .. pc.spell
+        -- v0.8.19: CastedSpell приходит с префиксом имени ("HalfElves_..._e6090219-…"),
+        -- в pendingCasts храним голый GUID e6090219-… — сравниваем по GUID-суффиксу.
+        local casterMatch = pc.caster == caster
+            or (type(caster) == "string" and caster:sub(-36) == pc.caster)
+            or (type(pc.caster) == "string" and pc.caster:sub(-36) == caster)
+        if casterMatch and spellMatch then
             table.remove(pendingCasts, i)
             writeResult(pc.id, true, false, cancelled and "cast_failed" or nil,
                 cancelled and "РљР°СЃС‚ РїСЂРµСЂРІР°РЅ/РїСЂРѕРІР°Р»РµРЅ" or nil)
@@ -1292,8 +1864,103 @@ local function finalizeCast(caster, spellName, cancelled)
     end
 end
 
-Ext.Osiris.RegisterListener("CastSpell", 5, "after", function(caster, spell, spellType, spellElement, storyActionID)
-end)
+-- v0.8.18+: дамп ЖИВЫХ каст-сущностей (ServerSpellCastState) — ground truth для
+-- сравнения с нашим синтетическим запросом: NetGuid, CastOptions, Targets,
+-- SpellCastGuid, CasterStartPosition. Собирает список кастов; файл пишется
+-- только если касты реально существуют (иначе поллинг затирал бы захват пустотой).
+local function collectCastEntities()
+    local casts = {}
+    local allOk, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("ServerSpellCastState") end)
+    if allOk and handles then
+        for _, h in ipairs(handles) do
+            local eOk, e = pcall(function() return Ext.Entity.Get(h) end)
+            if eOk and e then
+                local st
+                local sOk, s = pcall(function() return e.ServerSpellCastState end)
+                if sOk then st = s end
+                if st then
+                    local it = {}
+                    -- eoc::spell_cast::StateComponent: здесь Caster/SpellId/CastOptions/Targets/NetGuid/SpellCastGuid.
+                    local eocOk, eoc = pcall(function() return e.SpellCastState end)
+                    if eocOk and eoc then
+                        local cOk, caster = pcall(function() return eoc.Caster end)
+                        if cOk then it.casterHandle = tostring(caster) end
+                        local eOk2, casterEnt = pcall(function() return eoc.Caster:Get() end)
+                        if eOk2 and casterEnt then
+                            it.casterUuid = tostring(casterEnt.Uuid and casterEnt.Uuid.EntityUuid or nil)
+                        end
+                        local entOk, ent = pcall(function() return eoc.Entity end)
+                        if entOk then it.entityHandle = tostring(ent) end
+                        local spOk, sp = pcall(function() return eoc.SpellId end)
+                        if spOk then
+                            local spd = {}
+                            local p1, v1 = pcall(function() return sp.Prototype end)
+                            if p1 then spd.Prototype = tostring(v1) end
+                            local p2, v2 = pcall(function() return sp.OriginatorPrototype end)
+                            if p2 then spd.OriginatorPrototype = tostring(v2) end
+                            local p3, v3 = pcall(function() return sp.Source end)
+                            if p3 then spd.Source = tostring(v3) end
+                            local p4, v4 = pcall(function() return sp.ProgressionSource end)
+                            if p4 then spd.ProgressionSource = tostring(v4) end
+                            local p5, v5 = pcall(function() return sp.SourceType end)
+                            if p5 then spd.SourceType = tostring(v5) end
+                            local p6, v6 = pcall(function() return sp.SpellId end)
+                            if p6 then spd.SpellId = tostring(v6) end
+                            it.spell = spd
+                        end
+                        local coOk, co = pcall(function() return eoc.CastOptions end)
+                        if coOk then it.castOptions = co end
+                        local tgOk, tg = pcall(function() return eoc.Targets end)
+                        if tgOk and tg then
+                            local tl = {}
+                            for _, t in ipairs(tg) do
+                                local ti = { TargetingType = t.TargetingType }
+                                local tOk, th = pcall(function() return t.Target end)
+                                if tOk then ti.targetHandle = tostring(th) end
+                                local pOk, tp = pcall(function() return t.Position end)
+                                if pOk and tp then ti.position = { tp[1], tp[2], tp[3] } end
+                                tl[#tl + 1] = ti
+                            end
+                            it.targets = tl
+                        end
+                        local cgOk, cg = pcall(function() return eoc.SpellCastGuid end)
+                        if cgOk then it.spellCastGuid = tostring(cg) end
+                        local ngOk, ng = pcall(function() return eoc.NetGuid end)
+                        if ngOk then it.netGuid = tostring(ng) end
+                        local cpOk, cp = pcall(function() return eoc.CastPosition end)
+                        if cpOk and cp then it.castPosition = { cp[1], cp[2], cp[3] } end
+                        local ceOk, ce = pcall(function() return eoc.CastEndPosition end)
+                        if ceOk and ce then it.castEndPosition = { ce[1], ce[2], ce[3] } end
+                        local csOk, cs = pcall(function() return eoc.CasterStartPosition end)
+                        if csOk and cs then it.casterStartPosition = { cs[1], cs[2], cs[3] } end
+                        local srOk, sr = pcall(function() return eoc.Source end)
+                        if srOk then it.sourceHandle = tostring(sr) end
+                        local rOk, r = pcall(function() return eoc.Random end)
+                        if rOk then it.random = r end
+                    end
+                    local phOk, ph = pcall(function() return st.Phase end)
+                    if phOk then it.phase = tostring(ph) end
+                    local syOk, sy = pcall(function() return st.StoryActionId end)
+                    if syOk then it.storyActionId = sy end
+                    -- v0.8.18+: тег-компонент "клиент инициировал каст" (настоящий клик игрока).
+                    local ciOk, ci = pcall(function() return e.ServerSpellClientInitiated ~= nil end)
+                    if ciOk then it.clientInitiated = ci end
+                    casts[#casts + 1] = it
+                end
+            end
+        end
+    end
+    return casts
+end
+
+local function dumpCastEntities(tag)
+    local out = { tag = tag, timestamp = os and os.time and os.time() or nil, casts = collectCastEntities() }
+    if #out.casts > 0 then
+        pcall(Ext.IO.SaveFile, RESULT_DIR .. "/cast_capture.json", Ext.Json.Stringify(out))
+        _P("[BG3Neuro] cast_capture: " .. tostring(#out.casts) .. " live cast(s), tag=" .. tostring(tag))
+    end
+    return out
+end
 
 Ext.Osiris.RegisterListener("CastedSpell", 5, "after", function(caster, spell, spellType, spellElement, storyActionID)
     finalizeCast(caster, spell, false)
@@ -1303,9 +1970,28 @@ Ext.Osiris.RegisterListener("CastSpellFailed", 5, "after", function(caster, spel
     finalizeCast(caster, spell, true)
 end)
 
+-- v0.8.14: actor для move/attack/cast без explicit — story-лэтч (resolveActingCharacter),
+-- как в end_turn: пустой actor резолвился в nil (resolveEntity("") = nil) и действия
+-- падали с "Could not resolve the movement/attacker/caster actor".
+-- Объявлена ДО executeCast (v0.8.16): Lua видит локальные только после объявления.
+local function resolveCombatActor(explicit)
+    if explicit ~= nil and explicit ~= "" then
+        local via = resolveEntity(explicit)
+        if via ~= nil then
+            return via
+        end
+        return explicit
+    end
+    local raw = resolveActingCharacter("")
+    if raw ~= nil and raw ~= "" then
+        return raw
+    end
+    return nil
+end
+
 local function executeCast(action)
     local data = action.data
-    local actor = resolveEntity(data.actor or "")
+    local actor = resolveCombatActor(data.actor)
     local spellName = data.spell_name
     if actor == nil then
         return false, nil, "action_failed", "Could not resolve the caster"
@@ -1314,26 +2000,112 @@ local function executeCast(action)
         return false, nil, "action_failed", "spell_name is required"
     end
 
+    -- v0.8.19: "только в свой ход" по CanActInCombat кастера, а не по actingChar:
+    -- у BG3 бывают групповые ходы (несколько персонажей действуют в одном окне),
+    -- strict-матч actingChar заблокировал бы Тава в общий ход с Гейлом.
+    -- CanActInCombat -- признак "может действовать сейчас" из TurnBased-компонента
+    -- (как и в снапшоте state.canAct). Известен nil (компонент не читается) --
+    -- fallback на прошлый actingChar-матч.
+    local entOk, entVal = pcall(Ext.Entity.Get, actor)
+    local canAct = nil
+    if entOk and entVal ~= nil then
+        canAct = fieldOf(turnComponent(entVal), "CanActInCombat")
+    end
+    canAct = (canAct == true) or (tostring(canAct) == "true")
+    local acting = pureGuid(actingChar)
+    local okToCast = canAct or (acting ~= nil and pureGuid(actor) == acting)
+    if not okToCast then
+        return false, nil, "action_failed", "not_caster_turn: " .. tostring(actor) .. " canAct=" .. tostring(canAct)
+    end
+
     -- РџСЂРµСЂС‹РІР°РµРј Р°РєС‚РёРІРЅРѕРµ РґРІРёР¶РµРЅРёРµ (РєР°СЃС‚ Рё РґРІРёР¶РµРЅРёРµ РЅРµ РїРµСЂРµСЃРµРєР°СЋС‚СЃСЏ)
     cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ РєР°СЃС‚РѕРј", action.id)
 
     local stats = Ext.Stats.Get(spellName) -- prototype-РёРјСЏ (X5-РЅРѕСЂРјР°Р»РёР·Р°С†РёСЏ РІ StateExtractor)
-    local spellType = stats and stats.SpellType or "Object"
+    local spellType = stats and stats.SpellType or "Target"
     local target = resolveEntity(data.target_id or "")
     local pos = data.position
 
-    local ok, err = enqueueCastRequest(actor, spellName, target, pos and pos.x, pos and pos.y, pos and pos.z, spellType)
-    if not ok then
-        -- Fallback: РєРѕРїСЊС‘ РїРѕРґР°Р»СЊС€Рµ РѕС‚ pipeline, С‡РµСЃС‚РЅС‹С… AP РЅРµ РіР°СЂР°РЅС‚РёСЂСѓРµС‚
+    -- v0.8.17: pcall-обёртка enqueueCastRequest — ловим точную ошибку API вместо всплытия.
+    local ok, err
+    local insertAtFront = data.insert_at_front == true
+    local useOsiSpell = data.use_osi_spell == true
+    local queueName = data.queue
+    local forceFlags = data.force_flags == true
+    local oseiOk, oseiRes, oseiEntry
+    if useOsiSpell then
+        -- Реальный игровой каст (v0.8.19, доказано вживую) — прямой Osi.UseSpell.
+        -- Стабильное знание из экспериментов:
+        --  * голое имя ("FireBolt") даёт story-запись без игрового каста;
+        --  * реальный каст идёт по прототипному имени ОСЕЙ (Projectile_FireBolt),
+        --    которое у актора есть в книге (Osi.HasSpell(actor, sid) == 1);
+        --  * рабочий вари�ант — 3-арг. overload UseSpell(actor, sid, target)
+        --    (без withoutMove: строка в нём давала "Number expected for argument 6").
+        -- Пробуем кандидатов, приоритет у имён из книги кастера.
+        local spellCandidates = { spellName, "Projectile_" .. spellName, "Target_" .. spellName }
+        local knownNames = {}
+        local knownAdded = {}
+        for _, sid in ipairs(spellCandidates) do
+            if Osi and Osi.HasSpell then
+                local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
+                if hOK and tostring(hRes) == "1" and not knownAdded[sid] then
+                    knownNames[#knownNames + 1] = sid
+                    knownAdded[sid] = true
+                end
+            end
+        end
+        for _, sid in ipairs(spellCandidates) do
+            if not knownAdded[sid] then
+                knownNames[#knownNames + 1] = sid
+            end
+        end
+        if target then
+            for _, sid in ipairs(knownNames) do
+                if not oseiOk then
+                    oseiOk, oseiRes = pcall(Osi.UseSpell, actor, sid, target)
+                end
+            end
+        elseif pos then
+            oseiOk, oseiRes = pcall(Osi.UseSpellAtPosition, actor, spellName, pos.x, pos.y, pos.z)
+            if not oseiOk then
+                oseiOk, oseiRes = pcall(Osi.UseSpellAtPosition, actor, spellName, pos.x, pos.y, pos.z, 0)
+            end
+        else
+            ok = false
+            err = "use_osi_spell: no target or position"
+        end
+        if target or pos then
+            ok = oseiOk
+            err = oseiOk and nil or tostring(oseiRes)
+        end
+    else
+        local enqOk, enqRes, enqErr = pcall(function()
+            return enqueueCastRequest(actor, spellName, target, pos and pos.x, pos and pos.y, pos and pos.z, spellType, insertAtFront, queueName, forceFlags)
+        end)
+        if enqOk and enqRes == true then
+            ok, err = true, nil
+        else
+            ok = false
+            err = enqOk and enqErr or tostring(enqRes)
+        end
+    end
+    if not ok and not useOsiSpell then
+        -- Fallback: РєРѕРїСЊС‘ РїРѕРґР°Р»СЊС€Рµ РѕС‚ pipeline, С‡РµСЃС‚РЅС‹С… AP РЅРµ РіР°СЂР°РЅС‚РёСЂСѓРµС‚.
         if pos then
-            ok, err = pcall(Osi.UseSpellAtPosition, actor, spellName, pos.x, pos.y, pos.z, nil)
+            ok, err = pcall(Osi.UseSpellAtPosition, actor, spellName, pos.x, pos.y, pos.z, 0)
         elseif target then
-            ok, err = pcall(Osi.UseSpell, actor, spellName, target, nil, nil)
+            ok, err = pcall(Osi.UseSpell, actor, spellName, target, "", 1)
         end
     end
 
     if not ok then
-        return false, nil, "action_failed", tostring(err)
+        -- v0.8.17: прикладываем диагноз доступности каст-API к результату, чтобы
+        -- не приходилось гадать по "attempt to call a nil value": какой именно API nil.
+        local diag = castApiDiag()
+        diag.enqueue_error = tostring(err)
+        diag.probe = probeCastVariants(actor, spellName, target)
+        _P("[BG3Neuro] cast '" .. spellName .. "' failed: " .. tostring(err))
+        return false, nil, "action_failed", tostring(err), diag
     end
 
     pendingCasts[#pendingCasts + 1] = { id = action.id, spell = spellName, caster = actor }
@@ -1388,24 +2160,6 @@ local function executeDialogueOption(action)
     return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” DialogEnded)
 end
 
--- v0.8.14: actor для move/attack без explicit — story-лэтч (resolveActingCharacter),
--- как в end_turn: пустой actor резолвился в nil (resolveEntity("") = nil) и действия
--- падали с "Could not resolve the movement/attacker actor".
-local function resolveCombatActor(explicit)
-    if explicit ~= nil and explicit ~= "" then
-        local via = resolveEntity(explicit)
-        if via ~= nil then
-            return via
-        end
-        return explicit
-    end
-    local raw = resolveActingCharacter("")
-    if raw ~= nil and raw ~= "" then
-        return raw
-    end
-    return nil
-end
-
 local function executeMoveToTarget(action)
     local data = action.data
     local actor = resolveCombatActor(data.actor)
@@ -1452,15 +2206,74 @@ local function executeAttack(action)
     -- РџСЂРµСЂС‹РІР°РµРј Р°РєС‚РёРІРЅРѕРµ РґРІРёР¶РµРЅРёРµ (РґРІРёР¶РµРЅРёРµ Рё Р°С‚Р°РєР° РЅРµ РїРµСЂРµСЃРµРєР°СЋС‚СЃСЏ)
     cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ Р°С‚Р°РєРѕР№", action.id)
 
-    -- В§6.4: party-Р°С‚Р°РєРё С‡РµСЂРµР· ServerCastRequest СЃ РѕСЂСѓР¶РµР№РЅС‹Рј Р·Р°РєР»РёРЅР°РЅРёРµРј СѓСЂРѕРІРЅСЏ
-    -- Target_WeaponRange РІРЅРµРґСЂСЏРµС‚СЃСЏ РІРјРµСЃС‚Рµ СЃ РєР°СЃС‚-РјР°С€РёРЅРµСЂРёРµР№ (СЃР»РµРґСѓСЋС‰РёР№ С‚Р°РєС‚);
-    -- Р·РґРµСЃСЊ вЂ” РґРѕРєСѓРјРµРЅС‚РёСЂРѕРІР°РЅРЅС‹Р№ fallback Osi.Attack (one-shot). alwaysHit=0 в†’ Р±СЂРѕСЃРѕРє.
-    local ok, err = pcall(Osi.Attack, actor, target, 0)
+    -- В§6.4: party-атаки через оружейное заклинание (реальный боевой удар).
+    -- v0.8.20: переведено с Osi.Attack (one-shot, визуал без броска/журнала для
+    -- игроков) на проверенный вживую путь executeCast.use_osi_spell — Osi.UseSpell
+    -- по прототипному имени ОСЕЙ оружейной атаки (кандидаты MainHandAttack).
+    -- Рабочий вариант — 3-арг. UseSpell(actor, sid, target); побеждает имя из
+    -- книги кастера (Osi.HasSpell == 1). Резолв + броски + журнал идут в игре.
+    local attackCandidates = {
+        "MainHandAttack", "Projectile_MainHandAttack", "Target_MainHandAttack",
+        "MainHandRangedAttack", "Projectile_MainHandRangedAttack", "Target_MainHandRangedAttack",
+    }
+    local knownNames = {}
+    local knownAdded = {}
+    for _, sid in ipairs(attackCandidates) do
+        if Osi and Osi.HasSpell then
+            local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
+            if hOK and tostring(hRes) == "1" and not knownAdded[sid] then
+                knownNames[#knownNames + 1] = sid
+                knownAdded[sid] = true
+            end
+        end
+    end
+    for _, sid in ipairs(attackCandidates) do
+        if not knownAdded[sid] then
+            knownNames[#knownNames + 1] = sid
+        end
+    end
+
+    local ok, err
+    local useWeaponSpell = false
+    for _, sid in ipairs(knownNames) do
+        if not ok then
+            ok, err = pcall(Osi.UseSpell, actor, sid, target)
+            if ok then
+                useWeaponSpell = true
+            end
+        end
+    end
+
+    if not ok then
+        -- Документированный fallback для NPC/очередей — Osi.Attack (one-shot, alwaysHit=0).
+        ok, err = pcall(Osi.Attack, actor, target, 0)
+    end
     if not ok then
         return false, nil, "action_failed", tostring(err)
     end
 
-    return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” СЃРѕР±С‹С‚РёРµ Р°С‚Р°РєРё/СЃР»РµРґСѓСЋС‰РёР№ state)
+    -- Честное списание ресурса за атаку: Osi.UseSpell идёт через Osiris, который
+    -- игнорирует пред-условия и сам НЕ тратит Action Point (после живого теста v0.8.21
+    -- все действия в ходу оставались доступны). Списываем 1 AP вручную.
+    -- TODO(полная экономика): перевести атаку на ServerCastRequest с источником
+    -- из SpellBookPrepares (родное списание AP, bonus actions, кулдауны/кунж).
+    if useWeaponSpell then
+        local apOk, apErr = pcall(Osi.AddActionPoints, actor, -1)
+        if not apOk then
+            _P("[BG3Neuro] attack AP spend failed: " .. tostring(apErr))
+        end
+    end
+
+    -- Финализация (running -> результат после броска) через CastedSpell/CastSpellFailed,
+    -- как у каста: запись в pendingCasts матчится finalizeCast по списку-префиксам.
+    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = "MainHandAttack", caster = actor }
+    -- Если сработал fallback Osi.Attack — событий CastedSpell/CastSpellFailed может
+    -- не быть; финализируем результат сразу (one-shot завершился).
+    if not useWeaponSpell then
+        writeResult(action.id, true, false, nil, nil)
+        return true, false, nil, nil
+    end
+    return true, true, nil, nil -- success, running (финал — событие оружейной атаки)
 end
 
 -- ============================================================
@@ -1580,7 +2393,7 @@ end
 
 local function executeToggleMode(action)
     -- toggle_mode: v1 РїСЂРёРЅРёРјР°РµС‚ С‚РѕР»СЊРєРѕ "normal" (X3, stealth СѓР±СЂР°РЅ) вЂ” C# СѓР¶Рµ РѕС‚СЃРµРє РёРЅРѕРµ.
-    -- Р РµР¶РёРј normal вЂ” РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ Р±РµР· РёРіСЂРѕРІРѕРіРѕ РІС‹Р·РѕРІР°, РјРіРЅРѕРІРµРЅРЅС‹Р№ С„РёРЅР°Р».
+    -- Р РµР¶РёРј normal вЂ” РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ Р±РµР· РёРіСЂРѕРІРѕРіРѕ РІС‹Р·РѕРІР°, РјРіРЅРѕРІРµРЅРЅС‹Р№ С„РёРЅР°Р».
     return true, nil, nil, nil
 end
 
@@ -1796,6 +2609,24 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
 
     if name == "cast_spell" then
         return executeCast(action)
+    end
+
+    if name == "q_cast" or name == "q_sys" then
+        -- v0.8.18: снимок ВСЕХ очередей CastRequestSystem.
+        local qInfo = { id = action.id or name }
+        local queues = readCastQueues()
+        if queues.error then
+            return { id = qInfo.id, running = false, success = false, error_detail = queues.error }
+        end
+        qInfo.queues = queues
+        local resp = { id = qInfo.id, running = false, success = true, info = qInfo }
+        return resp
+    end
+
+    if name == "q_capture" then
+        -- v0.8.18+: дамп живых каст-сущностей (ground truth для сравнения с синтетикой).
+        local cap = dumpCastEntities(action.id or "q_capture")
+        return { id = action.id or name, running = false, success = true, captures = cap }
     end
 
     if name == "select_dialogue_option" then
