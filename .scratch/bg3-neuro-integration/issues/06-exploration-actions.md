@@ -7,55 +7,55 @@ Depended by: 07
 
 ## Answer
 
-Exploration Action Schemas — финальные. (Доработано в диалоге.)
+Exploration Action Schemas — final. (Refined in dialogue.)
 
-### Набор действий
+### Action set
 
-**Общий параметр всех действий: `actor?: string`** — псевдоним контролируемого персонажа (из state). Обязателен при `controlledPartySize > 1`, опускается при `party = 1`. Аналогично боевым действиям (04).
+**Common parameter of all actions: `actor?: string`** — alias of the controlled character (from state). Required when `controlledPartySize > 1`, omitted when `party = 1`. Analogous to combat actions (04).
 
-| # | Действие | Параметры | Описание |
+| # | Action | Parameters | Description |
 |---|---|---|---|
-| 1 | `move_to_entity` | `actor?: string`, `target_id: string` | Переместиться к цели |
-| 2 | `interact_with` | `actor?: string`, `target_id: string`, `interaction_type?: string` | Взаимодействовать с объектом |
-| 3 | `loot` | `actor?: string`, `target_id: string` | Собрать добычу с трупа/контейнера |
-| 4 | `open_map` | `actor?: string` | Открыть карту (просмотр) |
-| 5 | `open_inventory` | `actor?: string` | Открыть инвентарь (просмотр) |
-| 6 | `toggle_mode` | `actor?: string`, `target_id?: string`, `mode: "normal"` | Переключить режим |
-| 7 | `rest` | `actor?: string`, `rest_type: "full" \| "partial"` | Отдохнуть |
-| 8 | `travel_to` | `actor?: string`, `destination: string`, `region_id?: string` | Путешествовать в локацию |
+| 1 | `move_to_entity` | `actor?: string`, `target_id: string` | Move to the target |
+| 2 | `interact_with` | `actor?: string`, `target_id: string`, `interaction_type?: string` | Interact with an object |
+| 3 | `loot` | `actor?: string`, `target_id: string` | Loot a corpse/container |
+| 4 | `open_map` | `actor?: string` | Open the map (view) |
+| 5 | `open_inventory` | `actor?: string` | Open the inventory (view) |
+| 6 | `toggle_mode` | `actor?: string`, `target_id?: string`, `mode: "normal"` | Switch mode |
+| 7 | `rest` | `actor?: string`, `rest_type: "full" \| "partial"` | Rest |
+| 8 | `travel_to` | `actor?: string`, `destination: string`, `region_id?: string` | Travel to a location |
 
-### По каждому действию
+### Per action
 
-**1. `move_to_entity`** — `target_id` по псевдониму осведомлённого объекта.
+**1. `move_to_entity`** — `target_id` by the alias of an aware object.
 
-**2. `interact_with`** — E4: свободный `interaction_type` (не enum!) из state:
+**2. `interact_with`** — E4: free-form `interaction_type` (not an enum!) from the state:
 ```json
 { "target_id": "wooden_door", "interaction_type": "lockpick" }
 ```
-- Соответствует BEST_PRACTICES: изменяющийся набор взаимодействий → свободный параметр + runtime-валидация
-- В state (03) показывать доступные взаимодействия: `wooden_door (закрыта, 3м): [открыть, заламать, толкнуть]`
-- Валидация: несоответствие → failure с actionable message («У двери доступны: открыть, заламать, толкнуть»)
-- `interaction_type` опущен → дефолт (первый/«открыть»)
+- Matches BEST_PRACTICES: a changing set of interactions → free-form parameter + runtime validation
+- In the state (03) show the available interactions: `wooden_door (closed, 3m): [open, bash, shove]`
+- Validation: mismatch → failure with an actionable message («The door has available: open, bash, shove»)
+- `interaction_type` omitted → default (first/«open»)
 
-**3. `loot`** — E5: отдельное действие (частый жест в BG3, Neuro заказывает явно).
+**3. `loot`** — E5: separate action (a frequent gesture in BG3, Neuro orders it explicitly).
 
-**4/5. `open_map` / `open_inventory`** — E3: **вариант B** — просмотр + существующие действия.
-- `open_map` → state экрана карты (локации/области для `travel_to`)
-- `open_inventory` → state инвентаря (вещи; использование — через `use_item` из combat-схем)
-- Экипировка/дроп/сортировка/торговля — out of scope
+**4/5. `open_map` / `open_inventory`** — E3: **variant B** — view + existing actions.
+- `open_map` → map screen state (locations/areas for `travel_to`)
+- `open_inventory` → inventory state (items; usage — via `use_item` from the combat schemas)
+- Equip/drop/sort/trade — out of scope
 
-**6. `toggle_mode`** — E2: `target_id?` (по умолчанию активный; обязателен при партии) + `mode` enum. **X3 (тикет 07): в v1 enum — только `["normal"]`, `"stealth"` убран** — нет публичного Osiris-API переключения скрытности (клиентская механика; ApplyStatus — хрупко, имена статусов меняются). `"stealth"` вернётся, когда появится устойчивое решение (client-UI / status experiment).
+**6. `toggle_mode`** — E2: `target_id?` (default: the active one; required when party > 1) + `mode` enum. **X3 (ticket 07): in v1 the enum is only `["normal"]`, `"stealth"` removed** — no public Osiris API for toggling stealth (client-side mechanic; ApplyStatus — fragile, status names change). `"stealth"` will return when a stable solution appears (client-UI / status experiment).
 
-**7. `rest`** — E1: `rest_type` enum [full, partial]. Neuro выбирает, сколько припасов тратить.
+**7. `rest`** — E1: `rest_type` enum [full, partial]. Neuro chooses how many supplies to spend.
 
-**8. `travel_to`** — E2 (уточнено): `destination` = **название региона** (primary); `region_id?` — опционально, для однозначности при неоднозначных названиях. State (03 S5.4) показывает соответствие `[Название области (id: xxx)]` с дистанцией в гибридном формате.
+**8. `travel_to`** — E2 (refined): `destination` = **region name** (primary); `region_id?` — optional, for disambiguation with ambiguous names. The state (03 S5.4) shows the mapping `[Region name (id: xxx)]` with distance in hybrid format.
 
-### Примечания
+### Notes
 
-- Переход в бой из исследования — автоматический (DecisionLoop, тикет 01), не через действия.
-- Псевдонимы и осведомлённость — из тикетов 01, 03.
-- UI-клики внутри map/inventory — не даются Neuro (только просмотр state).
+- Combat transition from exploration — automatic (DecisionLoop, ticket 01), not via actions.
+- Aliases and awareness — from tickets 01, 03.
+- UI clicks inside map/inventory — not given to Neuro (state view only).
 
-### Формат регистрации
+### Registration format
 
-Как `Action` (SPECIFICATION.md): name, description (plain text), schema (JSON Schema object). Эти действия регистрируются на старте (persistent, см. 05 D2).
+As an `Action` (SPECIFICATION.md): name, description (plain text), schema (JSON Schema object). These actions are registered at startup (persistent, see 05 D2).

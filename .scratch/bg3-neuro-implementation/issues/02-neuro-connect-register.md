@@ -1,20 +1,20 @@
-# 02: Neuro-подключение + регистрация 17 действий
+# 02: Neuro connection + registration of 17 actions
 
-**What to build:** C#-процесс подключается к серверу Neuro (SDK WebSocket, связка с Randy на тестах), делает startup-рукопожатие и один раз регистрирует фиксированный набор из 17 действий (схемы §5.4: 8 боевых, 1 диалоговое, 8 exploration). Регистрация не меняется в рантайме (решение B): входящий `actions/reregister_all` лишь повторяет регистрацию того же набора. Реконнект WS при разрыве с корректной последовательностью startup → register.
+**What to build:** The C# process connects to the Neuro server (WebSocket SDK, wired to Randy in tests), performs the startup handshake, and registers a fixed set of 17 actions once (schemas §5.4: 8 combat, 1 dialogue, 8 exploration). Registration does not change at runtime (decision B): an incoming `actions/reregister_all` merely re-registers the same set. WS reconnect on drop with the correct startup → register sequence.
 
-**Blocked by:** 01 (конфиг: адрес/порт сервера, имя группы действий).
+**Blocked by:** 01 (config: server address/port, action group name).
 
 **Status:** done
 
-- [x] `NeuroWebSocketClient`: connect с автореконнектом; startup-сообщение отправлено и подтверждено.
-- [x] Зарегистрированы все 17 действий с точными схемами §5.4 (JSON-схемы зафиксированы в коде как статический реестр).
-- [x] Поведение при `actions/reregister_all`: перерегистрация того же набора, без дубликатов.
-- [x] Никакой динамической регистрации в рантайме (в v1 набор неизменяем); проверено тестом, что регистрация стабильна между реконнектами.
-- [x] Интеграционный тест: подключение к Randy, регистрация, перерегистрация.
+- [x] `NeuroWebSocketClient`: connect with auto-reconnect; startup message sent and acknowledged.
+- [x] All 17 actions registered with exact §5.4 schemas (JSON schemas pinned in code as a static registry).
+- [x] Behavior on `actions/reregister_all`: re-registration of the same set, no duplicates.
+- [x] No dynamic registration at runtime (in v1 the set is immutable); a test verifies that registration is stable across reconnects.
+- [x] Integration test: connect to Randy, register, re-register.
 
-## Итог
-- `ActionRegistry` + статический реестр 17 схем из `action_schemas.json` (embedded resource).
-- `NeuroWebSocketClient`: startup-рукопожатие, `actions/register`, авто-ответ на `actions/reregister_all`, обработка входящего `action`, camelCase-сериализация.
-- Юнит-тесты на FakeNeuroServer — 38/38 зелёные.
-- Интеграционный тест на реальный Randy (`RandyIntegrationTests`): 17 действий регистрируются без дубликатов, повторная регистрация после `reregister_all`, входящее `action end_turn` приходит и отвечается `actions/result` (ложное действие через HTTP POST `/` на случайном порту) — **весь набор тестов 37/37 зелёный**.
-- Randy пропатчен для тестов: порты WS/HTTP из env (`RANDY_WS_PORT`/`RANDY_HTTP_PORT`, default 8000/1337).
+## Summary
+- `ActionRegistry` + static registry of 17 schemas from `action_schemas.json` (embedded resource).
+- `NeuroWebSocketClient`: startup handshake, `actions/register`, auto-respond to `actions/reregister_all`, incoming `action` handling, camelCase serialization.
+- Unit tests against FakeNeuroServer — 38/38 green.
+- Integration test against real Randy (`RandyIntegrationTests`): 17 actions registered without duplicates, re-registration after `reregister_all`, an incoming `action end_turn` arrives and is answered with `actions/result` (fake action via HTTP POST `/` on a random port) — **the full test suite 37/37 green**.
+- Randy patched for tests: WS/HTTP ports from env (`RANDY_WS_PORT`/`RANDY_HTTP_PORT`, default 8000/1337).

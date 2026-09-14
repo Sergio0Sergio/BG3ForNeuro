@@ -1,17 +1,17 @@
-# 08: Exploration: движение/взаимодействие/лут + простые действия
+# 08: Exploration: movement/interaction/loot + simple actions
 
-**What to build:** Всё, что Neuro может делать вне боя: exploration-state с осведомлённостью (что вокруг и с какой дистанцией), `move_to_entity` (перемещение к существу/объекту), `interact_with` (свободный `interaction_type` из state; несоответствие → actionable failure с перечнем доступных вариантов), `loot`, `rest` (full/partial), `travel_to` (по названию региона, `region_id` опционально), `toggle_mode [normal]` (stealth недоступен — X3), `open_map`/`open_inventory` (только просмотр → state экрана). Отдых требует лагеря и припасов → `no_camp`.
+**What to build:** Everything Neuro can do outside combat: an exploration state with awareness (what is around and at what distance), `move_to_entity` (movement to a creature/object), `interact_with` (free-form `interaction_type` from the state; a mismatch → actionable failure with the list of available options), `loot`, `rest` (full/partial), `travel_to` (by region name, `region_id` optional), `toggle_mode [normal]` (stealth unavailable — X3), `open_map`/`open_inventory` (view-only → screen state). Rest requires a camp and supplies → `no_camp`.
 
-**Blocked by:** 03 (боевой цикл/execution-шаблон), 05 (переиспользование coverage для расстояний/осведомлённости — при желании объединить с 08).
+**Blocked by:** 03 (combat loop/execution pattern), 05 (reusing coverage for distances/awareness — optional, could be merged with 08).
 
 **Status:** done
 
-- [x] Exploration-state показывает ближайшие интерактивные объекты/существа с дистанцией (гибридный формат §3.3) и доступные взаимодействия.
-- [x] `move_to_entity`, `interact_with`, `loot` выполняются вне боя; interaction_type невалиден → actionable failure (список доступных).
-- [x] `travel_to`: матч по названию региона (primary), по `region_id` при задании; неизвестное название → failure.
-- [x] `rest` full/partial: проверка лагеря/припасов → `no_camp` при отсутствии; сон в игре выполнен.
-- [x] `toggle_mode` принимает только `"normal"`; `"stealth"` → отклонение с объяснением (X3).
-- [x] `open_map`/`open_inventory` дают state экрана; торговля/экипировка/дроп — вне scope (не вводить).
-- [x] Сквозной тест: перемещение→взаимодействие→лут по реальному state.
+- [x] Exploration state shows the nearest interactive objects/creatures with distance (hybrid §3.3 format) and available interactions.
+- [x] `move_to_entity`, `interact_with`, `loot` execute outside combat; an invalid interaction_type → actionable failure (list of available ones).
+- [x] `travel_to`: match by region name (primary), by `region_id` when given; unknown name → failure.
+- [x] `rest` full/partial: camp/supplies check → `no_camp` when missing; the in-game sleep is performed.
+- [x] `toggle_mode` accepts only `"normal"`; `"stealth"` → rejected with an explanation (X3).
+- [x] `open_map`/`open_inventory` give the screen state; trading/equipping/dropping — out of scope (do not introduce).
+- [x] End-to-end test: movement→interaction→loot on the real state.
 
-**Итог:** 134/134 тестов, сборка 0 предупреждений/ошибок, node 0. Lua v0.6.0 (не исполняется в CI — структурные правки: `Osi.Use` isInteraction для `interact_with`, `MoveAllLootableItemsTo`/`OpenCharacterLootUI` для `loot`, `RequestLongRest`(full) + listeners `LongRestFinished/Cancelled/StartFailed` для `rest`; `travel_to`/`open_map`/`open_inventory`/partial-rest — структурные `running:true` + TODO (нет подтверждённых публичных API; точный эффект приходит state-генератором, Канал B).
+**Summary:** 134/134 tests, build 0 warnings/errors, node 0. Lua v0.6.0 (not executed in CI — structural changes: `Osi.Use` isInteraction for `interact_with`, `MoveAllLootableItemsTo`/`OpenCharacterLootUI` for `loot`, `RequestLongRest` (full) + listeners `LongRestFinished/Cancelled/StartFailed` for `rest`; `travel_to`/`open_map`/`open_inventory`/partial rest — structural `running:true` + TODO (no confirmed public APIs; the exact effect arrives via the state generator, Channel B).

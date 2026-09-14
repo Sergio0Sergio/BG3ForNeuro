@@ -1,13 +1,13 @@
-# 01: Файловый мост + heartbeat
+# 01: File bridge + heartbeat
 
-**What to build:** Работающий файловый канал между Lua-модом BG3SE и C#-процессом с сигналом живости. C# стартует, читает конфиг (пути, тайминги), наблюдает за файлами BG3→Neuro; Lua-мод в игре подключается, пишет heartbeat (2s) и первое состояние; когда heartbeat протухает (порог 10s), C# помечает мод недоступным (`mod_unavailable`) и продолжает слушать. С двух сторон — устойчивость к пропущенным/частичным записям (файловое окно ~100–250ms поллинга, атомарная замена файла).
+**What to build:** A working file channel between the Lua BG3SE mod and the C# process with a liveness signal. C# starts, reads the config (paths, timings), watches the BG3→Neuro files; the in-game Lua mod connects, writes a heartbeat (2s) and the first state; when the heartbeat goes stale (threshold 10s), C# marks the mod as unavailable (`mod_unavailable`) and keeps listening. On both sides — resilience to missed/partial writes (file window ~100–250ms polling, atomic file replacement).
 
 **Blocked by:** None (can start immediately).
 
 **Status:** ready-for-agent
 
-- [ ] C# `ConfigLoader` читает `config.json`, применяет дефолты из §4 спецификации (`heartbeat_interval_s: 2`, `heartbeat_stale_s: 10`).
-- [ ] C# `IpcClient` поллит heartbeat-файл; перестал обновляться >10s → переход в `mod_unavailable`, лог + событие наверх, продолжение опроса.
-- [ ] Lua-мод стартует под BG3SE, пишет heartbeat каждые 2s и начальный файл состояния.
-- [ ] Сквозной признак: запущенный мод в игре виден C#-процессу «живым»; выгрузка/остановка мода детектится как `mod_unavailable` за порог ~10s.
-- [ ] Unit-тесты: дефолты конфига; вычисление staleness (границы 10s); отбрасывание частичной/пустой записи.
+- [ ] C# `ConfigLoader` reads `config.json`, applies defaults from §4 of the spec (`heartbeat_interval_s: 2`, `heartbeat_stale_s: 10`).
+- [ ] C# `IpcClient` polls the heartbeat file; if it stops updating for >10s → transition to `mod_unavailable`, log + event upward, keep polling.
+- [ ] Lua mod starts under BG3SE, writes a heartbeat every 2s and the initial state file.
+- [ ] End-to-end indicator: a running in-game mod is seen as "alive" by the C# process; mod unload/stop is detected as `mod_unavailable` within a ~10s threshold.
+- [ ] Unit tests: config defaults; staleness computation (10s boundaries); discarding partial/empty writes.

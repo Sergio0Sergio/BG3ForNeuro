@@ -1,13 +1,13 @@
-# 10: CI и smoke: Randy + mock-файлы + ручной чек-лист
+# 10: CI and smoke: Randy + mock files + manual checklist
 
-**What to build:** Готовый к исполнению тестовый стенд проекта. Интеграционные тесты (A/B из §9.3) гоняются против Randy (симулятор Neuro) и мок-файлов вместо реального BG3SE-канала, чтобы вертикали были проверяемы без игры. Smoke-сценарий «подключился → state пришёл → end_turn выполнен → state обновился» выполняется в одну команду/шаг. Ручной регресс-чек-лист §9.5 оформлен как разметка в репозитории (не просто текст спеки).
+**What to build:** A ready-to-run test bench for the project. Integration tests (A/B from §9.3) run against Randy (the Neuro simulator) and mock files instead of the real BG3SE channel, so the verticals are verifiable without the game. The smoke scenario "connected → state arrived → end_turn executed → state updated" runs in a single command/step. The §9.5 manual regression checklist is formatted as markup in the repository (not just spec text).
 
-**Blocked by:** 03 (боевой цикл — ядро смоuk-сценария).
+**Blocked by:** 03 (combat loop — core of the smoke scenario).
 
 **Status:** done
 
-- [x] Тест-стенд: Randy-симулятор + мок-обвязка файлового моста запускаются одной командой, документированы в README. (`README.md`: layout, сборка, `dotnet test` с авто-запуском Randy (env `RANDY_WS_PORT`/`RANDY_HTTP_PORT`, node required), `tests\smoke.ps1` одной командой; слои A/B/C по §9.3)
-- [x] Интеграционные тесты А/B автономны (CI, без игры), зелёные на 03-вертикали. (A: FakeNeuroServer + mock-файлы — бой/диалог/исследование/устойчивость; B: Randy через реальный WS; прогнано 2× **139/139**, node 0 после прогона)
-- [x] Smoke-сценарий (connect → state → end_turn → new state) скриптован и выполняется одним шагом. (`tests\smoke.ps1` + `FullLoopSmokeTests` (без Randy/игры): startup+register+force → end_turn success+action-файл → обновлённый state → новый force; exit code 0/≠0)
-- [x] Ручной регресс-чек-лист §9.5 внесён в репозиторий как executable-ish разметка и покрывает сценарии в игре. (`docs\manual-regression-checklist.md`: бой 1v1/1vмного/AoE/лечение, отказные коды, диалог простой/квестовый/закрытый, исследование move/interact/loot/rest/travel, устойчивость реконнект/рестарт/битый файл; покупка и стелс — out of scope)
-- [x] Пошаговый мануал «установка мода → запуск C# → подключение Neuro» актуален. (README «Запуск C#-процесса и подключение Neuro»: server-контекст BG3SE + pointer на research, config.json с дефолтами, команды запуска, контрольные строки лога)
+- [x] Test bench: the Randy simulator + mock harness for the file bridge start with one command, documented in the README. (`README.md`: layout, build, `dotnet test` with auto-start of Randy (env `RANDY_WS_PORT`/`RANDY_HTTP_PORT`, node required), `tests\smoke.ps1` in one command; layers A/B/C per §9.3)
+- [x] The A/B integration tests are standalone (CI, no game), green on the 03 vertical. (A: FakeNeuroServer + mock files — combat/dialogue/exploration/resilience; B: Randy over a real WS; run 2× **139/139**, 0 node after the run)
+- [x] The smoke scenario (connect → state → end_turn → new state) is scripted and runs in one step. (`tests\smoke.ps1` + `FullLoopSmokeTests` (no Randy/game): startup+register+force → end_turn success+action file → updated state → new force; exit code 0/≠0)
+- [x] The §9.5 manual regression checklist is committed to the repository as executable-ish markup and covers in-game scenarios. (`docs\manual-regression-checklist.md`: combat 1v1/1v many/AoE/healing, rejection codes, dialogue simple/quest/closed, exploration move/interact/loot/rest/travel, resilience reconnect/restart/broken file; buying and stealth — out of scope)
+- [x] The step-by-step manual "install the mod → start C# → connect Neuro" is current. (README "Starting the C# process and connecting Neuro": BG3SE server context + pointer to research, config.json with defaults, startup commands, log reference lines)

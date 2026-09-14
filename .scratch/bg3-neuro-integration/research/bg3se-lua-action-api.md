@@ -83,7 +83,7 @@ Client vs server: **game-action OS calls run in the server Lua context** (`Scrip
 - A long-running blocking Lua loop (or a heavy C++ call it triggers) stutters/freezes the whole game on that thread.
 - Consequences for the executor:
   - **Serialize all commands**: at most one in-flight action per context; enqueue in C# and in Lua.
-  - Keep every handler short and non-blocking; read the command file, dispatch, write the result — target «под секунду», ideally «десятки мс» per action (SPECIFICATION consensus «action/result ASAP, before it happens in-game»).
+  - Keep every handler short and non-blocking; read the command file, dispatch, write the result — target sub-second, ideally tens of milliseconds per action (SPECIFICATION consensus: action/result ASAP, before it happens in-game).
   - Actions that take game time (movement, spell animation) must not be awaited synchronously — fire-and-forget + report completion via an event/callback, not by sleeping on the Lua side.
 
 ## 4. Movement (`move_to_target`, `move_to_entity`, exploration)
@@ -321,37 +321,37 @@ Recommended executor flow per command (maps ticket 07 Q1/Q2/Q3/Q5):
 5. Where equipped items + spell ids come from: settle SpellId normalization (§13) before state extractor schema (03) is finalized.
 ---
 
-## Addendum (2026-09-06): эмпирика live-прогона на SE v32 (Patch 8 + HotFix 9)
+## Addendum (2026-09-06): empirical findings from a live run on SE v32 (Patch 8 + HotFix 9)
 
-Проверено в живой сессии (bootstrap server-контекста, `Ext.Utils.GameVersion()="v4.73.98.727"`).
+Verified in a live session (bootstrap server context, `Ext.Utils.GameVersion()="v4.73.98.727"`).
 
-### Реальные сигнатуры событий (источник: `Story\RawFiles\Goals\*.txt` из `Shared.pak`+`Patch8_HotFix9.pak`)
+### Real event signatures (source: `Story\RawFiles\Goals\*.txt` from `Shared.pak`+`Patch8_HotFix9.pak`)
 
-| Событие | Сигнатура | Подтверждение |
+| Event | Signature | Confirmation |
 | --- | --- | --- |
 | `CharacterMoveToCancelled` | 2 (`_Char,_ID`) | `__PROC.txt` |
 | `CastSpell` / `CastedSpell` | 5 (`_Caster,_Spell,_SpellType,_SpellElement,_StoryActionID`) | `__PROC.txt` + live capture `@5` |
-| `CastSpellFailed` | 5 (та же сигнатура, что CastedSpell) | `__PROC.txt` |
+| `CastSpellFailed` | 5 (same signature as CastedSpell) | `__PROC.txt` |
 | `DialogStarted` / `DialogEnded` | 2 (`_Dialog,_Inst`) | `__GLOBAL_Dialogs.txt` + live capture `@2` |
-| `DialogStarting` | **не событие** | отсутствует в raws; регистрация молча фейлится |
+| `DialogStarting` | **not an event** | absent from raws; registration silently fails |
 | `LongRestFinished` / `LongRestCancelled` / `LongRestStartFailed` | **0** | `GLO_Camp.txt` (`LongRestCancelled()`, `LongRestStartFailed()`, `LongRestStarted()`, `LongRestFinished()`) |
 
-### Поведение `Ext.Osiris.RegisterListener` в SE v32
+### `Ext.Osiris.RegisterListener` behavior on SE v32
 
-- Сигнатура: `RegisterListener(name, arity, "after"/"before", handler)`. Долгоживущие листенеры из
-  bootstrap не требуют id-стрint; лишний 3-й аргумент в старых примерах — не id, а фаза события.
-- Регистрация с арностью, отличной от объявления события, **молча не регистрирует**: в логе
+- Signature: `RegisterListener(name, arity, "after"/"before", handler)`. Long-lived listeners from
+  bootstrap do not require an id string; the extra 3rd argument in old examples is not an id but the event phase.
+- Registering with an arity that differs from the event's declaration **silently does not register**: the log shows
   `Couldn't register Osiris subscriber for <Name>/<arity>: Symbol not found in story`.
-- `pcall(RegisterListener(...))` при этом возвращает `true` — **ошибку видно только в логе
-  `Script Extender Logs\Extender Runtime …log`**; по имени с неверной arity «Symbol not found»
-  появляется на любой арности, включая 0.
-- Вывод в лог: `_P(...)` работает, `Ext.Print`/`Ext.PrintError` в этом билде = `nil`.
+- `pcall(RegisterListener(...))` returns `true` — **the error is only visible in
+  `Script Extender Logs\Extender Runtime …log`**; for a name with the wrong arity, "Symbol not found"
+  appears for any arity, including 0.
+- Logging: `_P(...)` works, `Ext.Print`/`Ext.PrintError` in this build = `nil`.
 
-### Песочница: что чего нет
+### Sandbox: what is/isn't there
 
-- `os` — `nil` (нет `os.date`/`os.time`); время — `Ext.Timer.ClockTime()` = `"YYYY-MM-DD HH:MM:SS.fffffff"`
-  (UTC, пробел, без `Z`) → нормировка `(s):gsub(" ", "T") .. "Z"` даёт ISO-8601, читаемый
-  `DateTimeOffset` на C#; есть `Ext.Timer.ClockEpoch()` (секунды).
-- `Ext.IO.SaveFile/LoadFile` — относительно `<профиль>\Script Extender\` (подкаталог `BG3Neuro\` —
-  файлы `heartbeat.json`, `bg3_to_neuro.json`, `neuro_to_bg3.json`, `result_*.json`).
-- `math` есть; `Ext.Json.Stringify/Parse` работают.
+- `os` — `nil` (no `os.date`/`os.time`); time — `Ext.Timer.ClockTime()` = `"YYYY-MM-DD HH:MM:SS.fffffff"`
+  (UTC, space, no `Z`) → normalizing `(s):gsub(" ", "T") .. "Z"` yields ISO-8601, readable by
+  `DateTimeOffset` on C#; `Ext.Timer.ClockEpoch()` exists (seconds).
+- `Ext.IO.SaveFile/LoadFile` — relative to `<profile>\Script Extender\` (subdirectory `BG3Neuro\` —
+  files `heartbeat.json`, `bg3_to_neuro.json`, `neuro_to_bg3.json`, `result_*.json`).
+- `math` exists; `Ext.Json.Stringify/Parse` work.

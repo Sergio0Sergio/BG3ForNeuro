@@ -7,17 +7,17 @@ Depended by: 07
 
 ## Answer
 
-Dialogue Action Schemas — финальные. (Доработано в диалоге.)
+Dialogue Action Schemas — final. (Refined in dialogue.)
 
-### Действие
+### Action
 
-**Одно действие — `select_dialogue_option`** (D1). Уходить/прерывать/пропускать — обычные варианты в state (BG3 предоставляет их в списке ответов). Никаких `skip_dialogue`/`end_dialogue`.
+**One action — `select_dialogue_option`** (D1). Leaving/interrupting/skipping — regular options in the state (BG3 provides them in the answer list). No `skip_dialogue`/`end_dialogue`.
 
-**Схема:**
+**Schema:**
 ```json
 {
   "name": "select_dialogue_option",
-  "description": "Выбрать один из предложенных вариантов ответа в диалоге.",
+  "description": "Select one of the proposed dialogue response options.",
   "schema": {
     "type": "object",
     "required": ["option_index"],
@@ -29,48 +29,48 @@ Dialogue Action Schemas — финальные. (Доработано в диа�
 }
 ```
 
-- `option_index` — **primary**: номер варианта, совпадающий с порядком в UI окна диалога BG3 (1-based, см. тикет 03 S4). Совпадает со стример-модом.
-- `option_text` — fallback: если Neuro написала текст, но пропустила индекс, плагин сам матчит по тексту и подставляет индекс.
+- `option_index` — **primary**: the option number, matching the order in the BG3 dialogue window UI (1-based, see ticket 03 S4). Matches streamer mode.
+- `option_text` — fallback: if Neuro wrote the text but missed the index, the plugin matches by text itself and substitutes the index.
 
-### Динамическая регистрация — PERSISTENT (D2)
+### Dynamic registration — PERSISTENT (D2)
 
-`select_dialogue_option` регистрируется **один раз на старте** (вместе с боевыми и исследовательскими действиями). Никакой рега/дерега при открытии/закрытии диалога.
+`select_dialogue_option` is registered **once at startup** (together with the combat and exploration actions). No reg/dereg when opening/closing a dialogue.
 
-- Неактивный диалог → валидация возвращает failure: «Сейчас нет активного диалога.»
-- Соответствует BEST_PRACTICES: "Register everything you can once at startup, and avoid rapidly registering and unregistering actions".
-- Защита от гонок: диалог закрылся, Neuro с запозданием шлёт выбор → failure, а не отсутствующее действие.
+- Inactive dialogue → validation returns a failure: «There is no active dialogue right now.»
+- Matches BEST_PRACTICES: "Register everything you can once at startup, and avoid rapidly registering and unregistering actions".
+- Race protection: the dialogue closed, Neuro sends the choice late → failure, not a missing action.
 
-### Контекст диалога (state, D5)
+### Dialogue context (state, D5)
 
 ```markdown
-## Диалог: Astarion (отношение: нейтральное)
+## Dialogue: Astarion (attitude: neutral)
 
-Astarion: «Я не думаю, что нам стоит идти туда...»
+Astarion: "I don't think we should go there..."
 
-## Варианты ответа
-1. «Мы должны идти. Это важно.»
-2. «Ты прав, отложим это.»
-3. «У меня есть вопрос о Cazador.» [Persuasion]
-4. [Уйти из диалога]
+## Reply options
+1. "We must go. This is important."
+2. "You're right, let's postpone it."
+3. "I have a question about Cazador." [Persuasion]
+4. [Leave the dialogue]
 ```
 
-- Заголовок: с кем говорит + отношение (видимая игроку часть)
-- Последняя реплика NPC
-- Варианты с подсказками типов ([Persuasion] и т.д., из S4)
-- Репутационные числа (математику) не показывать — только то, что игрок видит
-- Номер варианта = порядок в UI окна
+- Header: who is speaking with + attitude (the player-visible part)
+- The last NPC line
+- Options with type hints ([Persuasion], etc., from S4)
+- Don't show reputation numbers (the math) — only what the player sees
+- Option number = order in the UI window
 
-### Граничные случаи
+### Edge cases
 
-**Forced dialogue (враг атакует во время диалога)** (D4):
-- Диалог прерывается игрой автоматически
-- DecisionLoop переключает state режима: combat > dialogue (внезапная атака)
-- `select_dialogue_option` остаётся зарегистрированным (persistent), валидация вернёт failure, если нет активного диалога
+**Forced dialogue (an enemy attacks during dialogue)** (D4):
+- The dialogue is interrupted by the game automatically
+- DecisionLoop switches the state mode: combat > dialogue (surprise attack)
+- `select_dialogue_option` stays registered (persistent), validation will return a failure if there is no active dialogue
 
 ### Out of scope
 
-**Торговля (покупка/продажа)** (D3) — вне этого тикета и всей карты. «[Торговля]» в диалоге — обычный вариант; выбор открывает торговый экран — отдельный тип UI (вне scope). Отмечено в Out of scope карты.
+**Trading (buy/sell)** (D3) — outside this ticket and the whole map. «[Trading]» in dialogue is a regular option; selecting it opens the trading screen — a separate UI type (outside scope). Noted in the map's Out of scope.
 
-### Формат регистрации
+### Registration format
 
-Как `Action` (SPECIFICATION.md): name, description (plain text), schema (JSON Schema object, type object). Требования enum/стабильности — из BEST_PRACTICES.md.
+As an `Action` (SPECIFICATION.md): name, description (plain text), schema (JSON Schema object, type object). Enum/stability requirements — from BEST_PRACTICES.md.

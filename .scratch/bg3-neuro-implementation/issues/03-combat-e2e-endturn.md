@@ -1,16 +1,16 @@
-# 03: Боевой E2E «end_turn» (первый полный путь)
+# 03: Combat E2E «end_turn» (first complete path)
 
-**What to build:** Первая законченная вертикаль Neuro → C# → Lua → игра → result → state. Neuro получает боевой state (кто чей ход, controlled персонажи, стороны), шлёт `end_turn`; C#-валидатор проверяет, что действительно ход контролируемого; пишется action-файл; Lua-исполнитель зовёт `Osi.EndTurn`; C# получает result, отвечает Neuro `action/result`, и следующий state отражает нового актора хода. Валидация возвращается мгновенно (Канал A, R6), никто не ждёт игрового эффекта по таймеру.
+**What to build:** The first complete vertical Neuro → C# → Lua → game → result → state. Neuro receives the combat state (whose turn it is, controlled characters, sides), sends `end_turn`; the C# validator checks that it is indeed the controlled character's turn; the action file is written; the Lua executor calls `Osi.EndTurn`; C# receives the result, replies to Neuro with `action/result`, and the next state reflects the new turn actor. Validation returns instantly (Channel A, R6); nobody waits for the in-game effect on a timer.
 
-**Blocked by:** 01 (файловый мост), 02 (цикл Neuro↔C#).
+**Blocked by:** 01 (file bridge), 02 (Neuro↔C# loop).
 
 **Status:** done
 
-- [x] Боевой state в формате §3 (chrome/context/entities, controlled-персонаж, чей ход, AP) доходит до Neuro. — `DecisionLoop.MaybeForceAsync` шлёт `actions/force` с markdown-state на каждый ход контролируемого (тест `TurnAdvances_NewStateSendsForce_WithNextActor`).
-- [x] Входящее `end_turn`: ActionRouter валидирует фазу («сейчас ход контролируемого»); неверная фаза → actionable failure (Канал A, `wrong_phase`). — `EndTurn_WhenEnemyTurn_FailsWithWrongPhase_NoActionFile` + юнит `ActionRouterTests`.
-- [x] Проверенная команда выполняется в игре: ход реально заканчивается, следующий ход у следующего актора. — Lua `ActionExecutor` (v0.2.0) вызывает `Osi.EndTurn`; смена актора проверена в `TurnAdvances...` (state отражает Shadowheart на ходу).
-- [x] `action/result` отправляется сразу после валидации; успех/ошибка в едином формате §6.5. — `EndTurn_OnControlledTurn_WritesActionFile_AndSendsSuccessResult` (+ юнит `SendResult`).
-- [x] Обновлённый state после хода уходит Neuro. — DecisionLoop реагирует на `StateChanged`, шлёт force с новым актором (`TurnAdvances...`, force не дублируется: `UnchangedState_DoesNotResendForce`).
-- [x] Сквозной тест: Neuro-симулятор (тикет 02) шлёт `end_turn` в бою → проверка конца хода по state. — `RandyDecisionLoopIntegrationTests` (3 теста, полный цикл через Randy).
+- [x] Combat state in §3 format (chrome/context/entities, controlled character, whose turn it is, AP) reaches Neuro. — `DecisionLoop.MaybeForceAsync` sends `actions/force` with the markdown state on each controlled character's turn (test `TurnAdvances_NewStateSendsForce_WithNextActor`).
+- [x] Incoming `end_turn`: ActionRouter validates the phase ("currently the controlled character's turn"); wrong phase → actionable failure (Channel A, `wrong_phase`). — `EndTurn_WhenEnemyTurn_FailsWithWrongPhase_NoActionFile` + `ActionRouterTests` unit.
+- [x] The validated command executes in the game: the turn actually ends, the next turn belongs to the next actor. — Lua `ActionExecutor` (v0.2.0) calls `Osi.EndTurn`; actor change verified in `TurnAdvances...` (state reflects Shadowheart's turn).
+- [x] `action/result` is sent immediately after validation; success/failure in the unified §6.5 format. — `EndTurn_OnControlledTurn_WritesActionFile_AndSendsSuccessResult` (+ `SendResult` unit).
+- [x] The updated post-turn state goes to Neuro. — DecisionLoop reacts to `StateChanged`, sends a force with the new actor (`TurnAdvances...`, force not duplicated: `UnchangedState_DoesNotResendForce`).
+- [x] End-to-end test: the Neuro simulator (ticket 02) sends `end_turn` in combat → turn end verified from state. — `RandyDecisionLoopIntegrationTests` (3 tests, full loop through Randy).
 
-**Итог:** Вертикаль Neuro → C# (ActionRouter + DecisionLoop) → action-файл → Lua `Osi.EndTurn` → result → обновлённый state уходит Neuro закрыта. Канал A (валидация → `action/result`) без ожидания игрового эффекта по таймеру. Wire-формат клиента переведён на snake_case под §SPECIFICATION. 60/60 зелёных (57 прежних + 3 новых интеграционных), сборка 0 предупреждений, node-процессов после прогона 0.
+**Summary:** The vertical Neuro → C# (ActionRouter + DecisionLoop) → action file → Lua `Osi.EndTurn` → result → updated state to Neuro is closed. Channel A (validation → `action/result`) without waiting for the in-game effect on a timer. Client wire format switched to snake_case per §SPECIFICATION. 60/60 green (57 previous + 3 new integration), build 0 warnings, 0 node processes after the run.

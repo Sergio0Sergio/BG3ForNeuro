@@ -1,30 +1,30 @@
--- BG3Neuro v0.8.17 вЂ” С„Р°Р№Р»РѕРІРѕР№ IPC-РјРѕСЃС‚ (С‚РёРєРµС‚С‹ 01 + 03-09)
--- Р—Р°РґР°С‡Р°: heartbeat 2s + СЃС‚Р°СЂС‚РѕРІС‹Р№ state-С„Р°Р№Р» + РёСЃРїРѕР»РЅРµРЅРёРµ РґРµР№СЃС‚РІРёР№ РёР· action_*.json.
--- Р”РµР№СЃС‚РІРёСЏ: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
---           select_dialogue_option (07, client-РєРѕРЅС‚РµРєСЃС‚), exploration (08:
+-- BG3Neuro v0.8.17 — файловой IPC-мост (тикеты 01 + 03-09)
+-- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
+-- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
+--           select_dialogue_option (07, client-контекст), exploration (08:
 --           move_to_entity / interact_with / loot / rest / travel_to /
---           open_map / open_inventory / toggle_mode) вЂ” РґР»РёРЅРЅС‹Рµ РґРµР№СЃС‚РІРёСЏ
--- СЃ РґРІСѓС…С„Р°Р·РЅС‹Рј running:true (РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹Р№ ack) Рё С„РёРЅР°Р»РѕРј РїРѕ РёРіСЂРѕРІРѕРјСѓ СЃРѕР±С‹С‚РёСЋ.
--- Dumb-РјРѕРґСѓР»СЊ: С‚РѕР»СЊРєРѕ СЃРѕСЃС‚РѕСЏРЅРёРµ Рё РёСЃРїРѕР»РЅРµРЅРёРµ, Р±РµР· Р»РѕРіРёРєРё СЂРµС€РµРЅРёР№ (СЂРµС€РµРЅРёРµ вЂ” РІ C#).
--- Р”РёСЂРµРєС‚РѕСЂРёСЏ IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO РїРёС€РµС‚ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ Script Extender).
+--           open_map / open_inventory / toggle_mode) — длинные действия
+-- с двухфазным running:true (промежуточный ack) и финалом по игровому событию.
+-- Dumb-модуль: только состояние и исполнение, без логики решений (решение — в C#).
+-- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.22"
+local MOD_VERSION = "0.8.25"
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
-local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (СЂРµР°Р»СЊРЅС‹Р№ polling)
+local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (реальный polling)
 local STATE_FILE = IPC_DIR .. "/bg3_to_neuro.json"
 local HEARTBEAT_FILE = IPC_DIR .. "/heartbeat.json"
 local NEURO_TO_BG3_FILE = IPC_DIR .. "/neuro_to_bg3.json"
 local RESULT_DIR = IPC_DIR
 
 local seq = 0
-local activeMove = nil -- { id, event, moveId } вЂ” РґРІРёР¶РµРЅРёРµ РІ РїРѕР»С‘С‚Рµ (interruption/cancel)
+local activeMove = nil -- { id, event, moveId } — движение в полёте (interruption/cancel)
 
 local function nowIso()
-    -- UTC: Ext.Timer.ClockTime() РґР°С‘С‚ "YYYY-MM-DD HH:MM:SS.fffffff" (UTC);
-    -- РЅРѕСЂРјРёСЂСѓРµРј РІ ISO-8601 РґР»СЏ СЃСЂР°РІРЅРµРЅРёСЏ СЃ DateTimeOffset.UtcNow РЅР° C#-СЃС‚РѕСЂРѕРЅРµ.
-    -- (os РЅРµРґРѕСЃС‚СѓРїРµРЅ РІ РїРµСЃРѕС‡РЅРёС†Рµ SE вЂ” os.date РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РЅРµР»СЊР·СЏ)
+    -- UTC: Ext.Timer.ClockTime() даёт "YYYY-MM-DD HH:MM:SS.fffffff" (UTC);
+    -- нормируем в ISO-8601 для сравнения с DateTimeOffset.UtcNow на C#-стороне.
+    -- (os недоступен в песочнице SE — os.date использовать нельзя)
     return (Ext.Timer.ClockTime() or ""):gsub(" ", "T") .. "Z"
 end
 
@@ -53,7 +53,7 @@ local function writeInitialState()
         mode = "loading",
         generated_at = nowIso(),
         entities = {},
-        message = "РњРѕРґ РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ, СЃРѕСЃС‚РѕСЏРЅРёРµ Р·Р°РіСЂСѓР¶Р°РµС‚СЃСЏ",
+        message = "Мод инициализирован, состояние загружается",
     }
     local ok, err = pcall(Ext.IO.SaveFile, STATE_FILE, Ext.Json.Stringify(state))
     if not ok then
@@ -62,11 +62,11 @@ local function writeInitialState()
 end
 
 -- ============================================================
--- ActionExecutor (С‚РёРєРµС‚С‹ 03 + 04): reading actions served by C#
+-- ActionExecutor (тикеты 03 + 04): reading actions served by C#
 -- ============================================================
 
 local function readInFlightAction()
-    -- C# РїРёС€РµС‚ РµРґРёРЅСЃС‚РІРµРЅРЅС‹Р№ current action РІ neuro_to_bg3.json:
+    -- C# пишет единственный current action в neuro_to_bg3.json:
     -- { "id": "...", "name": "...", "data": "{\"...\":...}" }
     local ok, content = pcall(Ext.IO.LoadFile, NEURO_TO_BG3_FILE)
     if not ok or content == nil or content == "" then
@@ -103,9 +103,97 @@ local function writeResult(actionId, success, running, errorCode, errorDetail, e
     return ok
 end
 
--- РњР°РїРїРёРЅРі РїСЃРµРІРґРѕРЅРёРјРѕРІ state в†’ GUID, РїСЂРёС…РѕРґРёС‚ РёР· StateExtractor/СЂРµРіРёСЃС‚СЂР°С†РёРё Р±РѕСЏ.
--- Р’ v0.3 Р·Р°РїРѕР»РЅСЏРµС‚СЃСЏ РІ РјРѕРјРµРЅС‚ РґРёСЃРїР°С‚С‡Р° РёР· РґР°РЅРЅС‹С… РґРµР№СЃС‚РІРёСЏ; РґР»СЏ move/attack С„РёРЅР°Р»СЊРЅС‹Р№
--- GUID-РїСѓС‚СЊ (Р±РѕРµРІРѕР№ СЂРµРµСЃС‚СЂ СЃСѓС‰РЅРѕСЃС‚РµР№) РїРѕРґРєР»СЋС‡Р°РµС‚СЃСЏ РІ С‚РёРєРµС‚Рµ state-generator.
+-- v0.8.24 (тикет 02): снапшот боевых ресурсов кастера до/после действия.
+-- Снимает персональные ресурсы (AP/BA/Reaction/Movement/WeaponActionPoint) и
+-- кулдауны. Каждый вызов в pcall — GetActionResourceValuePersonal с
+-- невалидным именем возвращает nil; resourceLevel=0 для неслотовых.
+local SNAPSHOT_RESOURCES = { "ActionPoint", "BonusActionPoint", "ReactionActionPoint", "Movement", "WeaponActionPoint" }
+
+-- Для JSON: компоненты (SpellBookCooldowns и т.п.) — userdata/cdata, их
+-- Ext.Json.Stringify не переваривает. Распаковываем рекурсивно в примитивы
+-- (числа/строки/булевы/вложенные таблицы), всё прочее — в tostring. depth
+-- ограничивает вложенность против циклов.
+local function unwrapField(v, depth)
+    local tv = type(v)
+    if tv == "number" or tv == "string" or tv == "boolean" or v == nil then
+        return v
+    end
+    if tv ~= "table" then
+        local ok, s = pcall(tostring, v)
+        return ok and tostring(s) or "<unprintable>"
+    end
+    if depth == nil then depth = 6 end
+    if depth <= 0 then return "<depth>" end
+    local isArr = false
+    local okLen, len = pcall(function() return #v end)
+    if okLen and type(len) == "number" then
+        isArr = len > 0
+    end
+    if isArr then
+        local out = {}
+        for i = 1, len do
+            local o, e = pcall(function() return v[i] end)
+            out[i] = o and unwrapField(e, depth - 1) or nil
+        end
+        return out
+    end
+    local out = {}
+    local okPairs, iter = pcall(function() return pairs(v) end)
+    if okPairs and iter then
+        for k, val in iter do
+            local key = type(k) == "string" and k or tostring(k)
+            local o, e = pcall(function() return val end)
+            out[key] = o and unwrapField(e, depth - 1) or nil
+        end
+    end
+    return out
+end
+
+local function readResourceSnapshot(actor)
+    local out = {}
+    for _, name in ipairs(SNAPSHOT_RESOURCES) do
+        local ok, v = pcall(Osi.GetActionResourceValuePersonal, actor, name, 0)
+        out[name] = ((ok and v ~= nil) and v) or nil
+    end
+    local cdOk, cdVal = pcall(function() return Ext.Entity.Get(actor) end)
+    if cdOk and cdVal ~= nil then
+        local sbcOk, sbc = pcall(function()
+            return cdVal.SpellBookCooldowns
+        end)
+        if sbcOk and sbc ~= nil then
+            out.cooldowns = unwrapField(sbc)
+        end
+    end
+    return out
+end
+
+local function writeResourceSnapshot(actionId, actor, phase)
+    local payload = {
+        action_id = actionId,
+        actor = tostring(actor),
+        phase = phase,
+        timestamp = nowIso(),
+    }
+    local res = readResourceSnapshot(actor)
+    for k, v in pairs(res) do
+        payload[k] = v
+    end
+    local path = RESULT_DIR .. "/resource_snapshot_" .. (actionId or "unknown") .. "_" .. phase .. ".json"
+    local jsonOk, json = pcall(Ext.Json.Stringify, payload)
+    if not jsonOk then
+        _P("[BG3Neuro] resource snapshot stringify " .. (actionId or "unknown") .. "/" .. phase .. ": " .. tostring(json))
+        return false
+    end
+    local ok, err = pcall(Ext.IO.SaveFile, path, json)
+    if not ok then
+        _P("[BG3Neuro] resource snapshot " .. (actionId or "unknown") .. "/" .. phase .. ": " .. tostring(err))
+    end
+    return ok
+end
+
+-- Маппинг псевдонимов state → GUID, приходит из StateExtractor/регистрации боя.
+-- В v0.3 заполняется в момент диспатча из данных действия; для move/attack финальный
+-- GUID-путь (боевой реестр сущностей) подключается в тикете state-generator.
 local ENTITY_BY_ALIAS = {}
 
 local function isGuid(v)
@@ -123,18 +211,88 @@ local function resolveEntity(alias)
 end
 
 -- ============================================================
--- Turn intelligence (probe + end_turn): С‚РµРєСѓС‰РёР№ РґРµР№СЃС‚РІСѓСЋС‰РёР№ РїРµСЂСЃРѕРЅР°Р¶
--- РѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РІ РјРѕРґРµ (GetCurrentCharacter РїРѕ reserved user id),
--- Р° РЅРµ РёР· СЃР»РµРїРѕ Р·Р°РїРѕРјРЅРµРЅРЅРѕРіРѕ App-РѕРј GUID. Р­С‚Рѕ СѓР±РёСЂР°РµС‚ СЂР°СЃСЃРёРЅС…СЂРѕРЅ
--- "РєС‚Рѕ С…РѕРґРёС‚" РїСЂРё Р¶РёРІС‹С… combat-РїСЂРѕРІРµСЂРєР°С….
+-- v0.8.25 (тикет 03): конфиг force_legacy + гибридный откат честного пути.
+-- BG3SE игнорирует произвольные ключи ScriptExtender/Config.json и не имеет
+-- Ext.Mod.GetConfig (в Ext.Mod есть только GetBaseMod/GetLoadOrder/GetMod/
+-- GetModManager/IsModLoaded). Поэтому читаем свой Config.json руками из VFS
+-- (путь внутри pak: /Mods/<Folder>/ScriptExtender/Config.json) и парсим.
+-- Поля:
+--   force_legacy: true  — ВСЕ боевые действия (атаки/касты/бонусы) идут по legacy
+--                    путям (Osi.UseSpell + ручной AddActionPoints, Osi.Attack).
+--   legacy_fail_limit: N (default 3) — после N сбоев ЧЕСТНОГО пути подряд
+--                    включается устойчивый legacy-режим до перезапуска (гибрид).
+-- Счётчик — в памяти (после рестарта снова честный путь).
 -- ============================================================
+local forceLegacy = false
+local legacyFailLimit = 3
+local legacyFailCount = 0
+local legacyStable = false
 
--- Story-Р»Р°С‚С‡ С…РѕРґР° (v0.7.3): RegisterListener РЅР° TurnStarted/TurnEnded РґР°С‘С‚
--- РµРґРёРЅСЃС‚РІРµРЅРЅСѓСЋ РїСЂР°РІРґСѓ "РєС‚Рѕ СЃРµР№С‡Р°СЃ С…РѕРґРёС‚" вЂ” РґРІРёР¶РєРѕРІС‹Р№ С…РѕРґ РґРІРёРіР°РµС‚СЃСЏ СЃР°Рј, Р° story
--- Р»РёС€СЊ РЅР°Р±Р»СЋРґР°РµС‚ (Osiris-Р»РѕРі: TurnEnded РїСЂРёС…РѕРґРёС‚ Р±РµР· РІС‹Р·РѕРІР° EndTurn). Р­С‚Рѕ Рё РµСЃС‚СЊ
--- Р±Р°Р·Р° Рё РґР»СЏ СЃР°РјРѕРїСЂРѕРІРµСЂРєРё СЌС„С„РµРєС‚Р° end_turn (ended: true/false).
+local CONFIG_PATH = "Mods/" .. MOD_NAME .. "/ScriptExtender/Config.json"
+
+local function readModConfig()
+    if Ext == nil or Ext.IO == nil or Ext.IO.LoadFile == nil then
+        _P("[BG3Neuro] Ext.IO unavailable, config defaults apply")
+        return
+    end
+    -- context "data" => читаем через игровой VFS (в т.ч. файлы внутри pak)
+    local okLoad, raw = pcall(Ext.IO.LoadFile, CONFIG_PATH, "data")
+    if not okLoad or raw == nil or type(raw) ~= "string" then
+        _P("[BG3Neuro] mod config load failed (Config.json not found at " .. CONFIG_PATH .. ")")
+        return
+    end
+    local ok, cfg = pcall(Ext.Json.Parse, raw)
+    if not ok or type(cfg) ~= "table" then
+        _P("[BG3Neuro] mod config parse failed")
+        return
+    end
+    if cfg.force_legacy == true then
+        forceLegacy = true
+    end
+    if type(cfg.legacy_fail_limit) == "number" and cfg.legacy_fail_limit > 0 then
+        legacyFailLimit = cfg.legacy_fail_limit
+    end
+    _P("[BG3Neuro] config: force_legacy=" .. tostring(forceLegacy)
+        .. " legacy_fail_limit=" .. tostring(legacyFailLimit))
+end
+readModConfig()
+
+-- Гибрид (03): сбой честного пути — инкрементируем счётчик; после N сбоев
+-- подряд (legacyFailLimit) — устойчивый legacy до перезапуска.
+-- Возвращает true, если на ЭТОТ вызов нужно подхватить legacy (fallback на сбой).
+local function pipelineFailed(where)
+    if not forceLegacy and not legacyStable then
+        legacyFailCount = legacyFailCount + 1
+        _P("[BG3Neuro] honest path failed (" .. tostring(where)
+            .. "): " .. legacyFailCount .. "/" .. legacyFailLimit)
+        if legacyFailCount >= legacyFailLimit then
+            legacyStable = true
+            _P("[BG3Neuro] stable legacy ON (честный путь отключён до перезапуска)")
+        end
+    end
+    return true
+end
+
+-- Сброс счётчика при успешном честном пути (возврат к честному после сбоев).
+local function pipelineSucceeded()
+    if legacyFailCount > 0 then
+        _P("[BG3Neuro] honest path ok, legacyFailCount reset "
+            .. legacyFailCount .. " -> 0")
+        legacyFailCount = 0
+    end
+end
+
+-- Стоит ли сейчас использовать legacy-путь (флаг из конфига ИЛИ устойчивый откат).
+local function useLegacyNow()
+    return forceLegacy or legacyStable
+end
+
+-- Story-латч хода (v0.7.3): RegisterListener на TurnStarted/TurnEnded даёт
+-- единственную правду "кто сейчас ходит" — движковый ход двигается сам, а story
+-- лишь наблюдает (Osiris-лог: TurnEnded приходит без вызова EndTurn). Это и есть
+-- база и для самопроверки эффекта end_turn (ended: true/false).
 local actingChar = nil
-local turnLog = {}   -- { t = "S"|"E", g = clean_guid } вЂ” Р»РµРЅС‚Р° РїРѕСЃР»РµРґРЅРёС… СЃРјРµРЅ С…РѕРґР°
+local turnLog = {}   -- { t = "S"|"E", g = clean_guid } — лента последних смен хода
 
 -- end_turn verification (v0.8.12): the result is written only when the engine
 -- actually confirms the turn change (TurnStarted of another combatant or
@@ -211,7 +369,7 @@ Ext.Osiris.RegisterListener("TurnEnded", 1, "after", function(guid)
 end)
 
 function turnLogSlice(marker, n)
-    -- n РїРѕСЃР»РµРґРЅРёС… Р·Р°РїРёСЃРµР№ Р»РµРЅС‚С‹ РЅР°С‡РёРЅР°СЏ РїРѕСЃР»Рµ marker (РґР»СЏ СЃР°РјРѕРїСЂРѕРІРµСЂРєРё end_turn)
+    -- n последних записей ленты начиная после marker (для самопроверки end_turn)
     local out = {}
     for i = marker + 1, math.min(#turnLog, marker + (n or 16)) do
         out[#out + 1] = { turnLog[i].t, turnLog[i].g }
@@ -220,11 +378,11 @@ function turnLogSlice(marker, n)
 end
 
 local function dbRowsRead(name, arity)
-    -- Р‘РµР·РѕРїР°СЃРЅРѕРµ С‡С‚РµРЅРёРµ Osiris-DB РїРѕ РёРјРµРЅРё: Osi.DB_X:Get(nil,...); РІРѕР·РІСЂР°С‰Р°РµС‚
-    -- РїР»РѕСЃРєРёР№ РјР°СЃСЃРёРІ СЃС‚СЂРѕРє РёР»Рё nil, РµСЃР»Рё Р‘Р” РЅРµС‚/РЅРµС‡РёС‚Р°РµРјР°. arity вЂ” С‡РёСЃР»Рѕ РєРѕР»РѕРЅРѕРє.
+    -- Безопасное чтение Osiris-DB по имени: Osi.DB_X:Get(nil,...); возвращает
+    -- плоский массив строк или nil, если БД нет/нечитаема. arity — число колонок.
     local rows
     local function tryGet(obj)
-        -- Get СЃ СЏРІРЅС‹Рј РєРѕР»РёС‡РµСЃС‚РІРѕРј РїСѓСЃС‚С‹С… С„РёР»СЊС‚СЂРѕРІ (Р°СЂРЅРѕСЃС‚СЊ 1..3), fallback Get().
+        -- Get с явным количеством пустых фильтров (арность 1..3), fallback Get().
         if arity == 1 then
             local ok, r = pcall(function() return obj:Get(nil) end)
             if ok and type(r) == "table" then return r end
@@ -269,10 +427,10 @@ local function dbRowsRead(name, arity)
 end
 
 local function dumpDb(name)
-    -- РђРєРєСѓСЂР°С‚РЅС‹Р№ РґР°РјРї Osiris-DB (Avatars / CharacterSkipTurn / ...).
-    -- Р›СЋР±Р°СЏ РѕРїРµСЂР°С†РёСЏ СЃ Osi/Ext.Osiris РІ pcall: РІ СЂР°Р·РЅС‹С… РєРѕРЅС‚РµРєСЃС‚Р°С…
-    -- (client/server, story) Сѓ Р‘Р” РјРѕР¶РµС‚ РЅРµ Р±С‹С‚СЊ РјРµС‚РѕРґР° Get РёР»Рё РѕРЅР° РІРѕРѕР±С‰Рµ
-    -- РїСЂРѕРєСЃРё-РѕР±СЉРµРєС‚ Р±РµР· С‚РёРїР° table вЂ” С‚Р°РєРёРµ СЃР»СѓС‡Р°Рё РЅРµ РґРѕР»Р¶РЅС‹ СЂРѕРЅСЏС‚СЊ action.
+    -- Аккуратный дамп Osiris-DB (Avatars / CharacterSkipTurn / ...).
+    -- Любая операция с Osi/Ext.Osiris в pcall: в разных контекстах
+    -- (client/server, story) у БД может не быть метода Get или она вообще
+    -- прокси-объект без типа table — такие случаи не должны ронять action.
     local db
     local okIdx, o = pcall(function() return Osi["DB_" .. name] end)
     if okIdx and type(o) == "table" and type(o.Get) == "function" then
@@ -324,8 +482,8 @@ function pureGuid(s)
 end
 
 local function currentCharacters()
-    -- РўРµРєСѓС‰РёР№ СѓРїСЂР°РІР»СЏРµРјС‹Р№(Рµ) РїРµСЂСЃРѕРЅР°Р¶(Рё): РґР»СЏ reserved user id. Р’ РѕРґРёРЅРѕС‡РєРµ host
-    -- РјРѕР¶РµС‚ Р±С‹С‚СЊ user 1 (peer+1); РїРµСЂРµР±РёСЂР°РµРј С€РёСЂРµ, С‡РµРј 0..3 (v0.7.3).
+    -- Текущий управляемый(е) персонаж(и): для reserved user id. В одиночке host
+    -- может быть user 1 (peer+1); перебираем шире, чем 0..3 (v0.7.3).
     local users = { 1, 2, 3, 4, 0, 256, 65536 }
     local out = {}
     for _, user in ipairs(users) do
@@ -417,8 +575,8 @@ local function actingCleanOf(actor)
 end
 
 local function resolveActingCharacter(explicit)
-    -- РЇРІРЅС‹Р№ actor (РѕС‚ C#) вЂ” РїСЂРёРѕСЂРёС‚РµС‚; Р·Р°С‚РµРј story-Р»Р°С‚С‡ (TurnStarted Р±РµР· TurnEnded);
-    -- Р·Р°С‚РµРј РєРѕРЅС‚СЂРѕР»РёСЂСѓРµРјС‹Р№ СЃРµР№С‡Р°СЃ РїРµСЂСЃРѕРЅР°Р¶.
+    -- Явный actor (от C#) — приоритет; затем story-латч (TurnStarted без TurnEnded);
+    -- затем контролируемый сейчас персонаж.
     if explicit ~= nil and explicit ~= "" then
         return explicit
     end
@@ -472,8 +630,8 @@ end
 local entityTurnComponentDump
 
 local function probeGameState()
-    -- Р”РёР°РіРЅРѕСЃС‚РёРєР° РґР»СЏ StateExtractor-СЃРёРґР°: РєС‚Рѕ С…РѕРґРёС‚ СЃРµР№С‡Р°СЃ, РєС‚Рѕ РІ Р±РѕСЋ.
-    -- РљР°Р¶РґС‹Р№ С€Р°Рі РЅРµР·Р°РІРёСЃРёРј: РїР°РґРµРЅРёРµ РѕРґРЅРѕРіРѕ РЅРµ Р»РёС€Р°РµС‚ РѕСЃС‚Р°Р»СЊРЅС‹С… РґР°РЅРЅС‹С….
+    -- Диагностика для StateExtractor-сида: кто ходит сейчас, кто в бою.
+    -- Каждый шаг независим: падение одного не лишает остальных данных.
     local out = { current_characters = {} }
     local okAv, av = pcall(dumpDb, "Avatars")
     out.avatars = okAv and av or nil
@@ -515,12 +673,12 @@ local function probeGameState()
 end
 
 -- ============================================================
--- ECS-РґРёР°РіРЅРѕСЃС‚РёРєР° (v0.7.4): РґРІРёР¶РєРѕРІС‹Р№ turn-РјРµРЅРµРґР¶РµСЂ, РЅРµ story.
--- РљРѕРјРїРѕРЅРµРЅС‚ РїРµСЂСЃРѕРЅР°Р¶Р° EocCombatTurnBasedComponent (entity.TurnBased):
+-- ECS-диагностика (v0.7.4): движковый turn-менеджер, не story.
+-- Компонент персонажа EocCombatTurnBasedComponent (entity.TurnBased):
 --   IsActiveCombatTurn / CanActInCombat / CanAct_M / ActedThisRoundInCombat /
 --   HadTurnInCombat / RequestedEndTurn / EndTurnHoldTimer /
 --   TurnActionsCompleted / Timeout / PauseTimer / Combat / CombatTeam.
--- CombatState (EocCombatStateComponent) Р»РµР¶РёС‚ РЅР° combat-СЃСѓС‰РЅРѕСЃС‚Рё:
+-- CombatState (EocCombatStateComponent) лежит на combat-сущности:
 --   MyGuid / Participants / Initiatives / IsInNarrativeCombat / Level.
 -- ============================================================
 
@@ -535,8 +693,8 @@ local COMBAT_FIELDS = {
 }
 
 local function readComponentFields(component, fields)
-    -- РќР°РґС‘Р¶РЅРѕРµ С‡С‚РµРЅРёРµ СЃРєР°Р»СЏСЂРЅС‹С… РїРѕР»РµР№ РєРѕРјРїРѕРЅРµРЅС‚Р° (РєР°Р¶РґРѕРµ РІ pcall; РєР»Р°СЃСЃ/РїСЂРѕРєСЃРё:
-    -- Р·РЅР°С‡РµРЅРёСЏ Р»СЋР±С‹С… С‚РёРїРѕРІ РЅРѕСЂРјРёСЂСѓСЋС‚СЃСЏ, С‡С‚РѕР±С‹ РЅРµ Р»РѕРјР°С‚СЊ Ext.Json.Stringify).
+    -- Надёжное чтение скалярных полей компонента (каждое в pcall; класс/прокси:
+    -- значения любых типов нормируются, чтобы не ломать Ext.Json.Stringify).
     local out = {}
     for _, f in ipairs(fields) do
         local ok, v = pcall(function() return component[f] end)
@@ -557,14 +715,14 @@ local function readComponentFields(component, fields)
 end
 
 function entityTurnComponentDump(guid)
-    -- Р”Р°РјРї turn-РєРѕРјРїРѕРЅРµРЅС‚Р° РїРµСЂСЃРѕРЅР°Р¶Р° + combat-СЃСѓС‰РЅРѕСЃС‚Рё (read-only).
+    -- Дамп turn-компонента персонажа + combat-сущности (read-only).
     local out = {}
     if Ext == nil or Ext.Entity == nil then
         return { available = false }
     end
     local okE, ent = pcall(Ext.Entity.Get, guid)
     if not okE or ent == nil then
-        return { available = false, error = "РЅРµС‚ СЃСѓС‰РЅРѕСЃС‚Рё" }
+        return { available = false, error = "нет сущности" }
     end
     local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
     if okC and comp ~= nil then
@@ -765,6 +923,47 @@ local function healthOf(ent)
     return 0, 0
 end
 
+local function hasNonAscii(s)
+    s = tostring(s or "")
+    for i = 1, #s do
+        if s:byte(i) > 0x7F then
+            return true
+        end
+    end
+    return false
+end
+
+local function statSlug(guid)
+    local okE, ent = pcall(Ext.Entity.Get, guid)
+    if not okE or ent == nil then
+        return nil
+    end
+    local ids = {}
+    local okC, sc = pcall(function() return ent:GetComponent("Stats") end)
+    if okC and sc ~= nil then
+        local v = fieldOf(sc, "StatsId") or fieldOf(sc, "Stats")
+        if v ~= nil then
+            ids[#ids + 1] = tostring(v)
+        end
+    end
+    local okC2, cc = pcall(function() return ent:GetComponent("Character") end)
+    if okC2 and cc ~= nil then
+        local v = fieldOf(cc, "Stats")
+        if v ~= nil then
+            ids[#ids + 1] = tostring(v)
+        end
+    end
+    for _, id in ipairs(ids) do
+        if not hasNonAscii(id) then
+            local s = slug(id)
+            if s ~= nil and s ~= "" then
+                return s
+            end
+        end
+    end
+    return nil
+end
+
 -- guid → alias: устойчиво в рамках одного боя, чтобы Neuro и router работали с
 -- одними и теми же короткими именами на каждом тике state.
 local combatAliases = {}
@@ -776,7 +975,13 @@ local function registerAlias(guid, isControlled, taken)
         taken[existing] = true
         return existing
     end
-    local base = slug(displayName(guid))
+    local rawName = displayName(guid)
+    local base
+    if hasNonAscii(rawName) then
+        base = statSlug(guid) or slug(rawName)
+    else
+        base = slug(rawName)
+    end
     local alias
     if isControlled then
         -- партийные: имя как есть (karlach / shadowheart / tav), при коллизии — суффикс
@@ -1216,7 +1421,7 @@ end
 -- ============================================================
 
 Ext.Osiris.RegisterListener("CharacterMoveToCancelled", 2, "after", function(character, moveID)
-    -- ack: С„РёРЅР°Р» cancel СѓР¶Рµ РїРёС€РµС‚ cancelActiveMove (interruption path)
+    -- ack: финал cancel уже пишет cancelActiveMove (interruption path)
 end)
 
 function cancelActiveMove(reason, detail)
@@ -1225,7 +1430,7 @@ function cancelActiveMove(reason, detail)
     end
     local pending = activeMove
     activeMove = nil
-    -- РРЅС‚РµСЂСЂСѓРїС‚: РґРІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ РЅРѕРІС‹Рј РґРµР№СЃС‚РІРёРµРј/РІРЅРµС€РЅРµР№ РїСЂРёС‡РёРЅРѕР№ в†’ С„РёРЅР°Р» cancel
+    -- Интеррупт: движение прервано новым действием/внешней причиной → финал cancel
     writeResult(pending.id, true, false, nil, reason .. (detail and (": " .. tostring(detail)) or ""))
 end
 
@@ -1241,9 +1446,9 @@ Ext.Osiris.RegisterListener("EntityEvent", 2, "after", function(character, event
 end)
 
 -- ============================================================
--- РЎРѕРІРјРµСЃС‚РЅС‹Р№ РїР°Р№РїР»Р°Р№РЅ РєР°СЃС‚Р°/Р°С‚Р°РєРё (В§6.4): ServerCastRequest.
--- Р”Р»СЏ РёРіСЂРѕРєРѕРІ CastOptions {"FromClient", ...} в†’ СЂРµСЃСѓСЂСЃС‹/РєСѓР»РґР°СѓРЅС‹
--- СЃС‡РёС‚Р°РµС‚ СЃР°РјР° РёРіСЂР°. Fallback вЂ” Osi.UseSpell(AtPosition).
+-- РЎРѕРІРјРµСЃС‚РЅС‹Р№ РїР°Р№РїР»Р°Р№РЅ РєР°СЃС‚Р°/Р°С‚Р°РєРё (§6.4): ServerCastRequest.
+-- Для игроков CastOptions {"FromClient", ...} → ресурсы/кулдауны
+-- считает сама игра. Fallback — Osi.UseSpell(AtPosition).
 -- ============================================================
 
 local pendingCasts = {} -- { id = action.id, spell = name, caster = uuid }
@@ -1577,7 +1782,24 @@ local function probeCastVariants(actorUuid, spellName, targetUuid)
     return out
 end
 
-local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, posZ, spellType, insertAtFront, queueName, forceFlags)
+local function detectIsPlayer(actorUuid)
+    -- v0.8.18: Osi.IsPlayer (Ext.Osi и глобальный Osi) в рантайме — userdata-заглушка,
+    -- вызов даёт "attempt to call a nil value" (проверено на стенде), поэтому API
+    -- не вызываем вовсе. v0.8.25: надёжный признак «контролируемый персонаж» —
+    -- компонент ServerCharacter (InParty/IsPlayer/PartyFollower). Детект по "Player"
+    -- в имени — только запасной путь: у чистых GUID его нет (S_Player_Astarion_...
+    -- приходит как c7c13742-...), а без isPlayer честный путь уходит NPC-вариантом
+    -- (двойной префикс OriginatorPrototype + NULL-Source) и молча игнорится движком.
+    local pf = characterPartyFlags(actorUuid)
+    if pf and (pf.in_party or pf.is_player or pf.party_follower) then
+        return true, "serverCharacter"
+    elseif actorUuid and actorUuid:find("Player") then
+        return true, "name:Player"
+    end
+    return false, "non-player"
+end
+
+local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, posZ, spellType, insertAtFront, queueName, forceFlags, bonusAction)
     local apiOk, serverCastRequest = pcall(function() return Ext.System.ServerCastRequest end)
     if not apiOk or serverCastRequest == nil then
         return nil, "ServerCastRequest недоступен на этой сборке BG3SE"
@@ -1596,40 +1818,8 @@ local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, 
     -- SpellBookPrepares.PreparedSpells (ресурсы/кулдауны нативно), для NPC —
     -- Osiris Source. Иначе каст ставится в очередь, но молча не происходит.
     -- OriginatorPrototype - реальный прототип (SpellType_SpellName), иначе игра
-    -- не резолвит голое имя ("Fire Bolt" vs "Projectile_FireBolt").
-    local isPlayer = false
-    -- v0.8.18: IsPlayer живёт в глобальном Osi (Osi.lua), не только в Ext.Osi.
-    -- В рантайме это userdata (C-функция), поэтому тип проверяем через ~= nil,
-    -- а не через "function".
-    local ipDetail
-    local ipOk, ipRes = pcall(function()
-        if Ext.Osi and Ext.Osi.IsPlayer ~= nil then
-            local r = Ext.Osi.IsPlayer(actorUuid)
-            ipDetail = "ext:" .. tostring(r)
-            return r == 1
-        end
-        if Osi and Osi.IsPlayer ~= nil then
-            local r = Osi.IsPlayer(actorUuid)
-            ipDetail = "global:" .. tostring(r)
-            return r == 1
-        end
-        ipDetail = "no-api"
-        return false
-    end)
-    if ipOk and ipRes then
-        isPlayer = true
-    end
-    if not ipOk then
-        ipDetail = "err:" .. tostring(ipRes)
-    end
-    -- v0.8.18: Osi.IsPlayer в рантайме — userdata-заглушка, вызов даёт
-    -- "attempt to call a nil value". Для игрока детект по имени сущности
-    -- (UUID содержит "Player": S_Player_Astarion_..., HalfElves_Player_Strong...).
-    -- Без этого каст для игрока шлётся NPC-вариантом и молча игнорится.
-    if not isPlayer and actorUuid and actorUuid:find("Player") then
-        isPlayer = true
-        ipDetail = (ipDetail or "") .. "|name:Player"
-    end
+-- не резолвит голое имя ("Fire Bolt" vs "Projectile_FireBolt").
+    local isPlayer, ipDetail = detectIsPlayer(actorUuid)
     local originatorPrototype = spellType .. "_" .. spellName:gsub("%s+", "")
     local bookPrefix = originatorPrototype
     -- v0.8.18: реальный прототип из книги кастера (суффикс имени) — префиксная формула
@@ -1738,6 +1928,18 @@ local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, 
         end
         castOptions = add
     end
+    -- v0.8.25 (тикет 05, фикс): оффхенд-атака — отдельный стат OffhandAttack,
+    -- опция CastOffhand в SpellCastOptions НЕ существует в этой версии игры
+    -- (валидный список см. выше), поэтому доп. флаг не добавляем. NoMovement же
+    -- блокирует ПОДХОД к цели в радиус (CastSpellFailed/BlockedRequiredMove) —
+    -- для бонусной атаки движение разрешаем.
+    if bonusAction then
+        for i = #castOptions, 1, -1 do
+            if castOptions[i] == "NoMovement" then
+                table.remove(castOptions, i)
+            end
+        end
+    end
     local request = {
         CastOptions = castOptions,
         Caster = casterEntity,
@@ -1781,6 +1983,7 @@ local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, 
         castOptions = request.CastOptions,
         queue = queueId,
         forceFlags = forceFlags == true,
+        bonusAction = bonusAction == true,
         targetUuid = targetUuid,
         targetPos = targets[1] and targets[1].Position or nil,
         preparedSpells = preparedList,
@@ -1838,8 +2041,8 @@ local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, 
     return nil, tostring(enqPushErr)
 end
 
--- Р¤РёРЅР°Р» РєР°СЃС‚Р° РїРѕ РёРіСЂРѕРІС‹Рј СЃРѕР±С‹С‚РёСЏРј (РґРѕР»РіРёРµ/РєР°РЅР°Р»СЊРЅС‹Рµ Р·Р°РєР»РёРЅР°РЅРёСЏ): running:false.
--- Р•СЃР»Рё СЃРѕР±С‹С‚РёРµ РЅРµ РїСЂРёС€Р»Рѕ вЂ” РїСЂР°РІРґР° РІСЃС‘ СЂР°РІРЅРѕ СѓС…РѕРґРёС‚ С‡РµСЂРµР· СЃР»РµРґСѓСЋС‰РёР№ state (РљР°РЅР°Р» B).
+-- Финал каста по игровым событиям (долгие/канальные заклинания): running:false.
+-- Если событие не пришло — правда всё равно уходит через следующий state (Канал B).
 local function finalizeCast(caster, spellName, cancelled)
     for i = 1, #pendingCasts do
         local pc = pendingCasts[i]
@@ -1857,8 +2060,10 @@ local function finalizeCast(caster, spellName, cancelled)
             or (type(pc.caster) == "string" and pc.caster:sub(-36) == caster)
         if casterMatch and spellMatch then
             table.remove(pendingCasts, i)
+            -- v0.8.24: снапшот ресурсов после действия (тикет 02) — каст/атака завершились.
+            pcall(writeResourceSnapshot, pc.id, caster, "after")
             writeResult(pc.id, true, false, cancelled and "cast_failed" or nil,
-                cancelled and "РљР°СЃС‚ РїСЂРµСЂРІР°РЅ/РїСЂРѕРІР°Р»РµРЅ" or nil)
+                cancelled and "Каст прерван/провален" or nil)
             return
         end
     end
@@ -2018,18 +2223,28 @@ local function executeCast(action)
         return false, nil, "action_failed", "not_caster_turn: " .. tostring(actor) .. " canAct=" .. tostring(canAct)
     end
 
-    -- РџСЂРµСЂС‹РІР°РµРј Р°РєС‚РёРІРЅРѕРµ РґРІРёР¶РµРЅРёРµ (РєР°СЃС‚ Рё РґРІРёР¶РµРЅРёРµ РЅРµ РїРµСЂРµСЃРµРєР°СЋС‚СЃСЏ)
-    cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ РєР°СЃС‚РѕРј", action.id)
+    -- Прерываем активное движение (каст и движение не пересекаются)
+    cancelActiveMove("Движение прервано кастом", action.id)
 
-    local stats = Ext.Stats.Get(spellName) -- prototype-РёРјСЏ (X5-РЅРѕСЂРјР°Р»РёР·Р°С†РёСЏ РІ StateExtractor)
+    -- v0.8.24: снапшот ресурсов до действия (тикет 02, критерий честной экономики).
+    pcall(writeResourceSnapshot, action.id, actor, "before")
+
+    local stats = Ext.Stats.Get(spellName) -- prototype-имя (X5-нормализация в StateExtractor)
     local spellType = stats and stats.SpellType or "Target"
     local target = resolveEntity(data.target_id or "")
     local pos = data.position
 
     -- v0.8.17: pcall-обёртка enqueueCastRequest — ловим точную ошибку API вместо всплытия.
     local ok, err
+    -- v0.8.25 (тикет 04): авто insertAtFront в свой ход игрока — каст резолвится
+    -- сейчас, а не после чужих запросов. Явный data.insert_at_front остаётся override.
     local insertAtFront = data.insert_at_front == true
-    local useOsiSpell = data.use_osi_spell == true
+    if data.insert_at_front == nil and canAct then
+        local isPl, _ = detectIsPlayer(actor)
+        insertAtFront = isPl
+    end
+    -- v0.8.25 (тикет 03): useOsiSpell явно ИЛИ force_legacy / устойчивый откат.
+    local useOsiSpell = data.use_osi_spell == true or useLegacyNow()
     local queueName = data.queue
     local forceFlags = data.force_flags == true
     local oseiOk, oseiRes, oseiEntry
@@ -2084,13 +2299,18 @@ local function executeCast(action)
         end)
         if enqOk and enqRes == true then
             ok, err = true, nil
+            pipelineSucceeded()
         else
             ok = false
             err = enqOk and enqErr or tostring(enqRes)
         end
     end
     if not ok and not useOsiSpell then
-        -- Fallback: РєРѕРїСЊС‘ РїРѕРґР°Р»СЊС€Рµ РѕС‚ pipeline, С‡РµСЃС‚РЅС‹С… AP РЅРµ РіР°СЂР°РЅС‚РёСЂСѓРµС‚.
+        -- v0.8.25 (тикеты 03/04): гибрид — на сбой ЧЕСТНОГО пути (ошибка enqueue)
+        -- инкрементим счётчик, на этот вызов подхватываем legacy. CastSpellFailed
+        -- сюда не попадает (это валидный исход каста, не сбой машин�ерии).
+        pipelineFailed("cast")
+        -- Fallback: копьё подальше от pipeline, честных AP не гарантирует.
         if pos then
             ok, err = pcall(Osi.UseSpellAtPosition, actor, spellName, pos.x, pos.y, pos.z, 0)
         elseif target then
@@ -2109,15 +2329,15 @@ local function executeCast(action)
     end
 
     pendingCasts[#pendingCasts + 1] = { id = action.id, spell = spellName, caster = actor }
-    return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” СЃРѕР±С‹С‚РёРµ CastedSpell/CastSpellFailed)
+    return true, true, nil, nil -- success, running (финал — событие CastedSpell/CastSpellFailed)
 end
 
 -- ============================================================
--- Р”РёР°Р»РѕРі (С‚РёРєРµС‚ 07): select_dialogue_option С‡РµСЂРµР· client-РєР»РёРє.
--- Server РЅРµ СѓРјРµРµС‚ РїСѓР±Р»РёС‡РЅРѕ РІС‹Р±РёСЂР°С‚СЊ РІР°СЂРёР°РЅС‚ (research В§7.2, РЅРµС‚ PickDialogNode);
--- Р·РЅР°С‡РёС‚ РёСЃРїРѕР»РЅРёС‚РµР»СЊ Р¶РёРІС‘С‚ РІ client-РєРѕРЅС‚РµРєСЃС‚Рµ (Ext.UI). Р•СЃР»Рё РєР»РёРµРЅС‚СЃРєРёР№
--- РєРѕРЅС‚РµРєСЃС‚ РЅРµРґРѕСЃС‚СѓРїРµРЅ вЂ” РѕС‚РєР°С‚ not_supported (РќР• СѓРІРѕРґРёС‚СЊ Neuro РІ С†РёРєР» Р±РµР· РєР°РЅР°Р»Р°).
--- Р’Р°СЂРёР°РЅС‚С‹ РІ state РґР°С‘С‚ С‚РѕС‚ Р¶Рµ client-РёСЃС‚РѕС‡РЅРёРє, С‡С‚Рѕ Рё СЂРµРЅРґРµСЂ UI (option_index == UI order).
+-- Диалог (тикет 07): select_dialogue_option через client-клик.
+-- Server РЅРµ СѓРјРµРµС‚ РїСѓР±Р»РёС‡РЅРѕ РІС‹Р±РёСЂР°С‚СЊ РІР°СЂРёР°РЅС‚ (research §7.2, РЅРµС‚ PickDialogNode);
+-- значит исполнитель живёт в client-контексте (Ext.UI). Если клиентский
+-- контекст недоступен — откат not_supported (НЕ уводить Neuro в цикл без канала).
+-- Варианты в state даёт тот же client-источник, что и рендер UI (option_index == UI order).
 -- ============================================================
 
 local pendingDialogue = {} -- { id = action.id, dialog = guid }
@@ -2147,17 +2367,17 @@ local function executeDialogueOption(action)
         return false, nil, "not_supported", "option_index is required"
     end
 
-    -- РљРЅРѕРїРєР° РґРёР°Р»РѕРіР° РЅР°С…РѕРґРёС‚СЃСЏ РІ РєР»РёРµРЅС‚СЃРєРѕРј UI (Noesis); РєР»РёРє вЂ” С‚РѕР»СЊРєРѕ РёР· client-РєРѕРЅС‚РµРєСЃС‚Р°.
+    -- Кнопка диалога находится в клиентском UI (Noesis); клик — только из client-контекста.
     if Ext == nil or Ext.UI == nil then
         return false, nil, "not_supported",
             "ClientAutoselectExecutor unavailable: no client context for option highlight/click"
     end
 
-    -- Р”РѕР»РіРёР№ С…РѕРґ: РєР»РёРє РїСЂРѕРёСЃС…РѕРґРёС‚ РІ UI, РёС‚РѕРі вЂ” СЃРѕР±С‹С‚РёРµ DialogEnded/DialogClosed.
+    -- Долгий ход: клик происходит в UI, итог — событие DialogEnded/DialogClosed.
     pendingDialogue[#pendingDialogue + 1] = { id = action.id, dialog = "(unknown)" }
-    -- TODO(client): Ext.UI.NeedMouse / СЌРјСѓР»СЏС†РёСЏ РєР»РёРєР° РїРѕ UI-СЌР»РµРјРµРЅС‚Сѓ option_index, РїРѕРґСЃРІРµС‚РєР° РїРµСЂРµРґ РєР»РёРєРѕРј;
-    -- СЃСЋРґР° вЂ” СЂРµР°Р»СЊРЅС‹Р№ РґРёР°Р»РѕРіРѕРІС‹Р№ РґРµСЃРєСЂРёРїС‚РѕСЂ РґР»СЏ РјР°С‚С‡РёРЅРіР° DialogEnded.
-    return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” DialogEnded)
+    -- TODO(client): Ext.UI.NeedMouse / эмуляция клика по UI-элементу option_index, подсветка перед кликом;
+    -- сюда — реальный диалоговый дескриптор для матчинга DialogEnded.
+    return true, true, nil, nil -- success, running (финал — DialogEnded)
 end
 
 local function executeMoveToTarget(action)
@@ -2171,8 +2391,8 @@ local function executeMoveToTarget(action)
         return false, nil, "action_failed", "Movement target not found"
     end
 
-    -- РџСЂРµСЂС‹РІР°РµРј РїСЂРµРґС‹РґСѓС‰РµРµ РґРІРёР¶РµРЅРёРµ (interruption path, СЃРѕР±С‹С‚РёРµ cancel)
-    cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ РЅРѕРІС‹Рј РґРµР№СЃС‚РІРёРµРј", action.id)
+    -- Прерываем предыдущее движение (interruption path, событие cancel)
+    cancelActiveMove("Движение прервано новым действием", action.id)
 
     local moveEvent = "BG3NeuroMove_" .. action.id
     local moveId = math.random(1, 2147483647)
@@ -2180,7 +2400,7 @@ local function executeMoveToTarget(action)
     if data.position then
         ok, err = pcall(Osi.CharacterMoveToPosition, actor, data.position.x, data.position.y, data.position.z, "Run", moveEvent, moveId)
     elseif target then
-        -- РїРµСЂРµРјРµСЃС‚РёС‚СЊСЃСЏ Рє СЃСѓС‰РЅРѕСЃС‚Рё: РєРѕРѕСЂРґРёРЅР°С‚Р° С†РµР»Рё С‡РµСЂРµР· Osi.GetPosition
+        -- переместиться к сущности: координата цели через Osi.GetPosition
         ok, err = pcall(Osi.CharacterMoveTo, actor, target, "Run", moveEvent, moveId)
     end
 
@@ -2203,15 +2423,19 @@ local function executeAttack(action)
         return false, nil, "action_failed", "Attack target not found"
     end
 
-    -- РџСЂРµСЂС‹РІР°РµРј Р°РєС‚РёРІРЅРѕРµ РґРІРёР¶РµРЅРёРµ (РґРІРёР¶РµРЅРёРµ Рё Р°С‚Р°РєР° РЅРµ РїРµСЂРµСЃРµРєР°СЋС‚СЃСЏ)
-    cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ Р°С‚Р°РєРѕР№", action.id)
+    -- Прерываем активное движение (движение и атака не пересекаются)
+    cancelActiveMove("Движение прервано атакой", action.id)
 
-    -- В§6.4: party-атаки через оружейное заклинание (реальный боевой удар).
-    -- v0.8.20: переведено с Osi.Attack (one-shot, визуал без броска/журнала для
-    -- игроков) на проверенный вживую путь executeCast.use_osi_spell — Osi.UseSpell
-    -- по прототипному имени ОСЕЙ оружейной атаки (кандидаты MainHandAttack).
-    -- Рабочий вариант — 3-арг. UseSpell(actor, sid, target); побеждает имя из
-    -- книги кастера (Osi.HasSpell == 1). Резолв + броски + журнал идут в игре.
+    -- v0.8.24: снапшот ресурсов до действия (тикет 02, критерий честной экономики).
+    pcall(writeResourceSnapshot, action.id, actor, "before")
+
+    -- §6.4: атаки игроков — через ServerCastRequest (честная каст-машинерия).
+    -- v0.8.23 (приоритет): enqueueCastRequest в OsirisCastRequests — spell строится
+    -- из SpellBookPrepares.PreparedSpells кастера (валидный Source/ProgressionSource),
+    -- поэтому AP, bonus actions и cooldowns списываются нативно, FromClient для игрока.
+    -- v0.8.22 (fallback 1, доказан вживую): Osi.UseSpell по прототипному имени ОСЕЙ
+    -- оружейной атаки + ручное списание 1 AP (Osiris игнорирует ресурсы сам).
+    -- (fallback 2, NPC): Osi.Attack (one-shot, без ресурсов).
     local attackCandidates = {
         "MainHandAttack", "Projectile_MainHandAttack", "Target_MainHandAttack",
         "MainHandRangedAttack", "Projectile_MainHandRangedAttack", "Target_MainHandRangedAttack",
@@ -2234,30 +2458,68 @@ local function executeAttack(action)
     end
 
     local ok, err
-    local useWeaponSpell = false
-    for _, sid in ipairs(knownNames) do
-        if not ok then
-            ok, err = pcall(Osi.UseSpell, actor, sid, target)
-            if ok then
-                useWeaponSpell = true
+    local usedWeaponSpell = false
+    local honestUsed = false
+    local usedSid
+
+    -- v0.8.25 (тикет 03): force_legacy/устойчивый откат → честный путь пропускаем.
+    local legacyNow = useLegacyNow()
+
+    -- Честный путь (§6.4): ServerCastRequest.OsirisCastRequests, spell из книги
+    -- кастера (нативные ресурсы/кулдауны). Пробуем кандидатов из книги сначала.
+    if not legacyNow then
+        for _, sid in ipairs(knownNames) do
+            if not honestUsed then
+                local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
+                local sType = "Target"
+                if stOK and stRes and stRes.SpellType then
+                    sType = stRes.SpellType
+                end
+                local enqOK, enqRes, enqErr = pcall(function()
+                    return enqueueCastRequest(actor, sid, target, nil, nil, nil, sType, false, nil, false)
+                end)
+                if enqOK and enqRes == true then
+                    honestUsed = true
+                    usedWeaponSpell = true
+                    usedSid = sid
+                    ok = true
+                    -- v0.8.25 (03): успех честного пути сбрасывает счётчик сбоев.
+                    pipelineSucceeded()
+                end
+            end
+        end
+    end
+
+    -- Fallback 1: Osi.UseSpell (v0.8.22, доказан вживую) — реальный боевой удар,
+    -- резолв + броски + журнал идут в игре. 3-арг. UseSpell(actor, sid, target).
+    -- v0.8.25 (03): это НЕ честный путь → инкрементим счётчик гибрида.
+    if not honestUsed then
+        if not legacyNow then
+            pipelineFailed("attack")
+        end
+        for _, sid in ipairs(knownNames) do
+            if not ok then
+                ok, err = pcall(Osi.UseSpell, actor, sid, target)
+                if ok then
+                    usedWeaponSpell = true
+                    usedSid = sid
+                end
             end
         end
     end
 
     if not ok then
-        -- Документированный fallback для NPC/очередей — Osi.Attack (one-shot, alwaysHit=0).
+        -- Fallback 2: документированный fallback для NPC — Osi.Attack (one-shot, alwaysHit=0).
         ok, err = pcall(Osi.Attack, actor, target, 0)
     end
     if not ok then
         return false, nil, "action_failed", tostring(err)
     end
 
-    -- Честное списание ресурса за атаку: Osi.UseSpell идёт через Osiris, который
-    -- игнорирует пред-условия и сам НЕ тратит Action Point (после живого теста v0.8.21
-    -- все действия в ходу оставались доступны). Списываем 1 AP вручную.
-    -- TODO(полная экономика): перевести атаку на ServerCastRequest с источником
-    -- из SpellBookPrepares (родное списание AP, bonus actions, кулдауны/кунж).
-    if useWeaponSpell then
+    -- Списание ресурса: честный путь (enqueueCastRequest) списывает AP/кулдауны
+    -- нативно через Source из PreparedSpells. Для fallback Osi.UseSpell осiris
+    -- игнорирует ресурсы — списываем 1 AP вручную (проверено вживую v0.8.22).
+    if usedWeaponSpell and not honestUsed then
         local apOk, apErr = pcall(Osi.AddActionPoints, actor, -1)
         if not apOk then
             _P("[BG3Neuro] attack AP spend failed: " .. tostring(apErr))
@@ -2266,10 +2528,11 @@ local function executeAttack(action)
 
     -- Финализация (running -> результат после броска) через CastedSpell/CastSpellFailed,
     -- как у каста: запись в pendingCasts матчится finalizeCast по списку-префиксам.
-    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = "MainHandAttack", caster = actor }
+    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = usedSid or "MainHandAttack", caster = actor }
     -- Если сработал fallback Osi.Attack — событий CastedSpell/CastSpellFailed может
     -- не быть; финализируем результат сразу (one-shot завершился).
-    if not useWeaponSpell then
+    if not usedWeaponSpell then
+        pcall(writeResourceSnapshot, action.id, actor, "after")
         writeResult(action.id, true, false, nil, nil)
         return true, false, nil, nil
     end
@@ -2277,9 +2540,139 @@ local function executeAttack(action)
 end
 
 -- ============================================================
--- Exploration (С‚РёРєРµС‚ 08): interact / loot / rest / travel / screen / mode.
--- Р”РѕР»РіРёРµ Р¶РµСЃС‚С‹ вЂ” running:true, С„РёРЅР°Р» С‡РµСЂРµР· СЃР»РµРґСѓСЋС‰РёР№ state (РљР°РЅР°Р» B) РёР»Рё
--- РёРіСЂРѕРІС‹Рµ СЃРѕР±С‹С‚РёСЏ (Rest). РўРѕС‡РЅС‹Р№ BG3-СЌС„С„РµРєС‚ РїСЂРёС…РѕРґРёС‚ РѕС‚РґРµР»СЊРЅС‹Рј state РѕС‚ РјРѕРґР°.
+-- v0.8.25 (тикет 05): bonus_action через честный каст-пайплайн.
+    -- v1 = ТОЛЬКО offhand_attack: отдельный оружейный стат OffhandAttack
+    -- (опции CastOffhand в SpellCastOptions этой версии игры не существует), игра
+    -- списывает BonusActionPoint НАЦИВНО (стенд: снапшот BA −1). Остальные
+    -- action_type из enum схемы — not_supported (drink_potion/help/shove/
+    -- disengage/dash/dodge — реализация позже).
+-- ============================================================
+local BONUS_ACTIONS_V1 = {
+    offhand_attack = true,
+}
+
+local function executeBonusAction(action)
+    local data = action.data
+    local actionType = data.action_type
+    if actionType == nil or actionType == "" then
+        return false, nil, "action_failed", "bonus_action requires action_type"
+    end
+    if not BONUS_ACTIONS_V1[actionType] then
+        return false, nil, "not_supported",
+            "bonus_action '" .. tostring(actionType)
+            .. "' не реализован в v0.8.25 (доступно: offhand_attack)"
+    end
+
+    local actor = resolveCombatActor(data.actor)
+    local target = resolveEntity(data.target_id or "")
+    if actor == nil then
+        return false, nil, "action_failed", "Could not resolve the bonus action actor"
+    end
+    if target == nil then
+        return false, nil, "action_failed", "Bonus attack target not found"
+    end
+
+    -- v0.8.25: оффхенд-атака возможна ТОЛЬКО с оружием во второй руке — без него
+    -- игры не выдаёт спелл OffhandAttack, а честный каст «подвисает» на running
+    -- без события финализации (стенд: Tav без оффхенда). Проверяем заранее.
+    local offhandKnown = false
+    for _, sid in ipairs({ "OffhandAttack", "Projectile_OffhandAttack", "Target_OffhandAttack" }) do
+        local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
+        if hOK and tostring(hRes) == "1" then
+            offhandKnown = true
+            break
+        end
+    end
+    if not offhandKnown then
+        return false, nil, "action_failed",
+            "offhand_attack requires a light weapon in the off-hand (no OffhandAttack spell known)"
+    end
+
+    -- Прерываем активное движение (бонусная атака и движение не пересекаются).
+    cancelActiveMove("Движение прервано bonus_action", action.id)
+    -- v0.8.24: снапшот ресурсов до действия (критерий честной экономики 05).
+    pcall(writeResourceSnapshot, action.id, actor, "before")
+
+    -- Оффхенд-атака: ОТДЕЛЬНЫЙ оружейный стат OffhandAttack (Target_/Projectile_),
+    -- а не MainHandAttack с флагом. Опции CastOffhand в SpellCastOptions этой версии
+    -- игры НЕТ (валидные: IgnoreHasSpell..AvoidDangerousAuras) — попытка вставить её
+    -- валит весь маппинг запроса ("not a valid 'SpellCastOptions' bitfield value").
+    local bonusCandidates = {
+        "OffhandAttack", "Projectile_OffhandAttack", "Target_OffhandAttack",
+        "MeleeOffHandWeaponAttack", "RangedOffHandWeaponAttack",
+    }
+    local knownNames = {}
+    local knownAdded = {}
+    for _, sid in ipairs(bonusCandidates) do
+        if Osi and Osi.HasSpell then
+            local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
+            if hOK and tostring(hRes) == "1" and not knownAdded[sid] then
+                knownNames[#knownNames + 1] = sid
+                knownAdded[sid] = true
+            end
+        end
+    end
+    for _, sid in ipairs(bonusCandidates) do
+        if not knownAdded[sid] then
+            knownNames[#knownNames + 1] = sid
+        end
+    end
+
+    local ok, err
+    local honestUsed = false
+    local usedSid
+    local legacyNow = useLegacyNow()
+
+    -- Честный путь: ServerCastRequest + bonusAction=true ("CastOffhand" в CastOptions).
+    if not legacyNow then
+        for _, sid in ipairs(knownNames) do
+            if not honestUsed then
+                local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
+                local sType = "Target"
+                if stOK and stRes and stRes.SpellType then
+                    sType = stRes.SpellType
+                end
+                local enqOK, enqRes, enqErr = pcall(function()
+                    return enqueueCastRequest(actor, sid, target, nil, nil, nil, sType, false, nil, false, true)
+                end)
+                if enqOK and enqRes == true then
+                    honestUsed = true
+                    usedSid = sid
+                    ok = true
+                    pipelineSucceeded()
+                end
+            end
+        end
+    end
+
+    -- Fallback 1: Osi.UseSpell (гибрид 03 — сбой честного пути инкрементит счётчик).
+    if not honestUsed then
+        if not legacyNow then
+            pipelineFailed("bonus_offhand")
+        end
+        for _, sid in ipairs(knownNames) do
+            if not ok then
+                ok, err = pcall(Osi.UseSpell, actor, sid, target)
+                if ok then
+                    usedSid = sid
+                end
+            end
+        end
+    end
+
+    if not ok then
+        return false, nil, "action_failed", tostring(err)
+    end
+
+    -- Финализация: pendingCasts → событие CastedSpell/CastSpellFailed (как у атаки).
+    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = usedSid or "MainHandAttack", caster = actor }
+    return true, true, nil, nil -- success, running (финал — событие оружейной атаки)
+end
+
+-- ============================================================
+-- Exploration (тикет 08): interact / loot / rest / travel / screen / mode.
+-- Долгие жесты — running:true, финал через следующий state (Канал B) или
+-- игровые события (Rest). Точный BG3-эффект приходит отдельным state от мода.
 -- ============================================================
 
 local activeRest = nil -- { id = ... }
@@ -2298,11 +2691,11 @@ Ext.Osiris.RegisterListener("LongRestFinished", 0, "after", function()
 end)
 
 Ext.Osiris.RegisterListener("LongRestCancelled", 0, "after", function()
-    finalizeRest(false, "РћС‚РґС‹С… РїСЂРµСЂРІР°РЅ/РѕС‚РјРµРЅС‘РЅ")
+    finalizeRest(false, "Отдых прерван/отменён")
 end)
 
 Ext.Osiris.RegisterListener("LongRestStartFailed", 0, "after", function()
-    finalizeRest(false, "РћС‚РґС‹С… РЅРµ РЅР°С‡Р°Р»СЃСЏ (РЅРµС‚ Р»Р°РіРµСЂСЏ/РїСЂРёРїР°СЃРѕРІ)")
+    finalizeRest(false, "Отдых не начался (нет лагеря/припасов)")
 end)
 
 local function executeInteract(action)
@@ -2316,14 +2709,14 @@ local function executeInteract(action)
         return false, nil, "action_failed", "Interaction target not found"
     end
 
-    -- РњРёСЂРЅРѕРµ РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёРµ СЃ РѕР±СЉРµРєС‚РѕРј (В§8 research): useItem=0, isInteraction=1.
-    cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёРµРј", action.id)
+    -- РњРёСЂРЅРѕРµ РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёРµ СЃ РѕР±СЉРµРєС‚РѕРј (§8 research): useItem=0, isInteraction=1.
+    cancelActiveMove("Движение прервано взаимодействием", action.id)
     local ok, err = pcall(Osi.Use, actor, target, 0, 1, "")
     if not ok then
         return false, nil, "action_failed", tostring(err)
     end
 
-    return true, true, nil, nil -- success, running (РёСЃС…РѕРґ вЂ” СЃР»РµРґСѓСЋС‰РёР№ state)
+    return true, true, nil, nil -- success, running (исход — следующий state)
 end
 
 local function executeLoot(action)
@@ -2337,15 +2730,15 @@ local function executeLoot(action)
         return false, nil, "action_failed", "Loot target not found"
     end
 
-    -- РЎРµСЂРІРµСЂРЅС‹Р№ Р°РІС‚РѕРїРѕРґР±РѕСЂ: MoveAllLootableItemsTo(from, to, equipArmor=0, equipWeapons=0,
-    -- clrOwner=1, vanityClothing=0). UI-РІР°СЂРёР°РЅС‚ (OpenCharacterLootUI) вЂ” client-С‡Р°СЃС‚СЊ.
-    cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ СЃР±РѕСЂРѕРј РґРѕР±С‹С‡Рё", action.id)
+    -- Серверный автоподбор: MoveAllLootableItemsTo(from, to, equipArmor=0, equipWeapons=0,
+    -- clrOwner=1, vanityClothing=0). UI-вариант (OpenCharacterLootUI) — client-часть.
+    cancelActiveMove("Движение прервано сбором добычи", action.id)
     local ok, err = pcall(Osi.MoveAllLootableItemsTo, target, actor, 0, 0, 1, 0)
     if not ok then
         return false, nil, "action_failed", tostring(err)
     end
 
-    return true, true, nil, nil -- success, running (СЃРѕСЃС‚Р°РІ РґРѕР±С‹С‡Рё вЂ” СЃР»РµРґСѓСЋС‰РёР№ state)
+    return true, true, nil, nil -- success, running (состав добычи — следующий state)
 end
 
 local function executeRest(action)
@@ -2355,10 +2748,10 @@ local function executeRest(action)
         return false, nil, "action_failed", "Could not resolve the resting actor"
     end
 
-    -- РџРѕР»РЅС‹Р№ РѕС‚РґС‹С… вЂ” Osi.RequestLongRest (research В§9) + РіРµР№С‚ CanAllPartiesLongRest (C#-РІР°Р»РёРґР°С‚РѕСЂ).
-    -- Р§Р°СЃС‚РёС‡РЅС‹Р№ (Р»С‘РіРєРёР№) РѕС‚РґС‹С… РїСѓР±Р»РёС‡РЅРѕР№ Osiris-С„СѓРЅРєС†РёРё РЅРµ РёРјРµРµС‚ (story-side).
+    -- РџРѕР»РЅС‹Р№ РѕС‚РґС‹С… вЂ” Osi.RequestLongRest (research §9) + РіРµР№С‚ CanAllPartiesLongRest (C#-РІР°Р»РёРґР°С‚РѕСЂ).
+    -- Частичный (лёгкий) отдых публичной Osiris-функции не имеет (story-side).
     if data.rest_type ~= "full" then
-        -- TODO(client): Р»С‘РіРєРёР№ РѕС‚РґС‹С… вЂ” UI-РєРЅРѕРїРєР° Take Short Rest; СЃС‚СЂСѓРєС‚СѓСЂРЅС‹Р№ ack, С„РёРЅР°Р» вЂ” state.
+        -- TODO(client): лёгкий отдых — UI-кнопка Take Short Rest; структурный ack, финал — state.
         return true, true, nil, nil
     end
 
@@ -2368,7 +2761,7 @@ local function executeRest(action)
     end
 
     activeRest = { id = action.id }
-    return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” LongRestFinished/Cancelled/Failed)
+    return true, true, nil, nil -- success, running (финал — LongRestFinished/Cancelled/Failed)
 end
 
 local function executeTravel(action)
@@ -2378,21 +2771,21 @@ local function executeTravel(action)
         return false, nil, "action_failed", "Could not resolve the traveler"
     end
 
-    -- РџСѓР±Р»РёС‡РЅРѕРіРѕ fast-travel Osiris-РІС‹Р·РѕРІР° РІ research РЅРµС‚ (В§0/В§15): СЃС‚СЂСѓРєС‚СѓСЂРЅС‹Р№ ack.
-    -- TODO(game): РєР°РЅРґРёРґР°С‚ вЂ” С‚РµР»РµРїРѕСЂС‚ Рє waypoint-РјР°СЂРєРµСЂСѓ СЂРµРіРёРѕРЅР° (Osi.TeleportTo/Position);
-    -- С„Р°РєС‚РёС‡РµСЃРєРёР№ РїРµСЂРµРµР·Рґ РѕР±Р»Р°СЃС‚Рё РїСЂРёРґС‘С‚ РѕС‚РґРµР»СЊРЅС‹Рј state РѕС‚ mod-РіРµРЅРµСЂР°С‚РѕСЂР° (РљР°РЅР°Р» B).
-    return true, true, nil, nil -- success, running (РїРµСЂРµРЅРѕСЃ СЂРµРіРёРѕРЅР° вЂ” СЃР»РµРґСѓСЋС‰РёР№ state)
+    -- РџСѓР±Р»РёС‡РЅРѕРіРѕ fast-travel Osiris-РІС‹Р·РѕРІР° РІ research РЅРµС‚ (§0/§15): СЃС‚СЂСѓРєС‚СѓСЂРЅС‹Р№ ack.
+    -- TODO(game): кандидат — телепорт к waypoint-маркеру региона (Osi.TeleportTo/Position);
+    -- фактический переезд области придёт отдельным state от mod-генератора (Канал B).
+    return true, true, nil, nil -- success, running (перенос региона — следующий state)
 end
 
 local function executeOpenScreen(action)
-    -- open_map / open_inventory вЂ” С‚РѕР»СЊРєРѕ РїСЂРѕСЃРјРѕС‚СЂ (UI), РґРІРёР¶РѕРє СЃР°Рј РѕС‚РєСЂРѕРµС‚ СЌРєСЂР°РЅ.
-    -- TODO(client): РѕС‚РєСЂС‹С‚РёРµ СЌРєСЂР°РЅР° С‡РµСЂРµР· РєР»РёРµРЅС‚СЃРєРёР№ РІРІРѕРґ; state СЌРєСЂР°РЅР° РґР°С‘С‚ mod-РіРµРЅРµСЂР°С‚РѕСЂ.
-    cancelActiveMove("Р”РІРёР¶РµРЅРёРµ РїСЂРµСЂРІР°РЅРѕ РѕС‚РєСЂС‹С‚РёРµРј СЌРєСЂР°РЅР°", action.id)
-    return true, true, nil, nil -- success, running (СЌРєСЂР°РЅ вЂ” СЃР»РµРґСѓСЋС‰РёР№ state)
+    -- open_map / open_inventory — только просмотр (UI), движок сам откроет экран.
+    -- TODO(client): открытие экрана через клиентский ввод; state экрана даёт mod-генератор.
+    cancelActiveMove("Движение прервано открытием экрана", action.id)
+    return true, true, nil, nil -- success, running (экран — следующий state)
 end
 
 local function executeToggleMode(action)
-    -- toggle_mode: v1 РїСЂРёРЅРёРјР°РµС‚ С‚РѕР»СЊРєРѕ "normal" (X3, stealth СѓР±СЂР°РЅ) вЂ” C# СѓР¶Рµ РѕС‚СЃРµРє РёРЅРѕРµ.
+    -- toggle_mode: v1 принимает только "normal" (X3, stealth убран) — C# уже отсек иное.
     -- Р РµР¶РёРј normal вЂ” РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ Р±РµР· РёРіСЂРѕРІРѕРіРѕ РІС‹Р·РѕРІР°, РјРіРЅРѕРІРµРЅРЅС‹Р№ С„РёРЅР°Р».
     return true, nil, nil, nil
 end
@@ -2413,11 +2806,11 @@ local function executeAction(action)
     action.data = data
 
     if name == "end_turn" then
-        -- v0.7.3: РґРІСѓС…С„Р°Р·РЅС‹Р№ end_turn СЃ СЃР°РјРѕРїСЂРѕРІРµСЂРєРѕР№ СЂРµР°Р»СЊРЅРѕРіРѕ СЌС„С„РµРєС‚Р°.
-        -- РҐРѕРґ вЂ” РґРІРёР¶РєРѕРІС‹Р№ (story Р»РёС€СЊ РЅР°Р±Р»СЋРґР°РµС‚ TurnStarted/TurnEnded), РїРѕСЌС‚РѕРјСѓ
-        -- success Р·РґРµСЃСЊ РќР• Р·РЅР°С‡РёС‚ "С…РѕРґ СЃРјРµРЅРёР»СЃСЏ": С„РёРЅР°Р» С‡РµСЂРµР· ~1.2СЃ СЃРѕРѕР±С‰Р°РµС‚
-        -- ended:true/false РїРѕ С„Р°РєС‚Сѓ РЅР°СЃС‚СѓРїР»РµРЅРёСЏ TurnEnded(actor) РёР»Рё TurnStarted
-        -- РґСЂСѓРіРѕРіРѕ РїРµСЂСЃРѕРЅР°Р¶Р°. Р•СЃР»Рё C# РЅРµ Р·РЅР°РµС‚ Р°РєС‚СѓР°Р»СЊРЅС‹Р№ GUID вЂ” story-Р»Р°С‚С‡.
+        -- v0.7.3: двухфазный end_turn с самопроверкой реального эффекта.
+        -- Ход — движковый (story лишь наблюдает TurnStarted/TurnEnded), поэтому
+        -- success здесь НЕ значит "ход сменился": финал через ~1.2с сообщает
+        -- ended:true/false по факту наступления TurnEnded(actor) или TurnStarted
+        -- другого персонажа. Если C# не знает актуальный GUID — story-латч.
         local raw = resolveActingCharacter(data.actor or "")
         local acting = resolveEndTurnActor(data.actor or "")
         _P("[BG3Neuro] end_turn: explicit=" .. tostring(data.actor or "")
@@ -2443,21 +2836,21 @@ local function executeAction(action)
             return false, nil, "action_failed", tostring(errE)
         end
 
-        -- Р¤РёРЅР°Р» вЂ” СЃРѕР±С‹С‚РёР№РЅР°СЏ СЃР°РјРѕРїСЂРѕРІРµСЂРєР° (TurnEnded/TurnStarted) + fallback-таймер.
+        -- Финал — событийная самопроверка (TurnEnded/TurnStarted) + fallback-таймер.
         armEndTurn({ id = action.id, acting = acting, actingBefore = actingBefore, marker = marker })
 
-        return true, true, nil, nil -- success, running (С„РёРЅР°Р» вЂ” verifyEndTurn)
+        return true, true, nil, nil -- success, running (финал — verifyEndTurn)
     end
 
     if name == "end_turn_ecs" then
-        -- v0.7.5: РґРІРёР¶РєРѕРІРѕР№ РєР°РЅР°Р» РєРѕРЅС†Р° С…РѕРґР°.
-        --  mode "probe"  вЂ” С‚РѕР»СЊРєРѕ С‡С‚РµРЅРёРµ;
-        --  mode "ecs"    вЂ” С„Р»Р°Рі RequestedEndTurn (v0.7.4, РґРѕРєР°Р·Р°РЅ no-op);
-        --  mode "system" (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ) вЂ” РїСѓС€ combat-СЃСѓС‰РЅРѕСЃС‚Рё РІ РѕС‡РµСЂРµРґСЊ
+        -- v0.7.5: движковый канал конца хода.
+        --  mode "probe"  — только чтение;
+        --  mode "ecs"    — флаг RequestedEndTurn (v0.7.4, доказан no-op);
+        --  mode "system" (по умолчанию) — пуш combat-сущности в очередь
         --    Ext.System.ServerTurnOrder.EndTurn (esv::TurnOrderSystem::EndTurn,
-        --    Array<EntityHandle>) вЂ” С‚РѕС‚ Р¶Рµ РєР°РЅР°Р», С‡С‚Рѕ Рё РєР»РёРµРЅС‚СЃРєРѕРµ
-        --    NETMSG_TURNBASED_ENDTURN_REQUEST; РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚СЃСЏ СЃРёСЃС‚РµРјРѕР№ РґРІРёР¶РєР°
-        --    РєР°Р¶РґС‹Р№ РєР°РґСЂ. Р¤Р»Р°Рі С‚РѕР¶Рµ СЃС‚Р°РІРёРј (РІРµСЃСЊ СЃС‚РµРє РєР»РёРµРЅС‚Р°).
+        --    Array<EntityHandle>) — тот же канал, что и клиентское
+        --    NETMSG_TURNBASED_ENDTURN_REQUEST; обрабатывается системой движка
+        --    каждый кадр. Флаг тоже ставим (весь стек клиента).
         local raw = resolveActingCharacter(data.actor or "")
         local acting = resolveEndTurnActor(data.actor or "")
         local mode = data.mode or "system"
@@ -2475,7 +2868,7 @@ local function executeAction(action)
                 if okE and ent ~= nil then
                     local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
                     if okC and comp ~= nil then
-                        -- С„Р»Р°Рі РєРѕРЅС†Р° С…РѕРґР° Р°РєС‚РёРІРЅРѕРіРѕ РїРµСЂСЃРѕРЅР°Р¶Р°
+                        -- флаг конца хода активного персонажа
 local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
                         payload.write_requested = okW1 and true or false
                         payload.write_error = okW1 and nil or tostring(errW1)
@@ -2484,7 +2877,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
                         pcall(function() combatGuid = comp.CombatTeam or comp.Combat end)
                         payload.combat_guid = combatGuid
                         if mode ~= "ecs" and combatGuid ~= nil then
-                            -- РєР°РЅР°Р» turn-order system: РѕС‡РµСЂРµРґСЊ EndTurn (combat entity)
+                            -- канал turn-order system: очередь EndTurn (combat entity)
                             local okH, combatHandle = pcall(Ext.Entity.UuidToHandle, combatGuid)
                             payload.combat_handle = okH and tostring(combatHandle) or tostring(combatHandle)
                             local sys = Ext.System and Ext.System.ServerTurnOrder
@@ -2509,7 +2902,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
                 else
                     payload.write_error = "entity not found"
                 end
-                -- РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РїСЂРѕР±СѓРµРј story-РєР°РЅР°Р» (РІ BG3 РѕРЅ no-op, РЅРѕ РґС‘С€РµРІ)
+                -- дополнительно пробуем story-канал (в BG3 он no-op, но дёшев)
                 pcall(Osi.EndTurn, raw)
             end)
             if not stepOk then
@@ -2537,13 +2930,13 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
             _P("[BG3Neuro] end_turn_ecs verify: ended=" .. tostring(ended))
         end
         Ext.Timer.WaitForRealtime(onlyProbe and 100 or 5000, verifyEcsEndTurn)
-        return true, true, nil, nil -- С„РёРЅР°Р» вЂ” verifyEcsEndTurn
+        return true, true, nil, nil -- финал — verifyEcsEndTurn
     end
 
     if name == "diag_skip" then
-        -- Р”РёР°РіРЅРѕСЃС‚РёРєР° РјРµС…Р°РЅРёР·РјР° DB_CharacterSkipTurn (v0.7.3): РґРѕР±Р°РІРёС‚СЊ СЃС‚СЂРѕРєСѓ,
-        -- РїРѕСЃРјРѕС‚СЂРµС‚СЊ, РІС‹Р·С‹РІР°РµС‚ Р»Рё story EndTurn РЅР° Р±Р»РёР¶Р°Р№С€РµРј TurnStarted, Рё СЃРЅСЏС‚СЊ
-        -- СЃС‚СЂРѕРєСѓ РѕР±СЂР°С‚РЅРѕ (С‡С‚РѕР±С‹ РЅРµ Р»РѕРјР°С‚СЊ Р±СѓРґСѓС‰РёРµ С…РѕРґС‹ РёРіСЂРѕРєР°).
+        -- Диагностика механизма DB_CharacterSkipTurn (v0.7.3): добавить строку,
+        -- посмотреть, вызывает ли story EndTurn на ближайшем TurnStarted, и снять
+        -- строку обратно (чтобы не ломать будущие ходы игрока).
         local acting = resolveActingCharacter(data.actor or "")
         if acting == nil or acting == "" then
             return false, nil, "action_failed", "Could not determine the acting character"
@@ -2553,7 +2946,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         payload.row_added = okAdd and true or false
         payload.row_add_error = okAdd and nil or tostring(errAdd)
         payload.rows_after_add = dbRowsRead("CharacterSkipTurn", 1)
-        -- СЃРЅСЏС‚СЊ СЃС‚СЂРѕРєСѓ СЃСЂР°Р·Сѓ (РґРёР°РіРЅРѕСЃС‚РёРєР° РЅРµ РґРѕР»Р¶РЅР° РјРµРЅСЏС‚СЊ РіРµР№РјРїР»РµР№)
+        -- снять строку сразу (диагностика не должна менять геймплей)
         local okDel, errDel = pcall(function() return Osi.DB_CharacterSkipTurn:Delete(acting) end)
         payload.row_deleted = okDel and true or false
         payload.row_del_error = okDel and nil or tostring(errDel)
@@ -2563,7 +2956,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
     end
 
     if name == "probe" then
-        -- Р”РёР°РіРЅРѕСЃС‚РёРєР° (РЅРµ РґР»СЏ РїСЂРѕРґР°): РєС‚Рѕ С…РѕРґРёС‚, РєС‚Рѕ РІ Р±РѕСЋ, skip/GEN С„Р»Р°РіРё.
+        -- Диагностика (не для прода): кто ходит, кто в бою, skip/GEN флаги.
         local p
         local okProbe, errProbe = pcall(probeGameState)
         if okProbe then
@@ -2611,6 +3004,11 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         return executeCast(action)
     end
 
+    if name == "bonus_action" then
+        -- v0.8.25 (тикет 05): bonus_action → offhand_attack (v1), остальные — позже.
+        return executeBonusAction(action)
+    end
+
     if name == "q_cast" or name == "q_sys" then
         -- v0.8.18: снимок ВСЕХ очередей CastRequestSystem.
         local qInfo = { id = action.id or name }
@@ -2634,7 +3032,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
     end
 
     if name == "move_to_entity" then
-        -- РџРµСЂРµРјРµС‰РµРЅРёРµ Рє РѕР±СЉРµРєС‚Сѓ/СЃСѓС‰РµСЃС‚РІСѓ РІ РёСЃСЃР»РµРґРѕРІР°РЅРёРё вЂ” С‚РѕС‚ Р¶Рµ РјР°СЃСЃРѕРІС‹Р№ РїСѓС‚СЊ, С‡С‚Рѕ move_to_target
+        -- Перемещение к объекту/существу в исследовании — тот же массовый путь, что move_to_target
         return executeMoveToTarget(action)
     end
 
@@ -2662,14 +3060,14 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         return executeToggleMode(action)
     end
 
-    -- РћСЃС‚Р°Р»СЊРЅС‹Рµ РґРµР№СЃС‚РІРёСЏ С‚РёРєРµС‚С‹ 03/04 РЅРµ РёСЃРїРѕР»РЅСЏСЋС‚ (РІР°Р»РёРґР°С†РёСЏ СѓР¶Рµ РїСЂРѕС€Р»Р° РЅР° C#; РёСЃРїРѕР»РЅРµРЅРёРµ вЂ” РїРѕР·Р¶Рµ).
+    -- Остальные действия тикеты 03/04 не исполняют (валидация уже прошла на C#; исполнение — позже).
     return false, nil, "not_supported", "Action '" .. name .. "' is not supported by the mod in v1"
 end
 
 local function clearInFlight()
-    -- Р РµСЃС‚Р°СЂС‚ РјРѕРґР°/РёРіСЂС‹ (С‚РёРєРµС‚ 09, R7): РѕР±РЅСѓР»СЏРµРј neuro_to_bg3.json, С‡С‚РѕР±С‹ РЅРµ
-    -- РёСЃРїРѕР»РЅРёС‚СЊ РґРµР№СЃС‚РІРёРµ РїРѕРіРёР±С€РµРіРѕ СЃС‚СЌРЅРґР°. SaveFile("") РІРјРµСЃС‚Рѕ СѓРґР°Р»РµРЅРёСЏ вЂ” LoadFile
-    -- РІРµСЂРЅС‘С‚ "" Рё readInFlightAction() РѕС‚РєР»РѕРЅРёС‚ РµРіРѕ РєР°Рє РЅРµС‚ РґРµР№СЃС‚РІРёСЏ.
+    -- Рестарт мода/игры (тикет 09, R7): обнуляем neuro_to_bg3.json, чтобы не
+    -- исполнить действие погибшего стэнда. SaveFile("") вместо удаления — LoadFile
+    -- вернёт "" и readInFlightAction() отклонит его как нет действия.
     local ok, err = pcall(Ext.IO.SaveFile, NEURO_TO_BG3_FILE, "")
     if not ok then
         _P("[BG3Neuro] clear in-flight: " .. tostring(err))
@@ -2685,8 +3083,8 @@ local function pollActions()
 
     local execOk, success, running, errorCode, errorDetail, extra = pcall(executeAction, action)
     if not execOk then
-        -- РСЃРєР»СЋС‡РµРЅРёРµ Lua РІ РѕР±СЂР°Р±РѕС‚С‡РёРєРµ: СЃРѕС…СЂР°РЅСЏРµРј РќРђРЎРўРћРЇР©Р•Р• СЃРѕРѕР±С‰РµРЅРёРµ РѕС€РёР±РєРё,
-        -- Р° РЅРµ tostring(false) (Р±Р°Рі v0.7.4 вЂ” С‚РµСЂСЏР» С‚РµРєСЃС‚ РѕС€РёР±РєРё).
+        -- Исключение Lua в обработчике: сохраняем НАСТОЯЩЕЕ сообщение ошибки,
+        -- а не tostring(false) (баг v0.7.4 — терял текст ошибки).
         local errMsg = tostring(success)
         success = false
         running = nil
@@ -2694,9 +3092,9 @@ local function pollActions()
         errorDetail = errMsg
         extra = nil
     end
-    -- РћС‡РёС‰Р°РµРј in-flight РЎР РђР—РЈ РїРѕСЃР»Рµ С‡С‚РµРЅРёСЏ С‚РµРєСѓС‰РµРіРѕ РґРµР№СЃС‚РІРёСЏ: РѕРґРЅРѕС€Р°РіРѕРІС‹Рµ РґРµР№СЃС‚РІРёСЏ
-    -- (success Р±РµР· running) Р±РѕР»СЊС€Рµ РЅРµ РґРѕР»Р¶РЅС‹ РїРµСЂРµРёСЃРїРѕР»РЅСЏС‚СЊСЃСЏ РєР°Р¶РґС‹Рµ 200 РјСЃ, Р° С„РёРЅР°Р»
-    -- РґР»РёРЅРЅС‹С… РґРµР№СЃС‚РІРёР№ РїСЂРёС…РѕРґРёС‚ РїРѕ РёРіСЂРѕРІРѕРјСѓ СЃРѕР±С‹С‚РёСЋ, Р° РЅРµ РёР· С„Р°Р№Р»Р° (R7).
+    -- Очищаем in-flight СРАЗУ после чтения текущего действия: одношаговые действия
+    -- (success без running) больше не должны переисполняться каждые 200 мс, а финал
+    -- длинных действий приходит по игровому событию, а не из файла (R7).
     clearInFlight()
     writeResult(action.id, success, running, errorCode, errorDetail, extra)
     Ext.Timer.WaitForRealtime(ACTION_POLL_MS, pollActions)

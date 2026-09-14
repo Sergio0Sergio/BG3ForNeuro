@@ -7,39 +7,39 @@ Depended by: 02, 03, 04, 05, 06, 07, 08, 09
 
 ## Answer
 
-Architecture определена. (Резолвено в живом диалоге.)
+Architecture is defined. (Resolved in live dialogue.)
 
-### 1. Модули
+### 1. Modules
 
-**BG3SE Mod (Lua)** — dumb, без логики решений:
-- `StateExtractor` — подписка на события BG3, извлечение состояния → JSON → файл `bg3_to_neuro.json`
-- `ActionExecutor` — приём команд из файла `neuro_to_bg3.json`, вызов `Ext/Osi` API
-- `IpcFileHandler` — работа с файлами (`Ext.IO.SaveFile/LoadFile`, `Ext.Json`, polling `Ext.Timer.WaitForRealtime`)
+**BG3SE Mod (Lua)** — dumb, no decision logic:
+- `StateExtractor` — subscribes to BG3 events, extracts state → JSON → file `bg3_to_neuro.json`
+- `ActionExecutor` — receives commands from file `neuro_to_bg3.json`, calls `Ext/Osi` API
+- `IpcFileHandler` — works with files (`Ext.IO.SaveFile/LoadFile`, `Ext.Json`, polling `Ext.Timer.WaitForRealtime`)
 
-**C# Standalone Process** — вся логика Neuro-взаимодействия (решение в C#):
-- `NeuroWebSocketClient` — WebSocket к Neuro: реконнект, startup, actions/register, actions/force, action/result
-- `IpcClient` — файловый IPC: FileSystemWatcher на чтение, запись команд (JSON)
-- `StateSerializer` — JSON состояния BG3 → Markdown контекст для Neuro
-- `ActionRouter` — валидация JSON от Neuro (name→entity_id, schema), обычный failure → маршрутизация к ActionExecutor
-- `DecisionLoop` — оркестрация: событие → context/force → валидация → execute → result; владеет правилами "когда force"
+**C# Standalone Process** — all Neuro-interaction logic (decision in C#):
+- `NeuroWebSocketClient` — WebSocket to Neuro: reconnect, startup, actions/register, actions/force, action/result
+- `IpcClient` — file-based IPC: FileSystemWatcher for reads, writes commands (JSON)
+- `StateSerializer` — BG3 state JSON → Markdown context for Neuro
+- `ActionRouter` — validates JSON from Neuro (name→entity_id, schema), regular failure → routing to ActionExecutor
+- `DecisionLoop` — orchestration: event → context/force → validation → execute → result; owns the "when to force" rules
 
-### 2. Потоки данных
+### 2. Data flows
 
 **BG3 → Neuro:**
-Событие в BG3 → `StateExtractor` → JSON → `bg3_to_neuro.json` → `IpcClient` (FileSystemWatcher) → `StateSerializer` (JSON→Markdown) → `NeuroWebSocketClient` (context или state в force)
+Event in BG3 → `StateExtractor` → JSON → `bg3_to_neuro.json` → `IpcClient` (FileSystemWatcher) → `StateSerializer` (JSON→Markdown) → `NeuroWebSocketClient` (context or state in force)
 
 **Neuro → BG3:**
-Neuro decision → `ActionRouter` (валидация, alias→id) → `IpcClient` (запись JSON) → `neuro_to_bg3.json` → `IpcFileHandler` → `ActionExecutor` → `Ext/Osi` API → результат → обратно через состояние
+Neuro decision → `ActionRouter` (validation, alias→id) → `IpcClient` (writes JSON) → `neuro_to_bg3.json` → `IpcFileHandler` → `ActionExecutor` → `Ext/Osi` API → result → back through the state
 
-### 3. Жизненный цикл
+### 3. Lifecycle
 
-- **Запуск C#**: читает `config.json` → стартует `IpcClient` (файловый) → `NeuroWebSocketClient.Connect()` → при коннекте: `startup` + `actions/register`
-- **Запуск BG3SE**: мод создаёт файлы IPC, подписывается на события, шлёт первое состояние (SessionLoaded)
-- **Реконнект WS**: `NeuroWebSocketClient` автореконнект (interval ~3s) → после open: re-send `startup` + re-register actions (BEST_PRACTICES)
-- **Реконнект игры/мода**: мод при старте пересоздаёт файлы; при отсутствии new state файла C# ждёт
-- **Ошибка/паника мода**: C# логирует, ждёт файл-сердцебиение
+- **C# startup**: reads `config.json` → starts `IpcClient` (file-based) → `NeuroWebSocketClient.Connect()` → on connect: `startup` + `actions/register`
+- **BG3SE startup**: the mod creates IPC files, subscribes to events, sends the first state (SessionLoaded)
+- **WS reconnect**: `NeuroWebSocketClient` auto-reconnect (interval ~3s) → after open: re-send `startup` + re-register actions (BEST_PRACTICES)
+- **Game/mod reconnect**: the mod recreates the files on startup; C# waits if there is no new state file
+- **Mod error/panic**: C# logs, waits for the heartbeat file
 
-### 4. Конфигурация (`config.json`)
+### 4. Configuration (`config.json`)
 
 ```json
 {
@@ -65,17 +65,17 @@ Neuro decision → `ActionRouter` (валидация, alias→id) → `IpcClien
 }
 ```
 
-### Ключевые специфичные решения
+### Key specific decisions
 
-- **Решение-в-C#**: BG3SE — dumb. Вся логика "когда слать force/context" живёт в C# (тестируемо).
-- **Псевдонимы сущностей**: контекст содержит таблицу id↔name; Neuro работает с короткими именами (`goblin_1`), `ActionRouter` переводит в entity_id.
-- **`controlledPartySize` (1..4)**: настройка числа контролируемых персонажей. State показывает всех; текущий ходящий определяется инициативой. Параметр `actor` в схемах действий при >1.
-- **Force + state**: каждый force несёт свежий markdown state (`ephemeral_context: true` per BEST_PRACTICES для bulky state каждый ход); редкие context — для правил/задач (silent=true), редко.
+- **Decision-in-C#**: BG3SE is dumb. All "when to send force/context" logic lives in C# (testable).
+- **Entity aliases**: the context contains an id↔name table; Neuro works with short names (`goblin_1`), `ActionRouter` translates them to entity_id.
+- **`controlledPartySize` (1..4)**: setting for the number of controlled characters. State shows everyone; the current turn-taker is determined by initiative. Parameter `actor` in action schemas when >1.
+- **Force + state**: each force carries fresh markdown state (`ephemeral_context: true` per BEST_PRACTICES for bulky state each turn); rare context — for rules/tasks (silent=true), rarely.
 
-### 1.6 Политика force (DecisionLoop) — уточнено в тикете 01 (review C)
+### 1.6 Force policy (DecisionLoop) — refined in ticket 01 (review C)
 
-Триггеры: **combat** — старт хода контролируемого, выход из боя; **dialogue** — DialogStarted; **exploration** — SessionLoaded/выход из боя/смена режима + timeout-then-force для открытых периодов (BEST_PRACTICES). **Priority: всегда `low`** (BG3 пошаговая; medium/high/critical в v1 не используются — нет хард-реалтайма). **Замена, не очередь**: новый force поверх активного отменяет и заменяет (SPEC §Force Actions), безопасно т.к. каждый force несёт полное свежее состояние. Сохранена дисциплина «force только на точках решения, где игра ждёт Neuro».
+Triggers: **combat** — start of a controlled character's turn, leaving combat; **dialogue** — DialogStarted; **exploration** — SessionLoaded/leaving combat/mode change + timeout-then-force for open periods (BEST_PRACTICES). **Priority: always `low`** (BG3 is turn-based; medium/high/critical are not used in v1 — no hard realtime). **Replacement, not queue**: a new force over an active one cancels and replaces it (SPEC §Force Actions), safe because each force carries complete fresh state. The discipline "force only at decision points where the game waits for Neuro" is preserved.
 
-### Замечание
+### Note
 
-Q5-IPC корректируется research-фактом: не named pipe, а файловый IPC. Модуль `NamedPipe` в вопросе — устарел; актуально: `IpcFileHandler` + `IpcClient`.
+Q5-IPC is corrected by a research fact: not named pipe, but file-based IPC. The `NamedPipe` module in the question is outdated; current: `IpcFileHandler` + `IpcClient`.

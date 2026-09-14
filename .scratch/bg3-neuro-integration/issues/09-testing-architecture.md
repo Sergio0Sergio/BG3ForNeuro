@@ -7,31 +7,31 @@ Depended by: —
 
 ## Answer
 
-### Решения (HITL)
+### Decisions (HITL)
 
-- **T1 — Randy как есть**: базовый e2e-цикл (register → force → action → result) + HTTP POST `localhost:1337` для ручных сценариев. Randy не модифицируем (чужой код, известные рамки: JSONSchemaFaker, только forced actions, мгновенные ответы). «Плохие» кейсы — unit/интеграционные, не Randy.
-- **T2 — Unit-тесты**:
-  - Минимальный набор модулей: **StateSerializer**, **ActionRouter** (валидация JSON schema, dispatch по name), **IpcClient** (с фейковыми action_/result_ файлами), **ConfigLoader** (config.json → структуры с дефолтами), **ErrorMapper** (словарь error_code → actionable message).
-  - Автомат «range/AoE coverage» — **отдельный чистый модуль** (единый code path с StateSerializer, 03 S3) с собственными unit-тестами (это основной кусок логики).
-  - Lua-часть (BG3SE мод) против моков `Ext.*` — лёгкий smoke на стенде, **не в CI**; в v1 хватает изолированных C#-тестов + ручного прогона мода в игре.
-- **T3 — Интеграционные тесты**: **A + B в CI**: (A) C#-конвейер без игры — mock-файлы BG3SE (action_/result_) + фейковый WS; (B) C# ↔ Randy (реальный WS, ws://localhost:8000) + mock-файлы BG3SE. (C) Реальная Neuro — ручной регрессионный прогон перед выпуском, не в CI.
-- **T4 — Smoke**: фейковый BG3SE (mock-файлы) в CI (авто, сценарий «видит поле боя → attack_entity → результат») + **обязательный ручной тест на реальной игре** (тестовая сцена с 1 врагом) перед релизом. Авто на реальной игре не честно автоматизировать — это главный доверитель.
-- **T5 — Сценарии**: автотесты на **симулированных state** покрывают логику (formatter/валидатор/coverage/router) по-максимуму; все сценарии (бой 1v1/1vмного/AoE/лечение; диалог выбор/квест; исследование перемещение/взаимодействие) идут в **ручной чек-лист регрессии** на реальной игре. Покупка — out of scope (05), из чек-листа исключена.
+- **T1 — Randy as-is**: base e2e loop (register → force → action → result) + HTTP POST `localhost:1337` for manual scenarios. Randy is not modified (foreign code, known constraints: JSONSchemaFaker, only forced actions, instant responses). "Bad" cases — unit/integration, not Randy.
+- **T2 — Unit tests**:
+  - Minimal module set: **StateSerializer**, **ActionRouter** (JSON schema validation, dispatch by name), **IpcClient** (with fake action_/result_ files), **ConfigLoader** (config.json → structures with defaults), **ErrorMapper** (error_code → actionable message dictionary).
+  - The "range/AoE coverage" automaton — **a separate clean module** (single code path with StateSerializer, 03 S3) with its own unit tests (this is the main logic piece).
+  - The Lua part (BG3SE mod) against `Ext.*` mocks — light smoke on the bench, **not in CI**; in v1 isolated C# tests + a manual run of the mod in the game are enough.
+- **T3 — Integration tests**: **A + B in CI**: (A) C# pipeline without the game — BG3SE mock files (action_/result_) + fake WS; (B) C# ↔ Randy (real WS, ws://localhost:8000) + BG3SE mock files. (C) Real Neuro — manual regression run before release, not in CI.
+- **T4 — Smoke**: fake BG3SE (mock files) in CI (automated, the "sees the battlefield → attack_entity → result" scenario) + **mandatory manual test on a real game** (test scene with 1 enemy) before release. Automating on a real game is not honestly possible — this is the main trust anchor.
+- **T5 — Scenarios**: automated tests on **simulated states** cover the logic (formatter/validator/coverage/router) to the maximum; all scenarios (combat 1v1/1v many/AoE/healing; dialogue choice/quest; exploration movement/interaction) go into the **manual regression checklist** on a real game. Trading — out of scope (05), excluded from the checklist.
 
 ## Question
 
-Определить архитектуру тестирования:
+Determine the testing architecture:
 
-1. **Randy-тестирование**: Как подключить плагин к Randy? Какие WS-команды Randy поддерживает? (См. Randy/README.md: random actions, action forces, POST API для симуляции)
-2. **Unit-тесты**: Какие модули тестируем изолированно?
-   - State Serializer: мок-данные BG3 → проверка формата
-   - Action Router: валидация JSON schema
-   - IPC Message Parser: десериализация сообщений
-3. **Интеграционные тесты**: Полный цикл mock-состояние → решение → действие
-4. **Smoke test**: Минимальный сценарий "Neuro видит поле боя, атакует врага, получает результат"
-5. **Тестовые сценарии**: Какие конкретные сценарии тестировать?
-   - Бой: 1v1, 1vмного, AoE, лечение
-   - Диалог: простой выбор, покупка, квест
-   - Исследование: перемещение, взаимодействие
+1. **Randy testing**: How to connect the plugin to Randy? Which WS commands does Randy support? (See Randy/README.md: random actions, action forces, POST API for simulation)
+2. **Unit tests**: Which modules do we test in isolation?
+   - State Serializer: BG3 mock data → format check
+   - Action Router: JSON schema validation
+   - IPC Message Parser: message deserialization
+3. **Integration tests**: Full mock-state → decision → action loop
+4. **Smoke test**: Minimal scenario "Neuro sees the battlefield, attacks the enemy, gets a result"
+5. **Test scenarios**: Which specific scenarios to test?
+   - Combat: 1v1, 1v many, AoE, healing
+   - Dialogue: simple choice, trading, quest
+   - Exploration: movement, interaction
 
-См. Randy/README.md для API Randy (ws://localhost:8000, HTTP POST port 1337).
+See Randy/README.md for the Randy API (ws://localhost:8000, HTTP POST port 1337).

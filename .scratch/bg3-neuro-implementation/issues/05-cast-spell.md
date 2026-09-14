@@ -1,16 +1,16 @@
-# 05: cast_spell (AoE-покрытие, ресурсы)
+# 05: cast_spell (AoE coverage, resources)
 
-**What to build:** Каст заклинания из списка знаний: Neuro кастует известным заклинанием по `spell_id` из state (список из `SpellBook`), при необходимости с AoE-целью и coverage. Покрытие range/AoE вычисляется единым code path с StateSerializer (CoverageAuto), чтобы state и валидатор видели одно и то же. Честность ресурсов: заклинание можно кастовать только если хватает AP/зарядов/кулдауна. Каст с `throw` (кидание заклинания/предмета) → `not_supported`.
+**What to build:** Casting a spell from the known-spells list: Neuro casts a known spell by `spell_id` from the state (list from `SpellBook`), with an AoE target and coverage when needed. Range/AoE coverage is computed by a single code path shared with StateSerializer (CoverageAuto), so the state and the validator see the same thing. Resource honesty: a spell can only be cast if enough AP/charges/cooldown are available. A `throw` cast (throwing a spell/item) → `not_supported`.
 
-**Blocked by:** 03 (боевой цикл), 04 (движение/атака as base).
+**Blocked by:** 03 (combat loop), 04 (movement/attack as base).
 
 **Status:** done
 
-- [x] State отдаёт список известных заклинаний и их предпосылки (AP, заряды, кулдаун) — из `SpellBook`/`GetSpell`. → `SpellInfo{CastsLeft, OnCooldown, Slot, Range, Aoe}` + рендер «зарядов осталось / на кулдауне» в `StateSerializer`.
-- [x] `cast_spell` валидирует: известно ли заклинание (`no_spell` + список известных), достаточно ли ресурсов (кулдаун/0 зарядов → `no_spell`), в зоне ли (единый coverage-код через `CoverageAuto`). Нарушение → actionable failure (`target_missing`, `target_not_in_range` с перечнем достижимых/недостижимых).
-- [x] Cast выполняется в игре (канальный или мгновенный), `running:true` + событие финала для длительных. → Lua v0.4.0 `executeCast` через `ServerCastRequest` (CastOptions `FromClient/ShowPrepareAnimation/NoMovement`, `SourceType="Osiris"`), fallback `Osi.UseSpell(AtPosition)`; финал — `CastedSpell`/`CastSpellFailed` → `running:false`. Правда уходит и через следующий state (Канал B).
-- [ ] Normalization spell-id (X5): серверный id заклинания сопоставляется с русским именем в state. → отложено: заглушка `SourceType="Osiris"`, prototype-имя используется как есть до ввода реального SpellBook-extractor.
-- [x] AoE: выбор центра/покрытия консистентен между state и выполнением (CoverageAuto). → чистый модуль `CoverageAuto` (единый code path), детерминированный `BestAoECenter` (центры-кандидаты = позиции целей + центроид; центр обязан быть в range кастера).
-- [x] Сквозной тест: каст из списка с ресурсами и проверкой по state. → E2E Randy: известный каст (action-файл + потраченный заряд в следующем force), неизвестный (`no_spell` без action-файла), AoE-coverage с недостижимой целью (`target_not_in_range`).
+- [x] The state gives the list of known spells and their prerequisites (AP, charges, cooldown) — from `SpellBook`/`GetSpell`. → `SpellInfo{CastsLeft, OnCooldown, Slot, Range, Aoe}` + "charges left / on cooldown" render in `StateSerializer`.
+- [x] `cast_spell` validates: whether the spell is known (`no_spell` + list of known spells), whether enough resources are available (cooldown/0 charges → `no_spell`), whether it is in range (unified coverage code via `CoverageAuto`). Violation → actionable failure (`target_missing`, `target_not_in_range` with the list of reachable/unreachable).
+- [x] Cast executes in the game (channelled or instant), `running:true` + a final event for long ones. → Lua v0.4.0 `executeCast` via `ServerCastRequest` (CastOptions `FromClient/ShowPrepareAnimation/NoMovement`, `SourceType="Osiris"`), fallback `Osi.UseSpell(AtPosition)`; final — `CastedSpell`/`CastSpellFailed` → `running:false`. The truth also goes out through the next state (Channel B).
+- [ ] Normalization spell-id (X5): the server spell id is matched against the Russian name in the state. → deferred: `SourceType="Osiris"` stub, the prototype name is used as-is until a real SpellBook extractor is introduced.
+- [x] AoE: center/coverage selection is consistent between state and execution (CoverageAuto). → clean `CoverageAuto` module (single code path), deterministic `BestAoECenter` (candidate centers = target positions + centroid; the center must be within the caster's range).
+- [x] End-to-end test: cast from the list with resources and a state check. → Randy E2E: known cast (action file + spent charge in the next force), unknown (`no_spell` without an action file), AoE coverage with an unreachable target (`target_not_in_range`).
 
-**Итог:** 90/90 тестов (было 71), сборка 0 предупреждений, node-процессов после прогона 0.
+**Summary:** 90/90 tests (was 71), build 0 warnings, 0 node processes after the run.
