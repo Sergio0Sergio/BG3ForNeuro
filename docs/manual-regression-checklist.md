@@ -75,3 +75,40 @@ does NOT surface this — the error is only visible in the Extender Runtime log.
 - [ ] `throw`, voice, multiplayer, camera — **out of scope v1**.
 
 Result: all items checked + 139 automated tests green (`dotnet test` + `tests\smoke.ps1 -Full`) → release candidate. Project entry point — `README.md`.
+
+## Run 2026-09-14 (v0.8.25, live benchmark — goblin gate melee, RU locale)
+
+Bridge: PAK v029 (MD5 `96F09777974E194677891D153D7E45D0`), SE v32, `21 actions registered`,
+Randy + HTTP inject on `localhost:1337` for deterministic actions, state regenerated on `TurnStarted`.
+
+### Combat — passed
+- [x] **turn-loop**: `end_turn` → `ended=true`, acting rotates (Tav `…e6090219` → bugbear `…cde6e700`).
+- [x] **attack + damage**: `attack_entity` (fresh Tav turn, AP snapshot 1→0) → `den_goblin_archer_2` HP 9/9→3/9.
+- [x] **honest economy**: out-of-range attack leaves AP untouched (snapshot 1.0→1.0); attack at 0 AP → engine
+      `CastSpellFailed` (`cast_failed`, no resource theft); snapshots before/after written.
+- [x] **refusals in action**: `not_supported` (`use_item`; `bonus_action disengage/dash`), `action_failed`/`not_caster_turn`.
+
+### Resilience — passed
+- [x] **corrupt write**: `bg3_to_neuro.json` overwritten with garbage → app logs a single
+      `state: failed to parse combat state`, keeps running; state restored, heartbeat continues.
+- [x] **WS reconnect**: Neuro killed → `[neuro] disconnected` → auto-reconnect → re-registration
+      (`connecting … 21 actions registered`) with no intervention; forcing resumes on the next combat turn.
+
+### Blocked / findings (v0.8.25, state-integration gap)
+Mod emits only a combat-shaped state (`captureCombatState`), never the non-combat blocks; the router
+`CombatState` (deserialized straight from `bg3_to_neuro.json`) then starves the feature gates:
+
+- [ ] **`cast_spell` (AoE / healing)** — blocked: no `spells` key in state → `CombatState.Spells` empty →
+      `ErrorCode.NoSpell` on every `cast_spell`. `CoverageAuto.BestAoECenter` / `IsInRange` exist but are dead code.
+- [ ] **Dialog** — blocked: state has no `dialogue` block (speaker/line/options) → `dialogue_closed` on the router;
+      additionally `executeDialogueOption` has a `TODO(client)` — no `Ext.UI` click implemented.
+- [ ] **Exploration** (`move_to_entity`/`interact_with`/`loot`/`rest`/`travel_to`) — blocked: no
+      `objects`/`inventory`/`can_rest`/`regions` in state → `target not found` / `no_camp` / no regions.
+- [ ] **Semi-blocked**: `not_in_range` schema code exists only for `cast_spell` (`CoverageAuto.IsInRange`);
+      out-of-range `attack_entity` reaches the mod and the engine answers `cast_failed`.
+- [ ] **Bench notes**: invalid HTTP injections are dropped silently (no response to the caller); two back-to-back
+      injections race on the shared `neuro_to_bg3.json` (a command can be lost); async denials invisible over the inject channel.
+- [ ] Resilience №3 (mod/game restart) — not run (requires game restart).
+
+Next: wire the non-combat state emitters (spells / dialogue / exploration) into `bg3_to_neuro.json`,
+then re-run the blocked §9.5 items against the full stack.

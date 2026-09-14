@@ -933,31 +933,47 @@ local function hasNonAscii(s)
     return false
 end
 
+local statSlugSource = {} -- guid -> "accessor=value" (для stats_probe)
+
+-- SE v32: stats id персонажа лежит в esv::Character (алиас "ServerCharacter") ->
+-- CharacterTemplate.Stats (FixedString); резерв - eoc::DataComponent.StatsId
+-- (ExtIdeHelpers: EsvCharacter:BaseComponent и StatsComponent прямых полей
+-- Stats/StatsId не имеют; Osiris CharacterGetStatsId/DB_CharacterStatsId в v32
+-- отсутствуют - проверено runtime'ом).
+local STAT_ID_CANDIDATES = {
+    { name = "ServerCharacter", path = { "Template", "Stats" }, tag = "ServerCharacter.Template.Stats" },
+    { name = "ServerCharacter", path = { "OriginalTemplate", "Stats" }, tag = "ServerCharacter.OriginalTemplate.Stats" },
+    { name = "Data", path = { "StatsId" }, tag = "Data.StatsId" },
+}
+
+local function resolvePath(comp, path)
+    for _, step in ipairs(path) do
+        local okS, cur = pcall(function() return comp[step] end)
+        if not okS or cur == nil then
+            return nil, false
+        end
+        comp = cur
+    end
+    return comp, true
+end
+
 local function statSlug(guid)
     local okE, ent = pcall(Ext.Entity.Get, guid)
-    if not okE or ent == nil then
-        return nil
-    end
-    local ids = {}
-    local okC, sc = pcall(function() return ent:GetComponent("Stats") end)
-    if okC and sc ~= nil then
-        local v = fieldOf(sc, "StatsId") or fieldOf(sc, "Stats")
-        if v ~= nil then
-            ids[#ids + 1] = tostring(v)
-        end
-    end
-    local okC2, cc = pcall(function() return ent:GetComponent("Character") end)
-    if okC2 and cc ~= nil then
-        local v = fieldOf(cc, "Stats")
-        if v ~= nil then
-            ids[#ids + 1] = tostring(v)
-        end
-    end
-    for _, id in ipairs(ids) do
-        if not hasNonAscii(id) then
-            local s = slug(id)
-            if s ~= nil and s ~= "" then
-                return s
+    if okE and ent ~= nil then
+        for _, cand in ipairs(STAT_ID_CANDIDATES) do
+            local okC, comp = pcall(function() return ent:GetComponent(cand.name) end)
+            if okC and comp ~= nil then
+                local v, okV = resolvePath(comp, cand.path)
+                if okV and v ~= nil then
+                    local okT, vs = pcall(tostring, v)
+                    if okT and type(vs) == "string" and vs ~= "" and not hasNonAscii(vs) then
+                        local s = slug(vs)
+                        if s ~= nil and s ~= "" and s ~= "entity" then
+                            statSlugSource[guid] = cand.tag .. "='" .. vs .. "'"
+                            return s
+                        end
+                    end
+                end
             end
         end
     end
@@ -1022,6 +1038,81 @@ local function participantGuids(combatComp)
         local okH, guid = pcall(Ext.Entity.HandleToUuid, parts[i])
         if okH and guid ~= nil and guid ~= "" then
             out[#out + 1] = tostring(guid)
+        end
+    end
+    return out
+end
+
+local function probeCombatStats()
+    -- Диагностика statSlug: участники текущего боя + их компоненты/поля,
+    -- а также какой accessor был реально использован для каждого guid.
+    local out = { source_map = {}, entries = {} }
+    local guids = {}
+    local okAll, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("CombatState") end)
+    if okAll and handles ~= nil then
+        for i = 1, #handles do
+            local okC, comp = pcall(function() return handles[i]:GetComponent("CombatState") end)
+            if okC and comp ~= nil then
+                local parts = participantGuids(comp)
+                for _, g in ipairs(parts) do
+                    if #guids < 12 then
+                        guids[#guids + 1] = g
+                    end
+                end
+                if #guids > 0 then
+                    break
+                end
+            end
+        end
+    end
+    out.guids = guids
+    for _, g in ipairs(guids) do
+        local entry = { guid = g }
+        local okO1, sid1 = pcall(Osi.CharacterGetStatsId, g)
+        entry.osi_CharacterGetStatsId = okO1 and tostring(sid1) or "<err: " .. tostring(sid1) .. ">"
+        local okO2, rows2 = pcall(Osi.DB_CharacterStatsId, g)
+        if okO2 and type(rows2) == "table" and rows2[1] ~= nil then
+            local shown = {}
+            for _, r in ipairs(rows2) do
+                local parts = {}
+                for _, v in ipairs(r) do
+                    parts[#parts + 1] = tostring(v)
+                end
+                shown[#shown + 1] = table.concat(parts, "|")
+                if #shown >= 2 then break end
+            end
+            entry.osi_DB_CharacterStatsId = shown
+        else
+            entry.osi_DB_CharacterStatsId = "<none>"
+        end
+        local okE, ent = pcall(Ext.Entity.Get, g)
+        if okE and ent ~= nil then
+            entry.entity = "ok"
+            local okN, names = pcall(function() return ent:GetAllComponentNames() end)
+            entry.component_names = okN and names or nil
+            for _, cand in ipairs(STAT_ID_CANDIDATES) do
+                local okCn, comp = pcall(function() return ent:GetComponent(cand.name) end)
+                entry["has_" .. cand.name] = okCn and (comp ~= nil) or false
+                if okCn and comp ~= nil then
+                    local v, okV = resolvePath(comp, cand.path)
+                    entry[cand.tag] = (okV and v ~= nil) and tostring(v) or "<nil/err>"
+                    local okPairs, keys = pcall(function()
+                        local ks = {}
+                        for k in pairs(comp) do
+                            ks[#ks + 1] = tostring(k)
+                            if #ks >= 40 then break end
+                        end
+                        return ks
+                    end)
+                    entry[cand.name .. "_keys"] = okPairs and keys or "<pairs/err>"
+                end
+            end
+        else
+            entry.entity = "missing"
+        end
+        out.entries[#out.entries + 1] = entry
+        if statSlugSource[g] ~= nil then
+            out.source_map[g] = statSlugSource[g]
         end
     end
     return out
@@ -2967,6 +3058,18 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         _P("[BG3Neuro] probe: avatars=" .. #(p.avatars or {})
             .. " current=" .. #p.current_characters
             .. (p.probe_error and (" error=" .. p.probe_error) or ""))
+        return true, nil, nil, nil, { debug = p }
+    end
+
+    if name == "stats_probe" then
+        -- Диагностика (не для прода): интроспекция компонентов участников боя
+        -- для проверки пути statSlug. Дёргается через neuro_to_bg3.json:
+        --   { "id": "stats_probe", "name": "stats_probe", "data": "{}" }
+        local okP, p = pcall(probeCombatStats)
+        if not okP then
+            p = { probe_error = tostring(p) }
+        end
+        _P("[BG3Neuro] stats_probe: guids=" .. #(p.guids or {}))
         return true, nil, nil, nil, { debug = p }
     end
 
