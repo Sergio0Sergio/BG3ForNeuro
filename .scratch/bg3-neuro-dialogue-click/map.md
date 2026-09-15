@@ -16,6 +16,9 @@
 ## Decisions so far
 
 - [BG3SE: как программно выбрать вариант диалога (server vs client)](issues/01-bg3se-dialogue-click-api.md): клиентский контекст обязателен — серверного маршрута нет. `Ext.Dialog` отсутствует, osiris — только административные lifecycle-функции; `Ext.UI` client-only (обход Noesis-дерева по `option_index`, клик `:Execute()`/`Subscribe("Click")`); server↔client — NetChannel (`Ext.Net.CreateChannel` + `SendToClient`/`RequestToClient`). Нет клиента → fallback `not_supported` (X1). Тикет 02 проектируется поверх этих фактов.
+- [Маршрут клика по диалогу и контракт server↔client](issues/02-dialogue-click-route.md): только авто-клик на клиентском контексте (Q1=а). Клиент ищет кнопку по `option_index`, при сбое — по `option_text` (Q2=б). Успех — по следующему state диалога, без подтверждающей петли (Q3=а). Нет клиента/диалог закрыт/торговля → `not_supported` + warning (Q4=а). Маршрут: C# → action-файл → server-Lua → NetChannel (`option_index`+`option_text`) → client-Lua (`Ext.UI` поиск+клик) → следующий state.
+
+**Map status: destination reached.** Оба тикета разрешены; маршрут клика зафиксирован (варианты из Fog-секции ниже стали имплементацией). Дальше — имплементация вне карты (клик по диалогу + параллельно `use_item`-зелье/`on_cooldown`), по правилу «wayfinder решает, а не строит».
 
 ## Not yet specified
 

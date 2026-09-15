@@ -432,6 +432,49 @@ public class StateSerializerTests
     }
 
     [Fact]
+    public void Parse_LuaExtractorDialogueJson_PopulatedOptionsFromClientContext()
+    {
+        // v0.8.27: client-контекст (bootstrap DialogClick) отдаёт снапшот диалога
+        // (speaker/line/options) по NetChannel-запросу; сервер мержит его в dialogue-
+        // state. Контракт StateSerializer: непустой options (index+text) разбирается
+        // и рендерится в порядке UI.
+        var state = StateSerializer.Parse("""
+            {
+              "version": 2,
+              "mode": "dialogue",
+              "trigger": "dialog_state",
+              "turn_actor": "",
+              "allies": [],
+              "enemies": [],
+              "dialogue": {
+                "speaker_name": "Withers",
+                "line": "Ты принял свою смерть?",
+                "options": [
+                  { "option_index": 1, "text": "Да, я готов." },
+                  { "option_index": 2, "text": "Расскажи мне ещё." }
+                ]
+              },
+              "available_actions": ["select_dialogue_option"],
+              "events": ["Диалог: варианты и реплики — клиентский источник (NetChannel)"]
+            }
+            """)!;
+
+        Assert.Equal("dialogue", state.Mode);
+        Assert.NotNull(state.Dialogue);
+        Assert.Equal(2, state.Dialogue!.Options.Count);
+        Assert.Equal(1, state.Dialogue.Options[0].OptionIndex);
+        Assert.Equal("Да, я готов.", state.Dialogue.Options[0].Text);
+        Assert.Equal(2, state.Dialogue.Options[1].OptionIndex);
+        Assert.Equal("Расскажи мне ещё.", state.Dialogue.Options[1].Text);
+
+        var md = StateSerializer.ToMarkdown(state);
+        Assert.Contains("- [1] Да, я готов.", md);
+        Assert.Contains("- [2] Расскажи мне ещё.", md);
+        Assert.Contains("Speaker: Withers", md);
+        Assert.Contains("Line: Ты принял свою смерть?", md);
+    }
+
+    [Fact]
     public void Parse_LuaExtractorCombatJson_SpellsBlock_2DTargetsInRange()
     {
         // v0.8.26: buildCombatSpellsBlock — spell_name полным stat-именем, slot из UseCosts,

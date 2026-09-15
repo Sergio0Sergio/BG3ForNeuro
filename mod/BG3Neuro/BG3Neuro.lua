@@ -1,18 +1,27 @@
--- BG3Neuro v0.8.26 — файловой IPC-мост (тикеты 01 + 03-09)
+-- BG3Neuro v0.8.27 — файловой IPC-мост (тикеты 01 + 03-09 + bg3-neuro-dialogue-click)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
---           select_dialogue_option (07, client-контекст), exploration (08:
+--           select_dialogue_option (07), exploration (08:
 --           move_to_entity / interact_with / loot / rest / travel_to /
 --           open_map / open_inventory / toggle_mode) — длинные действия
 -- с двухфазным running:true (промежуточный ack) и финалом по игровому событию.
 -- Dumb-модуль: только состояние и исполнение, без логики решений (решение — в C#).
--- Состояние (v0.8.26): combat (TurnStarted) + exploration (free-roam loop) + dialogue
--- (DialogStarted), все блоки эмитятся в bg3_to_neuro.json (spells/objects/regions/
--- inventory/can_rest/screen); selection/клик диалога остаются client-контекстом (TODO(client)).
+-- Состояние (v0.8.27): combat (TurnStarted) + exploration (free-roam loop) + dialogue
+-- (DialogStarted + клиентский снапшот): все блоки эмитятся в bg3_to_neuro.json
+-- (spells/objects/regions/inventory/can_rest/screen/dialogue.options).
+-- Диалог (тикет bg3-neuro-dialogue-click, карта destination): варианты ответа и
+-- клик живут в клиентском контексте (мод ставит вторую половинку BG3NeuroClient.lua
+-- через BootstrapClient.lua). Server↔client — NetChannel "BG3NeuroDialogue":
+--   server → client:  { kind="bg3neuro_dialogue_snapshot" } (request, ответ с options)
+--   server → client:  { kind="bg3neuro_dialogue_click", index, text, action_id } (fire)
+--   client → server:  { kind="bg3neuro_dialogue_click_result", action_id, ok=false, reason }
+-- Решения тикета 02: авто-клик (Q1=а), поиск по option_index с фолбэком по option_text
+-- (Q2=б), успех = по следующему state диалога (Q3=а), клиент недоступен → not_supported
+-- + warning (Q4=а).
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.26"
+local MOD_VERSION = "0.8.27"
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
 local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (реальный polling)
@@ -1685,6 +1694,36 @@ local EXPLORE_OBJECT_TYPES = { "ServerCharacter", "Item", "Useable", "Usable", "
 local dialogActive = false            -- диалог открыт (DialogStarted -> DialogEnded)
 local currentScreen = "exploration"   -- "exploration" | "map" | "inventory"
 
+-- Диалог: server↔client мост (тикет bg3-neuro-dialogue-click). Канал создаётся
+-- здесь же (server-контекст) и в BG3NeuroClient.lua (client-контекст); сообщения
+-- ходят по NetChannel внутри процесса SP и по сети в MP. См. секцию «Диалог».
+local DIALOGUE_CHANNEL = "BG3NeuroDialogue"
+local DIALOGUE_CLIENT_TIMEOUT_MS = 1500
+
+local dialogueBridge = nil          -- NetChannel (server-контекст)
+local dialogueClientAlive = false   -- клиентская половина отвечала на снапшоты?
+local dialogueSnapshot = nil        -- { speaker, line, options = { {index,text}, ... } } от клиента
+local dialogueSnapshotPending = false
+local dialogueSnapshotSeq = 0    -- поколение запроса для отсева устаревших таймаутов
+local dialogueUnavailable = false   -- канал не создан / клиент молчит (Q4: честный отказ)
+local lastDialogueJson = nil
+local pendingDialogue = {}          -- { id, fp } — клики в полёте; финал: следующий state или DialogEnded
+
+local function dialogueBridgeOk()
+    return Ext ~= nil and Ext.Net ~= nil and dialogueBridge ~= nil
+end
+
+local function dialogueFingerprint(snapshot)
+    if snapshot == nil then
+        return nil
+    end
+    local parts = { tostring(snapshot.speaker or ""), tostring(snapshot.line or "") }
+    for _, o in ipairs(snapshot.options or {}) do
+        parts[#parts + 1] = tostring(o ~= nil and o.index or "") .. "=" .. tostring(o ~= nil and o.text or "")
+    end
+    return table.concat(parts, "|")
+end
+
 local function currentMode(acting)
     -- Единый приоритет режимов для всех эмиттеров: диалог > комбат > экран > свободный режим.
     if dialogActive then
@@ -2042,6 +2081,36 @@ local function speakerForDialog(dialogId)
 end
 
 function captureDialogueState(trigger, dialogId)
+    local state = buildDialogueState(trigger, dialogId)
+    writeStateFile(state)
+    return state
+end
+
+-- Построение dialogue-state на основе последнего снапшота клиента (options/line)
+-- + серверного speaker. Опции — из клиентского UI (NetChannel), server не может
+-- их увидеть (research 01: client-only UI). Если клиент молчит — честный fallback.
+local function buildDialogueState(trigger, dialogId)
+    local snap = dialogueSnapshot
+    local options = {}
+    if snap ~= nil and snap.options ~= nil then
+        for i, o in ipairs(snap.options) do
+            if type(o) == "table" and o.index ~= nil then
+                options[i] = { option_index = o.index, text = o.text }
+            end
+        end
+    end
+
+    local events
+    if dialogueBridgeOk() == false then
+        events = { "Диалог открыт. Клиентский источник вариантов недоступен (NetChannel не создан) — select_dialogue_option вернёт not_supported (Q4)." }
+    elseif dialogueClientAlive == false then
+        events = { "Диалог открыт. Клиентская половина не отвечает на снапшот — select_dialogue_option вернёт not_supported (Q4)." }
+    elseif #options > 0 then
+        events = { "Диалог: " .. #options .. " вариантов ответа (клиентский источник)." }
+    else
+        events = { "Диалог открыт. Варианты ответа собираются из клиентского UI (NetChannel)." }
+    end
+
     local state = {
         version = STATE_VERSION,
         mode = "dialogue",
@@ -2052,18 +2121,43 @@ function captureDialogueState(trigger, dialogId)
         enemies = {},
         dialogue = {
             speaker_name = nil,
-            line = nil,
-            options = {},
+            line = (snap ~= nil and snap.line) or nil,
+            options = options,
         },
         available_actions = { "select_dialogue_option" },
-        events = { "Диалог открыт. Варианты ответа живут в клиентском UI (клик по option — TODO(client))." },
+        events = events,
     }
     local speaker = speakerForDialog(dialogId)
     if speaker ~= nil then
         state.dialogue.speaker_name = speaker
     end
-    writeStateFile(state)
     return state
+end
+
+-- Пишет dialogue-state только при изменении базового содержимого (без generated_at)
+-- или когда force. Используется снапшот-ответом и таймаутом — чтобы не спамить
+-- файл на каждый тик exploreLoop.
+local function writeDialogueStateIfChanged(trigger, force)
+    local okB, state = pcall(buildDialogueState, trigger, nil)
+    if not (okB and type(state) == "table") then
+        return
+    end
+    local okJ, json = pcall(function()
+        local c = {}
+        for k, v in pairs(state) do
+            if k ~= "generated_at" then
+                c[k] = v
+            end
+        end
+        return Ext.Json.Stringify(c)
+    end)
+    if not (okJ and type(json) == "string") then
+        return
+    end
+    if force or json ~= lastDialogueJson then
+        writeStateFile(state)
+        lastDialogueJson = json
+    end
 end
 
 function captureCurrentState(trigger, force)
@@ -2997,39 +3091,173 @@ local function executeCast(action)
 end
 
 -- ============================================================
--- Диалог (тикет 07): select_dialogue_option через client-клик.
--- Server РЅРµ СѓРјРµРµС‚ РїСѓР±Р»РёС‡РЅРѕ РІС‹Р±РёСЂР°С‚СЊ РІР°СЂРёР°РЅС‚ (research §7.2, РЅРµС‚ PickDialogNode);
--- значит исполнитель живёт в client-контексте (Ext.UI). Если клиентский
--- контекст недоступен — откат not_supported (НЕ уводить Neuro в цикл без канала).
--- Варианты в state даёт тот же client-источник, что и рендер UI (option_index == UI order).
+-- Диалог (тикет 07 + bg3-neuro-dialogue-click): select_dialogue_option
+-- через client-клик. Server не умеет выбирать вариант (research 01:
+-- нет Ext.Dialog / PickDialogNode в osiris) — исполнитель живёт в
+-- клиентской половине мода (BG3NeuroClient.lua, Ext.UI). Связь — NetChannel
+-- "BG3NeuroDialogue" (одинаковый module+channel в обеих половинках):
+--   server → client: { kind="bg3neuro_dialogue_snapshot" }   (запрос вариантов)
+--   server → client: { kind="bg3neuro_dialogue_click", index, text, action_id }
+--   client → server: { kind="bg3neuro_dialogue_snapshot_reply", ok, speaker,
+--                       line, options = { {index, text} } }
+--   client → server: { kind="bg3neuro_dialogue_click_result", action_id, ok=false, reason }
+-- Решения тикета 02: авто-клик (Q1=а); поиск кнопки по option_index с фолбэком
+-- по option_text (Q2=б); успех = следующий state диалога (Q3=а); клиент
+-- недоступен → not_supported + warning (Q4=а). Варианты в state — тот же
+-- клиентский источник, что и рендер UI (option_index == порядок UI).
 -- ============================================================
 
-local pendingDialogue = {} -- { id = action.id, dialog = guid }
-
-local function finalizeDialogueOption(dialog)
-    for i = 1, #pendingDialogue do
-        local pd = pendingDialogue[i]
-        if pd.dialog == dialog then
-            table.remove(pendingDialogue, i)
-            writeResult(pd.id, true, false, nil, nil)
-            return
-        end
+-- Канал создаётся сразу при загрузке серверного модуля (в bootstrap моды уже
+-- загружены, Ext.Mod.IsModLoaded(ModuleUUID) = true). Обработчик ошибок клика:
+-- если клиент не смог кликнуть — writeResult(not_supported) и warning.
+local function initDialogueBridge()
+    local okC, channel = pcall(function()
+        return Ext.Net.CreateChannel(ModuleUUID or MOD_NAME, DIALOGUE_CHANNEL)
+    end)
+    if not okC or channel == nil then
+        dialogueUnavailable = true
+        _P("[BG3Neuro] dialogue: NetChannel create failed: " .. tostring(channel))
+        return
     end
+    dialogueBridge = channel
+    local okH, errH = pcall(function()
+        dialogueBridge:SetHandler(function(msg, user)
+            if type(msg) ~= "table" or msg.kind ~= "bg3neuro_dialogue_click_result" then
+                return
+            end
+            if msg.ok == false then
+                for i = 1, #pendingDialogue do
+                    local pd = pendingDialogue[i]
+                    if pd.id == msg.action_id then
+                        table.remove(pendingDialogue, i)
+                        _P("[BG3Neuro] dialogue: click failed: " .. tostring(msg.reason or "unknown"))
+                        writeResult(pd.id, false, nil, "not_supported",
+                            "ClientAutoselectExecutor: клик по варианту не выполнен клиентом: "
+                            .. tostring(msg.reason or "unknown"))
+                        return
+                    end
+                end
+            end
+        end)
+    end)
+    if not okH then
+        _P("[BG3Neuro] dialogue: SetHandler failed: " .. tostring(errH))
+    end
+    _P("[BG3Neuro] dialogue: NetChannel ready (module=" .. tostring(ModuleUUID or MOD_NAME)
+        .. ", channel=" .. DIALOGUE_CHANNEL .. ")")
+end
+
+initDialogueBridge()
+
+-- Финализация всех «кликов в полёте»: успех (DialogEnded) — клик сработал,
+-- диалог закрыт, спорить не с чем.
+local function finalizeAllDialogueOptions()
+    for i = 1, #pendingDialogue do
+        writeResult(pendingDialogue[i].id, true, false, nil, nil)
+    end
+    pendingDialogue = {}
+end
+
+-- forward-decl: beginDialogueSnapshotRequest использует onDialogueSnapshotReply в колбэке
+local onDialogueSnapshotReply
+
+-- Запрос снапшота вариантов у клиента. Таймаут DIALOGUE_CLIENT_TIMEOUT_MS →
+-- пометка Q4 (honest fallback) + честный state без options.
+local function beginDialogueSnapshotRequest()
+    if dialogueBridgeOk() == false then
+        if dialogueUnavailable == false then
+            dialogueUnavailable = true
+            _P("[BG3Neuro] dialogue: client bridge unavailable (Ext.Net/канал не создан) — Q4")
+            writeDialogueStateIfChanged("dialog_state", true)
+        end
+        return
+    end
+    if dialogueSnapshotPending then
+        return
+    end
+    dialogueSnapshotPending = true
+    dialogueSnapshotSeq = dialogueSnapshotSeq + 1
+    local seq = dialogueSnapshotSeq
+    local ok, err = pcall(function()
+        dialogueBridge:RequestToClient({ kind = "bg3neuro_dialogue_snapshot" }, nil, function(reply)
+            dialogueSnapshotPending = false
+            onDialogueSnapshotReply(reply)
+        end)
+    end)
+    if not ok then
+        dialogueSnapshotPending = false
+        dialogueUnavailable = true
+        _P("[BG3Neuro] dialogue: snapshot request failed: " .. tostring(err))
+        writeDialogueStateIfChanged("dialog_state", true)
+        return
+    end
+    Ext.Timer.WaitForRealtime(DIALOGUE_CLIENT_TIMEOUT_MS, function()
+        if dialogueSnapshotPending and seq == dialogueSnapshotSeq then
+            dialogueSnapshotPending = false
+            dialogueClientAlive = false
+            _P("[BG3Neuro] dialogue: client не ответил за " .. DIALOGUE_CLIENT_TIMEOUT_MS
+                .. "ms — клик недоступен (Q4)")
+            writeDialogueStateIfChanged("dialog_state", true)
+        end
+    end)
+end
+
+-- Ответ клиента со снапшотом диалога. Обновляет dialogue-state, а по
+-- смене fingerprint (fp) от снапшота финализирует «клики в полёте» (Q3=а:
+-- новый state = клик сработал).
+onDialogueSnapshotReply = function(reply)
+    if type(reply) ~= "table" then
+        dialogueClientAlive = false
+        return
+    end
+    local wasAlive = dialogueClientAlive
+    dialogueUnavailable = false
+    dialogueClientAlive = true
+    if reply.ok == true and type(reply.options) == "table" then
+        local snap = { speaker = reply.speaker, line = reply.line, options = {} }
+        for i, o in ipairs(reply.options) do
+            if type(o) == "table" and o.index ~= nil then
+                snap.options[i] = { index = o.index, text = o.text }
+            end
+        end
+        dialogueSnapshot = snap
+        local fp = dialogueFingerprint(dialogueSnapshot)
+        local i = 1
+        while i <= #pendingDialogue do
+            local pd = pendingDialogue[i]
+            if pd.fp ~= nil and fp ~= pd.fp then
+                table.remove(pendingDialogue, i)
+                _P("[BG3Neuro] dialogue: click advanced dialogue (новый state) — выбранный вариант сработал")
+                writeResult(pd.id, true, false, nil, nil)
+            else
+                i = i + 1
+            end
+        end
+    elseif reply.ok == false then
+        _P("[BG3Neuro] dialogue: client snapshot error: " .. tostring(reply.reason or "?"))
+    end
+    if dialogueSnapshotPending then
+        -- ответ пришёл раньше таймаута — сбрасываем флаг (таймер больше не тронет)
+        dialogueSnapshotPending = false
+    end
+    -- пишем только при реальном изменении (fp от времени не зависит)
+    writeDialogueStateIfChanged("dialog_state", wasAlive == false)
 end
 
 Ext.Osiris.RegisterListener("DialogStarted", 2, "after", function(dialog, instanceID)
-    -- v0.8.26: диалог открыт — пишем dialogue-состояние в bg3_to_neuro.json и
-    -- держим флаг, чтобы exploreLoop не затирал его exploration-тиками.
     dialogActive = true
     local okD = pcall(captureDialogueState, "dialog_started", dialog)
     if okD then
         _P("[BG3Neuro] dialogue: opened")
     end
+    -- сразу запрашиваем варианты (первый ответ даст options в state)
+    beginDialogueSnapshotRequest()
 end)
 
 Ext.Osiris.RegisterListener("DialogEnded", 2, "after", function(dialog, instanceID)
     dialogActive = false
-    finalizeDialogueOption(dialog)
+    dialogueSnapshotPending = false
+    finalizeAllDialogueOptions()
     -- следующий тик exploreLoop вернёт exploration (или TurnStarted — комбат)
     _P("[BG3Neuro] dialogue: closed")
 end)
@@ -3041,17 +3269,35 @@ local function executeDialogueOption(action)
         return false, nil, "not_supported", "option_index is required"
     end
 
-    -- Кнопка диалога находится в клиентском UI (Noesis); клик — только из client-контекста.
-    if Ext == nil or Ext.UI == nil then
+    -- Кнопка диалога живёт в клиентском UI (Noesis); клик — через NetChannel
+    -- в клиентскую половину мода (BG3NeuroClient.lua + BootstrapClient.lua).
+    if dialogueBridgeOk() == false then
         return false, nil, "not_supported",
-            "ClientAutoselectExecutor unavailable: no client context for option highlight/click"
+            "ClientAutoselectExecutor unavailable: NetChannel не создан — клиентская половина мода не установлена (Q4)"
+    end
+    if dialogueClientAlive == false or dialogueUnavailable then
+        return false, nil, "not_supported",
+            "ClientAutoselectExecutor unavailable: клиентская половина не ответила на снапшот — клик отклонён (Q4)"
     end
 
-    -- Долгий ход: клик происходит в UI, итог — событие DialogEnded/DialogClosed.
-    pendingDialogue[#pendingDialogue + 1] = { id = action.id, dialog = "(unknown)" }
-    -- TODO(client): Ext.UI.NeedMouse / эмуляция клика по UI-элементу option_index, подсветка перед кликом;
-    -- сюда — реальный диалоговый дескриптор для матчинга DialogEnded.
-    return true, true, nil, nil -- success, running (финал — DialogEnded)
+    local text = data.option_text
+    local ok, err = pcall(function()
+        dialogueBridge:SendToClient({
+            kind = "bg3neuro_dialogue_click",
+            index = index,
+            text = text,
+            action_id = action.id,
+        }, nil)
+    end)
+    if not ok then
+        return false, nil, "not_supported", "ClientAutoselectExecutor send failed: " .. tostring(err)
+    end
+
+    -- Долгий ход: клик ушёл в UI; финал — следующий state диалога (Q3=а, по fp
+    -- снапшота) или DialogEnded. Если клиент честно упал (msg ok=false) —
+    -- SetHandler отпишет not_supported.
+    pendingDialogue[#pendingDialogue + 1] = { id = action.id, fp = dialogueFingerprint(dialogueSnapshot) }
+    return true, true, nil, nil -- success, running
 end
 
 local function executeMoveToTarget(action)
@@ -3833,7 +4079,11 @@ local function exploreLoop()
         _P("[BG3Neuro] state: mode=" .. tostring(mode))
         lastExploreMode = mode
     end
-    if mode ~= "combat" and mode ~= "dialogue" then
+    if mode == "dialogue" then
+        -- v0.8.27: в диалоге держим снапшот вариантов свежим (клиентская половина
+        -- отвечает по NetChannel; ответ сам обновляет dialogue-state при изменении).
+        beginDialogueSnapshotRequest()
+    elseif mode ~= "combat" then
         local okB, state = pcall(buildExplorationState, "free_roam")
         if okB and state ~= nil then
             local okJ, json = pcall(function() return Ext.Json.Stringify(stripGeneratedAt(state)) end)

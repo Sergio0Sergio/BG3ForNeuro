@@ -355,6 +355,26 @@ public class ActionRouterTests : IDisposable
     }
 
     [Fact]
+    public void SelectDialogueOption_WithOptionText_PreservesTextInActionFile()
+    {
+        // v0.8.27: option_text — подстраховка клиентского маппинга (Q2=б). Контракт:
+        // значение пробрасывается сервером в action_*.json для client-Lua без изменений.
+        var router = CreateRouter();
+        var state = DialogueState();
+
+        var result = router.ValidateAndDispatch("act-1", "select_dialogue_option",
+            """{"option_index":1,"option_text":"Да, я готов."}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+        var file = File.ReadAllText(Path.Combine(_tmpDir, "action_act-1.json"));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(file)!;
+        var data = node["data"]!.GetValue<string>();
+        var dataNode = System.Text.Json.Nodes.JsonNode.Parse(data)!;
+        Assert.Equal(1, dataNode["option_index"]!.GetValue<int>());
+        Assert.Equal("Да, я готов.", dataNode["option_text"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void SelectDialogueOption_NoActiveDialogue_DialogueClosed()
     {
         var router = CreateRouter();
