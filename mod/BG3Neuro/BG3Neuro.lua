@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.17 — файловой IPC-мост (тикеты 01 + 03-09)
+-- BG3Neuro v0.8.26 — файловой IPC-мост (тикеты 01 + 03-09)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07, client-контекст), exploration (08:
@@ -6,10 +6,13 @@
 --           open_map / open_inventory / toggle_mode) — длинные действия
 -- с двухфазным running:true (промежуточный ack) и финалом по игровому событию.
 -- Dumb-модуль: только состояние и исполнение, без логики решений (решение — в C#).
+-- Состояние (v0.8.26): combat (TurnStarted) + exploration (free-roam loop) + dialogue
+-- (DialogStarted), все блоки эмитятся в bg3_to_neuro.json (spells/objects/regions/
+-- inventory/can_rest/screen); selection/клик диалога остаются client-контекстом (TODO(client)).
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.25"
+local MOD_VERSION = "0.8.26"
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
 local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (реальный polling)
@@ -901,6 +904,38 @@ local function fieldOf(comp, f)
     return nil
 end
 
+local function firstAttempt(attempts, accept)
+    -- Первый успешный pcall из перечня (fallback-ladder): НЕ-пустой результат,
+    -- опционально прошедший accept-фильтр. Общий механизм для
+    -- currentRegionName / ownerCleanOf / itemStatsId / speakerForDialog.
+    for _, f in ipairs(attempts) do
+        local ok, v = pcall(f)
+        if ok and v ~= nil and tostring(v) ~= "" then
+            if accept == nil or accept(v) then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+local function allEntityGuids(compName)
+    -- clean guid'ы всех сущностей с компонентом (HandleToUuid).
+    -- Общий скелет сканирования для scanNearbyObjects / scanRegions / scanPartyInventory.
+    local out = {}
+    local okAll, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent(compName) end)
+    if not okAll or handles == nil then
+        return out
+    end
+    for i = 1, #handles do
+        local okH, guid = pcall(Ext.Entity.HandleToUuid, handles[i])
+        if okH and guid ~= nil and tostring(guid) ~= "" then
+            out[#out + 1] = tostring(guid)
+        end
+    end
+    return out
+end
+
 local function turnComponent(ent)
     if ent == nil then
         return nil
@@ -1296,6 +1331,131 @@ local function combatStateComponentOf(combatGuid, acting, diag)
     return foundComp
 end
 
+-- ============================================================
+-- Spells emitter (v0.8.26, тикет 05): PreparedSpells кастера -> state.spells
+-- Диапазон/радиус AoE — поля SpellData (TargetRadius/AreaRadius, метры).
+-- spell_name отдаётся полным stat-именем (Target_CureWounds / Projectile_FireBolt):
+-- executeCast принимает его и как Ext.Stats.Get(spell), и как префиксный матч книги.
+-- ============================================================
+
+local function spellRangeAndAoe(statId)
+    local range, aoe = 0, 0
+    local okS, stats = pcall(Ext.Stats.Get, statId)
+    if okS and stats ~= nil then
+        local r = fieldOf(stats, "TargetRadius")
+        if type(r) == "number" and r > 0 then
+            range = r
+        end
+        local a = fieldOf(stats, "AreaRadius")
+        if type(a) == "number" and a > 0 then
+            aoe = a
+        end
+        if range <= 0 then
+            -- Touch/Utility без TargetRadius: melee по умолчанию (1.5 м)
+            local spellType = tostring(fieldOf(stats, "SpellType") or "")
+            if spellType == "Target" or spellType == "Shout" then
+                range = 1.5
+            end
+        end
+    end
+    return range, aoe
+end
+
+local function levelSlotOf(stats)
+    -- У заклинаний без SpellSlotsGroup (кантипы/атис) слот = SpellData.Level.
+    local lvl = fieldOf(stats, "Level")
+    if lvl ~= nil and tostring(lvl) ~= "" then
+        return tostring(lvl)
+    end
+    return nil
+end
+
+local function spellSlotFromUseCosts(useCosts)
+    -- Real UseCosts: "ActionPoint:1;SpellSlotsGroup:1:1:3" -> "3". Проверено по игре:
+    -- Bless(lvl1)="...:1:1:1", ScorchingRay/HoldPerson(lvl2)="...:1:1:2",
+    -- Fireball/Counterspell(lvl3)="...:1:1:3" — УРОВЕНЬ слота = ПОСЛЕДНЕЕ число.
+    if type(useCosts) ~= "string" then
+        return nil
+    end
+    local seg = useCosts:match("SpellSlotsGroup:[^;]*")
+    if seg == nil then
+        return nil
+    end
+    return seg:match(":(%d+)$")
+end
+
+local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
+    -- casterId — raw acting (префиксный/датч id). Ext.Entity.Get НЕ резолвит чистые
+    -- guid'ы (ревизия v0.8.13): при неудаче маппим id как в endTurnEntityId.
+    local id = casterId
+    if casterId ~= nil and casterId ~= "" then
+        local okTry, entTry = pcall(Ext.Entity.Get, casterId)
+        if not okTry or entTry == nil then
+            id = endTurnEntityId(casterId, casterId)
+        end
+    end
+    local okE, ent = pcall(Ext.Entity.Get, id)
+    local prepared = {}
+    if okE and ent ~= nil then
+        local okP, ps = pcall(function()
+            if ent.SpellBookPrepares and ent.SpellBookPrepares.PreparedSpells then
+                return ent.SpellBookPrepares.PreparedSpells
+            end
+            return {}
+        end)
+        if okP and ps ~= nil then
+            prepared = ps
+        end
+    end
+
+    local seen = {}
+    local list = {}
+    for i = 1, #prepared do
+        local ps = prepared[i]
+        local statId
+        local okO, origin = pcall(function() return ps.OriginatorPrototype end)
+        if okO and origin ~= nil and tostring(origin) ~= "" then
+            statId = tostring(origin)
+        else
+            local okT, proto = pcall(function() return ps.Prototype end)
+            if okT and proto ~= nil and tostring(proto) ~= "" then
+                statId = tostring(proto)
+            end
+        end
+        if statId ~= nil and not seen[statId] then
+            seen[statId] = true
+            local range, aoe = spellRangeAndAoe(statId)
+            local slot
+            local okG, statsG = pcall(Ext.Stats.Get, statId)
+            if okG and statsG ~= nil then
+                slot = spellSlotFromUseCosts(fieldOf(statsG, "UseCosts")) or levelSlotOf(statsG)
+            end
+
+            local targets = {}
+            if range > 0 and casterPosX ~= nil and casterPosY ~= nil then
+                for _, e in ipairs(state.enemies or {}) do
+                    if type(e.position_x) == "number" and type(e.position_y) == "number" then
+                        -- z у врагов не хранится в state: дистанция 2D (как CoverageAuto на C#)
+                        local d = math.sqrt((casterPosX - e.position_x) ^ 2 + (casterPosY - e.position_y) ^ 2)
+                        if d <= range then
+                            targets[#targets + 1] = e.alias
+                        end
+                    end
+                end
+            end
+            list[#list + 1] = {
+                spell_name = statId,
+                slot = slot,
+                range = round1(range) or 0,
+                aoe = round1(aoe) or 0,
+                on_cooldown = false,
+                targets_in_range = targets,
+            }
+        end
+    end
+    state.spells = list
+end
+
 function captureCombatState(event, force)
     -- Полный combat-state: глобальная функция, чтобы её мог вызвать уже
     -- зарегистрированный listener TurnStarted (резолвится в runtime).
@@ -1502,9 +1662,422 @@ function captureCombatState(event, force)
             "move_to_target: [" .. table.concat(allAliases, ", ") .. "]"
     end
 
+    -- v0.8.26 (тикет 05): подготовленные заклинания активного кастера -> state.spells.
+    -- Передаём raw acting: buildCombatSpellsBlock сам резолвит id (как endTurnEntityId).
+    buildCombatSpellsBlock(state, acting, actingPosX, actingPosY)
+
     writeStateFile(state)
     diag.stage = "done"
     return state, diag
+end
+
+-- ============================================================
+-- StateExtractor free-roam (v0.8.26, тикет 08 + 07): exploration / dialogue
+-- blocks в bg3_to_neuro.json. Комбат-состояние по-прежнему пишет TurnStarted;
+-- свободный режим — периодический тик exploreLoop; диалог — DialogStarted.
+-- ============================================================
+
+local EXPLORE_PERIOD_MS = 2000
+local EXPLORE_MAX_DISTANCE = 60
+local EXPLORE_MAX_OBJECTS = 60
+local EXPLORE_OBJECT_TYPES = { "ServerCharacter", "Item", "Useable", "Usable", "Interactable", "Lock", "Loot" }
+
+local dialogActive = false            -- диалог открыт (DialogStarted -> DialogEnded)
+local currentScreen = "exploration"   -- "exploration" | "map" | "inventory"
+
+local function currentMode(acting)
+    -- Единый приоритет режимов для всех эмиттеров: диалог > комбат > экран > свободный режим.
+    if dialogActive then
+        return "dialogue"
+    end
+    if inTurnBasedCombat(acting) then
+        return "combat"
+    end
+    if currentScreen == "map" then
+        return "map"
+    end
+    if currentScreen == "inventory" then
+        return "inventory"
+    end
+    return "exploration"
+end
+
+local function inTurnBasedCombat(actor)
+    -- Зеркало гейта captureCombatState: у ходящего есть TurnBased.CombatTeam/Combat,
+    -- т.е. вне боя возвращает false и тик свободного режима пишет exploration.
+    local clean = actingCleanOf(actor)
+    if clean == nil or clean == "" then
+        return false
+    end
+    local okE, ent = pcall(Ext.Entity.Get, clean)
+    if not okE or ent == nil then
+        return false
+    end
+    local tb = turnComponent(ent)
+    return tb ~= nil and (fieldOf(tb, "CombatTeam") ~= nil or fieldOf(tb, "Combat") ~= nil)
+end
+
+local function currentRegionName()
+    local v = firstAttempt({
+        function() return Osi.GetCurrentMap() end,
+        function() return Osi.GetCurrentRegion() end,
+        function() return Ext.World.GetCurrentMap() end,
+    })
+    if v ~= nil then
+        return tostring(v)
+    end
+    return nil
+end
+
+local function hasComponentSafe(ent, name)
+    if ent == nil then
+        return false
+    end
+    local okC, comp = pcall(function() return ent:GetComponent(name) end)
+    return okC and comp ~= nil
+end
+
+local function classifyObject(guid)
+    local okE, ent = pcall(Ext.Entity.Get, guid)
+    if not okE then
+        ent = nil
+    end
+    local isChar = hasComponentSafe(ent, "ServerCharacter")
+    local isItem = hasComponentSafe(ent, "Item")
+    local isLoot = hasComponentSafe(ent, "Loot")
+    local isLock = hasComponentSafe(ent, "Lock")
+    local isUseable = hasComponentSafe(ent, "Useable") or hasComponentSafe(ent, "Usable")
+    local isInteractable = hasComponentSafe(ent, "Interactable")
+
+    local typ = "object"
+    local interactions = {}
+    local lootable = false
+    if isChar then
+        typ = "character"
+        interactions[#interactions + 1] = "talk"
+        if isLoot then
+            lootable = true
+            interactions[#interactions + 1] = "loot"
+        end
+    elseif isItem then
+        typ = "item"
+        interactions[#interactions + 1] = "inspect"
+        interactions[#interactions + 1] = "take"
+        lootable = true
+    else
+        if isLock then
+            typ = "door"
+            interactions[#interactions + 1] = "open"
+            interactions[#interactions + 1] = "lockpick"
+        elseif isUseable then
+            typ = "useable"
+            interactions[#interactions + 1] = "use"
+        end
+        if isLoot then
+            lootable = true
+            if #interactions == 0 then
+                interactions[#interactions + 1] = "loot"
+            end
+        end
+        if isInteractable and #interactions == 0 then
+            interactions[#interactions + 1] = "interact"
+        end
+    end
+    return { type = typ, interactions = interactions, lootable = lootable }
+end
+
+local function scanNearbyObjects(ax, ay, az, partySet, ownedAliases)
+    local out = {}
+    local added = {}
+    for _, compName in ipairs(EXPLORE_OBJECT_TYPES) do
+        local guids = allEntityGuids(compName)
+        for _, g in ipairs(guids) do
+            if #out >= EXPLORE_MAX_OBJECTS then
+                break
+            end
+            if not partySet[g] and not added[g] then
+                local px, py, pz = positionOf(g)
+                if px ~= nil and ax ~= nil then
+                    local d = distance3(ax, ay, az, px, py, pz)
+                    if d ~= nil and d <= EXPLORE_MAX_DISTANCE then
+                        added[g] = true
+                        local cls = classifyObject(g)
+                        out[#out + 1] = {
+                            alias = registerAlias(g, false, ownedAliases),
+                            name = displayName(g),
+                            distance = round1(d) or 0,
+                            region = currentRegionName(),
+                            seen_by = "player",
+                            type = cls.type,
+                            status = nil,
+                            interactions = cls.interactions,
+                            lootable = cls.lootable,
+                        }
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
+local function scanRegions(ax, ay, az)
+    local out = {}
+    local region = currentRegionName()
+    local guids = allEntityGuids("Waypoint")
+    for i, g in ipairs(guids) do
+        local d = nil
+        local px, py, pz = positionOf(g)
+        if px ~= nil and ax ~= nil then
+            d = distance3(ax, ay, az, px, py, pz)
+        end
+        local name = displayName(g)
+        if name == g or name == "" then
+            name = "Waypoint_" .. tostring(i)
+        end
+        out[#out + 1] = {
+            name = name,
+            region_id = "wp_" .. tostring(i),
+            distance = round1(d or 0) or 0,
+            region = region,
+        }
+    end
+    return out
+end
+
+local function ownerCleanOf(comp)
+    if comp == nil then
+        return nil
+    end
+    local v = firstAttempt({
+        function() return comp.ItemData.Owner end,
+        function() return comp.Owner end,
+        function() return comp.ItemData.Parent end,
+        function() return comp.Parent end,
+    }, function(raw)
+        local p = pureGuid(tostring(raw))
+        return p ~= nil and p ~= ""
+    end)
+    if v == nil then
+        return nil
+    end
+    return pureGuid(tostring(v))
+end
+
+local function itemStatsId(comp)
+    if comp == nil then
+        return nil
+    end
+    local v = firstAttempt({
+        function() return comp.ItemData.StatsId end,
+        function() return comp.ItemData.Stats end,
+        function() return comp.StatsId end,
+    })
+    if v ~= nil then
+        return tostring(v)
+    end
+    return nil
+end
+
+local function itemQuantity(comp, statsId)
+    local okS, s = pcall(function() return comp.Stack end)
+    if okS and type(s) == "number" and s > 1 then
+        return s
+    end
+    if statsId ~= nil then
+        local okT, t = pcall(function() return Ext.Stats.Get(statsId).Stack end)
+        if okT and type(t) == "number" and t > 1 then
+            return t
+        end
+    end
+    return 1
+end
+
+local function itemCategory(statsId)
+    if statsId == nil then
+        return nil
+    end
+    local okS, stats = pcall(Ext.Stats.Get, statsId)
+    if not okS or stats == nil then
+        return nil
+    end
+    local okT, t = pcall(function() return stats.Type end)
+    local t2 = okT and tostring(t) or ""
+    if t2 == "Armor" or t2 == "Weapon" or t2 == "Shield" then
+        return "equipment"
+    end
+    if t2 == "Consumable" or t2 == "Potion" then
+        return "consumable"
+    end
+    return "item"
+end
+
+local function scanPartyInventory(partySet)
+    local out = {}
+    local guids = allEntityGuids("Item")
+    for i, itemGuid in ipairs(guids) do
+        local okE, ent = pcall(Ext.Entity.Get, itemGuid)
+        if okE and ent ~= nil then
+            local okC, comp = pcall(function() return ent:GetComponent("Item") end)
+            if okC and comp ~= nil then
+                local owner = ownerCleanOf(comp)
+                if owner ~= nil and partySet[owner] then
+                    local statsId = itemStatsId(comp)
+                    local name = displayName(itemGuid)
+                    if name == itemGuid or name == "" then
+                        name = "item_" .. tostring(i)
+                    end
+                    out[#out + 1] = {
+                        alias = "inv_" .. tostring(#out + 1),
+                        name = name,
+                        quantity = itemQuantity(comp, statsId),
+                        category = itemCategory(statsId) or "item",
+                    }
+                end
+            end
+        end
+    end
+    return out
+end
+
+local function partySetOf()
+    local out = {}
+    local avatars = partyAvatars()
+    for g in pairs(avatars) do
+        out[g] = true
+    end
+    for _, cc in ipairs(currentCharacters()) do
+        local p = pureGuid(cc.character)
+        if p ~= nil and p ~= "" then
+            out[p] = true
+        end
+    end
+    return out
+end
+
+function buildExplorationState(trigger)
+    local mode = currentScreen == "map" and "map"
+        or currentScreen == "inventory" and "inventory"
+        or "exploration"
+    local state = {
+        version = STATE_VERSION,
+        mode = mode,
+        generated_at = nowIso(),
+        trigger = trigger or "free_roam",
+        turn_actor = "",
+        allies = {},
+        enemies = {},
+        objects = {},
+        regions = {},
+        inventory = {},
+        can_rest = false,
+        screen = currentScreen,
+        available_actions = {},
+        events = {},
+    }
+    local acting = resolveActingCharacter("")
+    if acting == nil or acting == "" then
+        return state
+    end
+    local ax, ay, az = positionOf(acting)
+    local party = partySetOf()
+
+    local taken = {}
+    for g in pairs(party) do
+        local alias = registerAlias(g, true, taken)
+        local okE, ent = pcall(Ext.Entity.Get, g)
+        if not okE then
+            ent = nil
+        end
+        local hp, maxHp = healthOf(ent)
+        local px, py, pz = positionOf(g)
+        local dist = nil
+        if px ~= nil and ax ~= nil then
+            dist = round1(distance3(ax, ay, az, px, py, pz))
+        end
+        state.allies[#state.allies + 1] = {
+            alias = alias,
+            name = displayName(g),
+            hp = hp or 0,
+            max_hp = maxHp or 0,
+            distance = dist or 0,
+            position_x = round1(px or 0),
+            position_y = round1(py or 0),
+        }
+    end
+
+    state.objects = scanNearbyObjects(ax, ay, az, party, taken)
+    state.regions = scanRegions(ax, ay, az)
+    state.inventory = scanPartyInventory(party)
+    local okRest, canRest = pcall(Osi.CanAllPartiesLongRest)
+    state.can_rest = okRest and (canRest == true or tostring(canRest) == "1") or false
+
+    return state
+end
+
+function captureExplorationState(trigger)
+    local state = buildExplorationState(trigger)
+    writeStateFile(state)
+    return state
+end
+
+local function speakerForDialog(dialogId)
+    if dialogId == nil then
+        return nil
+    end
+    local v = firstAttempt({
+        function() return Osi.DialogGetSpeaker(dialogId) end,
+        function() return Osi.DialogGetHostCharacter(dialogId) end,
+        function() return Osi.DialogGetActiveCharacter(dialogId) end,
+    }, function(raw)
+        local clean = pureGuid(tostring(raw)) or tostring(raw)
+        local name = displayName(clean)
+        return name ~= nil and name ~= ""
+    end)
+    if v == nil then
+        return nil
+    end
+    local clean = pureGuid(tostring(v)) or tostring(v)
+    return displayName(clean)
+end
+
+function captureDialogueState(trigger, dialogId)
+    local state = {
+        version = STATE_VERSION,
+        mode = "dialogue",
+        generated_at = nowIso(),
+        trigger = trigger or "dialog",
+        turn_actor = "",
+        allies = {},
+        enemies = {},
+        dialogue = {
+            speaker_name = nil,
+            line = nil,
+            options = {},
+        },
+        available_actions = { "select_dialogue_option" },
+        events = { "Диалог открыт. Варианты ответа живут в клиентском UI (клик по option — TODO(client))." },
+    }
+    local speaker = speakerForDialog(dialogId)
+    if speaker ~= nil then
+        state.dialogue.speaker_name = speaker
+    end
+    writeStateFile(state)
+    return state
+end
+
+function captureCurrentState(trigger, force)
+    -- Единая точка захвата: диалог > комбат > свободный режим. Не затирает
+    -- состояние диалога следующими тиками (exploreLoop между DialogStarted/Ended — no-op).
+    local acting = resolveActingCharacter("")
+    local mode = currentMode(acting)
+    if mode == "dialogue" then
+        return captureDialogueState(trigger, nil)
+    end
+    if mode == "combat" then
+        return captureCombatState(trigger, force)
+    end
+    return captureExplorationState(trigger)
 end
 
 -- ============================================================
@@ -2445,10 +3018,20 @@ local function finalizeDialogueOption(dialog)
 end
 
 Ext.Osiris.RegisterListener("DialogStarted", 2, "after", function(dialog, instanceID)
+    -- v0.8.26: диалог открыт — пишем dialogue-состояние в bg3_to_neuro.json и
+    -- держим флаг, чтобы exploreLoop не затирал его exploration-тиками.
+    dialogActive = true
+    local okD = pcall(captureDialogueState, "dialog_started", dialog)
+    if okD then
+        _P("[BG3Neuro] dialogue: opened")
+    end
 end)
 
 Ext.Osiris.RegisterListener("DialogEnded", 2, "after", function(dialog, instanceID)
+    dialogActive = false
     finalizeDialogueOption(dialog)
+    -- следующий тик exploreLoop вернёт exploration (или TurnStarted — комбат)
+    _P("[BG3Neuro] dialogue: closed")
 end)
 
 local function executeDialogueOption(action)
@@ -2870,14 +3453,23 @@ end
 
 local function executeOpenScreen(action)
     -- open_map / open_inventory — только просмотр (UI), движок сам откроет экран.
-    -- TODO(client): открытие экрана через клиентский ввод; state экрана даёт mod-генератор.
+    -- v0.8.26: переключаем currentScreen и сразу отдаём состояние экрана мод-генератором.
+    if action.name == "open_map" then
+        currentScreen = "map"
+    elseif action.name == "open_inventory" then
+        currentScreen = "inventory"
+    end
     cancelActiveMove("Движение прервано открытием экрана", action.id)
+    pcall(captureCurrentState, "screen_" .. tostring(currentScreen), true)
     return true, true, nil, nil -- success, running (экран — следующий state)
 end
 
 local function executeToggleMode(action)
     -- toggle_mode: v1 принимает только "normal" (X3, stealth убран) — C# уже отсек иное.
     -- Р РµР¶РёРј normal вЂ” РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ Р±РµР· РёРіСЂРѕРІРѕРіРѕ РІС‹Р·РѕРІР°, РјРіРЅРѕРІРµРЅРЅС‹Р№ С„РёРЅР°Р».
+    -- v0.8.26: режим normal возвращает экран exploration в состоянии
+    currentScreen = "exploration"
+    pcall(captureCurrentState, "toggle_normal", true)
     return true, nil, nil, nil
 end
 
@@ -2895,6 +3487,13 @@ local function executeAction(action)
     -- action.data как таблицу; раньше здесь оставалась строка JSON, и
     -- data.actor/... давал nil. Подменяем action.data распарсенной таблицей.
     action.data = data
+
+    -- v0.8.26: любой экшн кроме открытия экрана возвращает currentScreen из
+    -- map/inventory в exploration (закрытие экранов сервер не наблюдает —
+    -- состояние режима держит только открытие через open_map/open_inventory).
+    if name ~= "open_map" and name ~= "open_inventory" then
+        currentScreen = "exploration"
+    end
 
     if name == "end_turn" then
         -- v0.7.3: двухфазный end_turn с самопроверкой реального эффекта.
@@ -3074,22 +3673,26 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
     end
 
     if name == "state_capture" then
-        -- StateExtractor (v0.8.11): принудительный combat-state прямо сейчас
-        -- (диагностика; полный state уже ушёл в bg3_to_neuro.json).
-        local okC, p, diag = pcall(captureCombatState, "state_capture", true)
+        -- StateExtractor (v0.8.26): принудительный state прямо сейчас; режим выбирает
+        -- captureCurrentState (диалог > комбат > exploration), результат — в bg3_to_neuro.json.
+        local okC, p = pcall(captureCurrentState, "state_capture", true)
         if okC then
-            _P("[BG3Neuro] state_capture: turn=" .. tostring(p.turn_actor)
-                .. " allies=" .. #p.allies .. " enemies=" .. #p.enemies
-                .. " stage=" .. tostring(diag and diag.stage or "?"))
+            _P("[BG3Neuro] state_capture: mode=" .. tostring(p.mode)
+                .. " allies=" .. #(p.allies or {}) .. " enemies=" .. #(p.enemies or {})
+                .. " objects=" .. #(p.objects or {}) .. " spells=" .. #(p.spells or {}))
             return true, nil, nil, nil, {
                 version = p.version,
+                mode = p.mode,
                 trigger = p.trigger,
-                turn_actor = p.turn_actor,
-                turn_initiative_index = p.turn_initiative_index,
-                turn_initiative_total = p.turn_initiative_total,
-                allies = #p.allies,
-                enemies = #p.enemies,
-                diag = diag,
+                turn_actor = p.turn_actor or "",
+                allies = #(p.allies or {}),
+                enemies = #(p.enemies or {}),
+                objects = #(p.objects or {}),
+                regions = #(p.regions or {}),
+                inventory = #(p.inventory or {}),
+                spells = #(p.spells or {}),
+                dialogue = (p.dialogue ~= nil and #(p.dialogue.options or {})) or -1,
+                can_rest = p.can_rest == true,
             }
         end
         return false, nil, "action_failed", tostring(p)
@@ -3203,8 +3806,49 @@ local function pollActions()
     Ext.Timer.WaitForRealtime(ACTION_POLL_MS, pollActions)
 end
 
+local lastExploreMode = nil
+local lastExploreJson = nil
+
+local function stripGeneratedAt(state)
+    -- Фингерпринт без метки времени: иначе каждый тик (nowIso в buildExplorationState)
+    -- даёт новый JSON и дедуп никогда не срабатывает.
+    local res = {}
+    for k, v in pairs(state) do
+        if k ~= "generated_at" then
+            res[k] = v
+        end
+    end
+    return res
+end
+
+local function exploreLoop()
+    -- v0.8.26: тик состояния вне боя. Комбат пишет TurnStarted, диалог — DialogStarted;
+    -- здесь — exploration (и наблюдение за сменой режима). Запись обязательна при СМЕНЕ
+    -- режима (иначе выход из combat/dialogue с неизменным содержимым застрял бы на
+    -- старом mode в файле), в остальном — только при изменении содержимого (фингерпринт).
+    local acting = resolveActingCharacter("")
+    local mode = currentMode(acting)
+    local modeChanged = lastExploreMode ~= mode
+    if modeChanged then
+        _P("[BG3Neuro] state: mode=" .. tostring(mode))
+        lastExploreMode = mode
+    end
+    if mode ~= "combat" and mode ~= "dialogue" then
+        local okB, state = pcall(buildExplorationState, "free_roam")
+        if okB and state ~= nil then
+            local okJ, json = pcall(function() return Ext.Json.Stringify(stripGeneratedAt(state)) end)
+            if okJ and (modeChanged or json ~= lastExploreJson) then
+                writeStateFile(state)
+                lastExploreJson = json
+            end
+        end
+    end
+    Ext.Timer.WaitForRealtime(EXPLORE_PERIOD_MS, exploreLoop)
+end
+
 clearInFlight()
 writeInitialState()
 startHeartbeatLoop()
 pollActions()
+exploreLoop()
 _P("[BG3Neuro] file IPC bridge up: " .. HEARTBEAT_FILE)

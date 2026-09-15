@@ -400,4 +400,68 @@ public class StateSerializerTests
         Assert.Contains("- rest: [full, partial]", md);
         Assert.Contains("open_map, open_inventory, toggle_mode: [normal]", md);
     }
+
+    [Fact]
+    public void Parse_LuaExtractorDialogueJson_EmptyOptionsFromServerContext_RendersSpeaker()
+    {
+        // v0.8.26: captureDialogueState (server-контекст) — варианты живут в клиентском UI,
+        // поэтому options пустой; контракт с StateSerializer должен переживать пустой массив.
+        var state = StateSerializer.Parse("""
+            {
+              "version": 2,
+              "mode": "dialogue",
+              "trigger": "dialog_started",
+              "turn_actor": "",
+              "allies": [],
+              "enemies": [],
+              "dialogue": { "speaker_name": "Goblin", "line": null, "options": [] },
+              "available_actions": ["select_dialogue_option"],
+              "events": ["Диалог открыт. Варианты ответа живут в клиентском UI (клик по option — TODO(client))."]
+            }
+            """)!;
+
+        var md = StateSerializer.ToMarkdown(state);
+
+        Assert.Equal("dialogue", state.Mode);
+        Assert.NotNull(state.Dialogue);
+        Assert.Equal("Goblin", state.Dialogue!.SpeakerName);
+        Assert.Empty(state.Dialogue.Options);
+        Assert.Contains("## Dialogue", md);
+        Assert.Contains("Speaker: Goblin", md);
+        Assert.Contains("- select_dialogue_option", md);
+    }
+
+    [Fact]
+    public void Parse_LuaExtractorCombatJson_SpellsBlock_2DTargetsInRange()
+    {
+        // v0.8.26: buildCombatSpellsBlock — spell_name полным stat-именем, slot из UseCosts,
+        // casts_left опущен (nil), on_cooldown всегда false; targets_in_range — 2D-дистанция.
+        var state = StateSerializer.Parse("""
+            {
+              "version": 2,
+              "mode": "combat",
+              "trigger": "TurnStarted",
+              "turn_actor": "tav",
+              "allies": [],
+              "enemies": [
+                { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 7.2, "position_x": 8.4, "position_y": 6.5 }
+              ],
+              "spells": [
+                { "spell_name": "Projectile_FireBolt", "slot": "0", "range": 18, "aoe": 0, "on_cooldown": false, "targets_in_range": ["goblin_1"] },
+                { "spell_name": "Target_CureWounds", "slot": "1", "range": 1.5, "aoe": 0, "on_cooldown": false, "targets_in_range": [] }
+              ],
+              "available_actions": ["end_turn", "attack_entity: [goblin_1]", "move_to_target: [tav, goblin_1]"]
+            }
+            """)!;
+
+        Assert.Equal(2, state.Spells.Count);
+        Assert.Equal("Projectile_FireBolt", state.Spells[0].SpellName);
+        Assert.Equal("0", state.Spells[0].Slot);
+        Assert.Equal(18, state.Spells[0].Range);
+        Assert.False(state.Spells[0].OnCooldown);
+        Assert.Null(state.Spells[0].CastsLeft);
+        Assert.Single(state.Spells[0].TargetsInRange);
+        Assert.Equal("goblin_1", state.Spells[0].TargetsInRange[0]);
+        Assert.Empty(state.Spells[1].TargetsInRange);
+    }
 }
