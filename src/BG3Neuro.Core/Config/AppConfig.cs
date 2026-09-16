@@ -8,4 +8,5 @@ public sealed class AppConfig
     public ActionsConfig Actions { get; set; } = new();
     public DialogueConfig Dialogue { get; set; } = new();
     public StateConfig State { get; set; } = new();
+    public AutopilotConfig Autopilot { get; set; } = new();
 }

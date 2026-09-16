@@ -5,8 +5,8 @@ Tracked: 7 tickets produced from the two-axis code-review of `HEAD` -> working t
 Tracker: local markdown (`.scratch/<effort>/`), conventions of `issue-tracker-local.md`.
 
 ## Status
-- [ ] 01-bonus-legacy-ba-spend — open (blocked by bench)
-- [ ] 02-movement-manual-cost — open (blocked by bench; map over-claims)
+- [x] 01-bonus-legacy-ba-spend — done (live bench: `Osi.UseSpell` spends NO BA/AP natively; `PartyIncreaseActionResourceValue` is a no-op for personal resources; public write set = `AddActionPoints`(AP) + `PartyIncrease…`(no-op) — no single-actor BA writer exists. Decision: enforce BA budget in-router on the legacy path, engine writer impossible). **Implementation verified live** (v0.8.30, PAK v036L legacy): legacy `bonus_action` #1 accepted + marked + logged, #2/#3 REFUSED `action_failed "Bonus action already used this turn (BA budget enforced in-router)"`; reset-on-`TurnStarted` code-verified, bench-pending (static save, turn never leaves Tav)
+- [x] 02-movement-manual-cost — done (v0.8.29 live bench: honest path = budget CLAMP only, `m0` gate "No movement left" when pool 0; game drains Movement natively on scripted combat movement (9→0 verified), so no manual writer needed — PartyIncrease personal no-op stands disqualified; legacy fallback dash-equivalent `AddActionPoints(actor,-1)` gated by `forceLegacy`/`legacyStable`. Evidence: move 14m→clamped 9.4m, 2nd move rejected at Movement=0; PAK v035)
 - [x] 03-attack-candidate-narrowing — done (executeAttack: 2 real prototypes, weapon discriminator, real pendingCasts default)
 - [x] 04-enqueue-seam — done (options table, reason threading in all 3 callers; PAK EED60034)
 - [x] 05-alias-statslug-fallback — done (already fixed in HEAD 7697f11: statSlug guards vs~=""/non-ASCII/"entity" -> nil, registerAlias falls back to slug(rawName))

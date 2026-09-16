@@ -26,17 +26,19 @@ public sealed class DecisionLoop : IDisposable
     private readonly ActionRouter _router;
     private readonly ExplorationStateConfig _exploration;
     private readonly TimeSpan _executionResultTimeout;
+    private readonly bool _autopilotEnabled;
     private CombatState? _combatState;
     private string? _lastForcedContent;
     private bool _connected;
 
-    public DecisionLoop(NeuroWebSocketClient neuro, IpcClient ipc, ActionRouter router, ExplorationStateConfig? exploration = null, TimeSpan? executionResultTimeout = null)
+    public DecisionLoop(NeuroWebSocketClient neuro, IpcClient ipc, ActionRouter router, ExplorationStateConfig? exploration = null, TimeSpan? executionResultTimeout = null, bool autopilotEnabled = true)
     {
         _neuro = neuro;
         _ipc = ipc;
         _router = router;
         _exploration = exploration ?? new ExplorationStateConfig();
         _executionResultTimeout = executionResultTimeout ?? TimeSpan.FromSeconds(15);
+        _autopilotEnabled = autopilotEnabled;
     }
 
     public event EventHandler<string>? DebugNote;
@@ -97,7 +99,7 @@ public sealed class DecisionLoop : IDisposable
 
     private async Task MaybeForceAsync(CombatState state)
     {
-        if (!_connected)
+        if (!_autopilotEnabled || !_connected)
         {
             return;
         }

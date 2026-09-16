@@ -51,7 +51,7 @@ internal static class Program
             ActionRegistry.Get(),
             TimeSpan.FromSeconds(config.Neuro.ReconnectIntervalS));
 
-        using var decisionLoop = new DecisionLoop(neuro, ipc, router, config.State.Exploration, TimeSpan.FromSeconds(config.Actions.ResultTimeoutS));
+        using var decisionLoop = new DecisionLoop(neuro, ipc, router, config.State.Exploration, TimeSpan.FromSeconds(config.Actions.ResultTimeoutS), config.Autopilot.Enabled);
         decisionLoop.DebugNote += (_, text) =>
         {
             var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");

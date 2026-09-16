@@ -267,5 +267,42 @@
         "actor": { "type": "string" }
       }
     }
+  },
+  {
+    "name": "bench_snapshot",
+    "description": "Стенд (followup 01/02): снапшот ресурсов актёра и всех членов партии.",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
+    "name": "bench_party_increase",
+    "description": "Стенд (followup 01/02): PartyIncreaseActionResourceValue с снапшотами до/после.",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" },
+        "resource": { "type": "string" },
+        "delta": { "type": "number" }
+      }
+    }
+  },
+  {
+    "name": "bench_use_spell",
+    "description": "Стенд (followup 01): проверяет, списывает ли Osi.UseSpell бонусное действие нативно.",
+    "schema": {
+      "type": "object",
+      "required": ["target_id"],
+      "properties": {
+        "target_id": { "type": "string" },
+        "actor": { "type": "string" },
+        "spell": { "type": "string" }
+      }
+    }
   }
 ]

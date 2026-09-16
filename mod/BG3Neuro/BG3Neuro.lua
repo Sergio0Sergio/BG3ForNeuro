@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.27 — файловой IPC-мост (тикеты 01 + 03-09 + bg3-neuro-dialogue-click)
+-- BG3Neuro v0.8.31 — файловой IPC-мост (тикеты 01 + 03-09 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,8 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.27"
+local MOD_VERSION = "0.8.31"
+_G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
 local ACTION_POLL_MS = 200          -- config.ipc.poll_interval_ms * 2 (реальный polling)
@@ -31,7 +32,7 @@ local NEURO_TO_BG3_FILE = IPC_DIR .. "/neuro_to_bg3.json"
 local RESULT_DIR = IPC_DIR
 
 local seq = 0
-local activeMove = nil -- { id, event, moveId } — движение в полёте (interruption/cancel)
+local activeMove = nil -- { id, event, moveId, actor, startX/Y/Z, m0, clamped } — движение в полёте
 
 local function nowIso()
     -- UTC: Ext.Timer.ClockTime() даёт "YYYY-MM-DD HH:MM:SS.fffffff" (UTC);
@@ -305,6 +306,7 @@ end
 -- база и для самопроверки эффекта end_turn (ended: true/false).
 local actingChar = nil
 local turnLog = {}   -- { t = "S"|"E", g = clean_guid } — лента последних смен хода
+local bonusUsedThisTurn = {} -- тикет 01 follow-up: BA-бюджет в роутере, key = actor-guid, honest|legacy
 
 -- end_turn verification (v0.8.12): the result is written only when the engine
 -- actually confirms the turn change (TurnStarted of another combatant or
@@ -359,6 +361,7 @@ end
 
 Ext.Osiris.RegisterListener("TurnStarted", 1, "after", function(guid)
     actingChar = guid
+    bonusUsedThisTurn = {} -- тикет 01 follow-up: новый ход — новый BA-бюджет
     turnLog[#turnLog + 1] = { t = "S", g = pureGuid(tostring(guid)) }
     if #turnLog > 32 then
         table.remove(turnLog, 1)
@@ -533,6 +536,31 @@ local function partyAvatars()
         end
     end
     return out
+end
+
+-- v0.8.28 (followup 01/02, стендовая диагностика): снапшот ресурсов для
+-- актёра И всех членов партии (партийная семантика writer'ов). Члены партии
+-- — partyAvatars() (DB_Avatars + UserAvatar), чистый guid из map key.
+-- Объявлено ПОСЛЕ partyAvatars: тот — локальная функция этой же области.
+local function snapshotPartyResources()
+    local members = partyAvatars()
+    local out = {}
+    local count = 0
+    for g in pairs(members) do
+        count = count + 1
+        local detail = readResourceSnapshot(g)
+        out[g] = detail
+        if count >= 12 then break end
+    end
+    return out
+end
+
+local function pcallSnapshotPartyOrErr()
+    local ok, res = pcall(snapshotPartyResources)
+    if ok then
+        return res
+    end
+    return { snapshot_error = tostring(res) }
 end
 
 local function characterPartyFlags(g)
@@ -2210,7 +2238,38 @@ Ext.Osiris.RegisterListener("EntityEvent", 2, "after", function(character, event
     if activeMove ~= nil and tostring(event) == tostring(activeMove.event) then
         local pending = activeMove
         activeMove = nil
-        writeResult(pending.id, true, false, nil, nil)
+        -- v0.8.29 (followup 02): финал движения + экономия.
+        -- Метры Movement публично непишуемы (bench 16.09: PartyIncreaseActionResourceValue
+        -- no-op на персональный Movement; AddActionPoints — только AP). Честный режим
+        -- ограничен клампом по Movement-пулу (см. executeMoveToTarget); в legacy —
+        -- dash-эквивалент: списание 1 AP ручным AddActionPoints (живой прецедент v0.8.22).
+        local extra = {}
+        local mover = pending.actor or character
+        local ex, ey, ez = positionOf(mover)
+        local distM = nil
+        if pending.startX ~= nil and ex ~= nil then
+            distM = round1(distance3(pending.startX, pending.startY, pending.startZ, ex, ey, ez))
+        end
+        local mOk, mAfter = pcall(Osi.GetActionResourceValuePersonal, mover, "Movement", 0)
+        extra.movement = {
+            before = pending.m0,
+            after = (mOk and type(mAfter) == "number") and mAfter or nil,
+            dist_m = distM,
+            clamped = pending.clamped == true,
+        }
+        if (forceLegacy or legacyStable) and pending.actor ~= nil then
+            local apOk, ap = pcall(Osi.GetActionResourceValuePersonal, pending.actor, "ActionPoint", 0)
+            if apOk and type(ap) == "number" and ap > 0 then
+                local sOk, sErr = pcall(Osi.AddActionPoints, pending.actor, -1)
+                if not sOk then
+                    _P("[BG3Neuro] movement AP spend failed: " .. tostring(sErr))
+                end
+            end
+        end
+        _P("[BG3Neuro] move final: id=" .. tostring(pending.id)
+            .. " dist=" .. tostring(distM) .. "m m_after=" .. tostring(extra.movement.after)
+            .. (extra.movement.clamped and " clamped" or ""))
+        writeResult(pending.id, true, false, nil, nil, extra)
     end
 end)
 
@@ -3415,21 +3474,60 @@ local function executeMoveToTarget(action)
     -- Прерываем предыдущее движение (interruption path, событие cancel)
     cancelActiveMove("Движение прервано новым действием", action.id)
 
+    -- v0.8.29 (followup 02): бюджет движения по Movement-метрам (GetActionResourceValuePersonal).
+    -- Писателя метров нет (bench 16.09), поэтому дистанция клампится до доступного пула —
+    -- актёр проходит не больше Movement (было: свободный забег на ~34 м при Movement=9,
+    -- демо-прогон 16.09). Если пул прочитать нельзя — движение без клампа (fallback).
+    local m0Ok, m0raw = pcall(Osi.GetActionResourceValuePersonal, actor, "Movement", 0)
+    local m0 = (m0Ok and type(m0raw) == "number") and m0raw or nil
+    if m0 ~= nil and m0 <= 0 then
+        return false, nil, "action_failed", "No movement left (Movement=" .. tostring(m0) .. ")"
+    end
+
+    local sx, sy, sz = positionOf(actor)
+    local tx, ty, tz
+    if data.position then
+        tx, ty, tz = data.position.x, data.position.y, data.position.z
+    elseif target then
+        tx, ty, tz = positionOf(target)
+    end
+
     local moveEvent = "BG3NeuroMove_" .. action.id
     local moveId = math.random(1, 2147483647)
     local ok, err
-    if data.position then
-        ok, err = pcall(Osi.CharacterMoveToPosition, actor, data.position.x, data.position.y, data.position.z, "Run", moveEvent, moveId)
-    elseif target then
-        -- переместиться к сущности: координата цели через Osi.GetPosition
-        ok, err = pcall(Osi.CharacterMoveTo, actor, target, "Run", moveEvent, moveId)
+    local clamped = false
+    if m0 ~= nil and tx ~= nil and sx ~= nil then
+        local d = distance3(sx, sy, sz, tx, ty, tz)
+        if d ~= nil and d > m0 then
+            -- прямая аппроксимация бюджета: точка на луче start→target на dist m0
+            local t = m0 / d
+            tx = sx + (tx - sx) * t
+            ty = sy + (ty - sy) * t
+            tz = sz + (tz - sz) * t
+            clamped = true
+            ok, err = pcall(Osi.CharacterMoveToPosition, actor, tx, ty, tz, "Run", moveEvent, moveId)
+        end
+    end
+    if ok == nil then
+        if data.position then
+            ok, err = pcall(Osi.CharacterMoveToPosition, actor, data.position.x, data.position.y, data.position.z, "Run", moveEvent, moveId)
+        elseif target then
+            -- переместиться к сущности: координата цели через Osi.GetPosition
+            ok, err = pcall(Osi.CharacterMoveTo, actor, target, "Run", moveEvent, moveId)
+        end
     end
 
     if not ok then
         return false, nil, "action_failed", tostring(err)
     end
 
-    activeMove = { id = action.id, event = moveEvent, moveId = moveId }
+    activeMove = {
+        id = action.id, event = moveEvent, moveId = moveId, actor = actor,
+        startX = sx, startY = sy, startZ = sz, m0 = m0, clamped = clamped,
+    }
+    _P("[BG3Neuro] move_to_target: actor=" .. tostring(actor)
+        .. " target=" .. tostring(target or "<pos>")
+        .. " m0=" .. tostring(m0) .. (clamped and " clamped" or ""))
     return true, true, nil, nil -- success, running
 end
 
@@ -3605,6 +3703,15 @@ local function executeBonusAction(action)
             "offhand_attack requires a light weapon in the off-hand (no OffhandAttack spell known)"
     end
 
+    -- v0.8.31 (тикет 01 follow-up): единый in-router BA-бюджет для обеих веток.
+    -- Честный путь тоже должен отказывать чисто: движок расходует BA нативно, но
+    -- повторный каст на пустом бюджете давал бы шумный CastSpellFailed/интеррапт.
+    if bonusUsedThisTurn[actor] then
+        _P("[BG3Neuro] bonus REFUSED: BA already used this turn (in-router budget)")
+        return false, nil, "action_failed",
+            "Bonus action already used this turn (BA budget enforced in-router)"
+    end
+
     -- Прерываем активное движение (бонусная атака и движение не пересекаются).
     cancelActiveMove("Движение прервано bonus_action", action.id)
     -- v0.8.24: снапшот ресурсов до действия (критерий честной экономики 05).
@@ -3634,6 +3741,7 @@ local function executeBonusAction(action)
         if enqSid ~= nil then
             honestUsed = true
             usedSid = enqSid
+            bonusUsedThisTurn[actor] = true -- тикет 01 follow-up: BA израсходован честным путём (движок спишет)
             ok = true
         else
             -- v0.8.28 (followup 04): причина честного пути не теряется
@@ -3647,11 +3755,21 @@ local function executeBonusAction(action)
         if not legacyNow then
             pipelineFailed("bonus_offhand")
         end
+        -- тикет 01 (follow-up): на legacy-пути движок BA НЕ списывает (стенд: UseSpell
+        -- не трогает ресурсы) — бюджет удерживаем в роутере: вторая бонусная атака за
+        -- ход отклоняется, лог — громкий, без фейкового списания.
+        if bonusUsedThisTurn[actor] then
+            _P("[BG3Neuro] legacy bonus REFUSED: BA already used this turn (in-router budget, no engine writer)")
+            return false, nil, "action_failed",
+                "Bonus action already used this turn (BA budget enforced in-router)"
+        end
         for _, sid in ipairs(knownNames) do
             if not ok then
                 ok, err = pcall(Osi.UseSpell, actor, sid, target)
                 if ok then
                     usedSid = sid
+                    bonusUsedThisTurn[actor] = true
+                    _P("[BG3Neuro] legacy bonus: BA budget enforced in-router (no engine writer)")
                 end
             end
         end
@@ -4019,6 +4137,69 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
             }
         end
         return false, nil, "action_failed", tostring(p)
+    end
+
+    if name == "bench_snapshot" then
+        -- Стенд (followup 01/02): снапшот ресурсов актёра + всех членов партии.
+        --   { "id":"b1", "name":"bench_snapshot", "data":"{\"actor\":\"Tav\"}" }
+        local actor = resolveCombatActor((action.data and action.data.actor) or "")
+        local p = {}
+        if actor ~= nil then
+            p.actor = readResourceSnapshot(actor)
+        end
+        p.party = pcallSnapshotPartyOrErr()
+        _P("[BG3Neuro] bench_snapshot: party=" .. tostring(#p.party))
+        return true, nil, nil, nil, { debug = p }
+    end
+
+    if name == "bench_party_increase" then
+        -- Стенд (followup 01/02): партийная семантика PartyIncreaseActionResourceValue.
+        --   { "id":"w1", "name":"bench_party_increase", "data":"{\"actor\":\"Tav\",\"resource\":\"Movement\",\"delta\":-1}" }
+        local data = action.data or {}
+        local actor = resolveCombatActor(data.actor or "")
+        if actor == nil then
+            return false, nil, "action_failed", "Could not resolve the actor"
+        end
+        local resource = tostring(data.resource or "Movement")
+        local delta = tonumber(data.delta or -1)
+        local p = { resource = resource, delta = delta }
+        p.before = pcallSnapshotPartyOrErr()
+        local okW, errW = pcall(Osi.PartyIncreaseActionResourceValue, actor, resource, delta)
+        p.write_ok = okW and true or false
+        p.write_error = okW and nil or tostring(errW)
+        p.after = pcallSnapshotPartyOrErr()
+        _P("[BG3Neuro] bench_party_increase: " .. resource .. " delta=" .. tostring(delta)
+            .. " ok=" .. tostring(p.write_ok))
+        return true, nil, nil, nil, { debug = p }
+    end
+
+    if name == "bench_use_spell" then
+        -- Стенд (followup 01): списывает ли Osi.UseSpell(actor, sid, target) BA нативно?
+        -- Снимаем BonusActionPoint до вызова и после (1.5s — время асинхронного каста).
+        local data = action.data or {}
+        local actor = resolveCombatActor(data.actor or "")
+        local target = resolveEntity(data.target_id or "")
+        if actor == nil then
+            return false, nil, "action_failed", "Could not resolve the actor"
+        end
+        if target == nil then
+            return false, nil, "action_failed", "UseSpell target not found"
+        end
+        local sid = tostring(data.spell or "OffhandAttack")
+        local p = { spell = sid }
+        p.before = readResourceSnapshot(actor)
+        local okS, errS = pcall(Osi.UseSpell, actor, sid, target)
+        p.cast_ok = okS and true or false
+        p.cast_error = okS and nil or tostring(errS)
+        _P("[BG3Neuro] bench_use_spell: spell=" .. sid .. " cast_ok=" .. tostring(p.cast_ok))
+        local finish = function()
+            p.after = readResourceSnapshot(actor)
+            _P("[BG3Neuro] bench_use_spell after: BA delta=" .. tostring(
+                (p.before and p.before.BonusActionPoint or -1) - (p.after and p.after.BonusActionPoint or -1)))
+            writeResult(action.id, true, false, nil, nil, { debug = p })
+        end
+        Ext.Timer.WaitForRealtime(1500, finish)
+        return true, true, nil, nil
     end
 
     if name == "move_to_target" then
