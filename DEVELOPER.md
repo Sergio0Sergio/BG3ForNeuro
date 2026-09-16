@@ -51,7 +51,8 @@ Communication between the C# process and the Lua mod happens through JSON files 
 |---|---|---|
 | `heartbeat.json` | Lua mod | Mod liveness signal (every 2s) |
 | `bg3_to_neuro.json` | Lua mod | Game state (combat/dialog/exploration) |
-| `action_<id>.json` | C# process | Action command for the mod |
+| `neuro_to_bg3.json` | C# process | Action command for the mod (**the only action file the mod polls**) |
+| `action_<id>.json` | C# process | C#-side log/artifact of the dispatched action (tests, trace — NOT read by the mod) |
 | `result_<id>.json` | Lua mod | Action execution result |
 
 ### Heartbeat
@@ -74,24 +75,23 @@ Emitted on game events (TurnStarted, DialogStarted, SessionLoaded, etc.). Branch
 - **Dialog** — conversation options (index + text), speaker, context
 - **Exploration** — visible objects, regions, inventory, rest availability
 
-### Action (`action_<id>.json`)
+### Action (`neuro_to_bg3.json`)
 
-Written by the C# process when Neuro decides an action:
+Written by the C# process when Neuro decides an action (a singleton — one in-flight action; the
+`action_<id>.json` copy below is only a trace artifact, the mod polls the shared command file):
 
 ```json
 {
-  "command": "action",
-  "data": {
-    "id": "bax1",
-    "name": "attack_entity",
-    "actor": "goblin_1",
-    "entity_id": "uuid-of-target",
-    "data": "{\"weapon_slot\":\"main\"}"
-  }
+  "id": "bax1",
+  "name": "attack_entity",
+  "actor": "goblin_1",
+  "data": "{\"weapon_slot\":\"main\"}"
 }
 ```
 
 **Important:** The `data` field must be a JSON **string**, not an object. The mod reads it with `data["data"]:GetValue<string>()`.
+
+**Important:** `actor`/`target_id` must be **state aliases** (`goblin_tracker_1`, from `bg3_to_neuro.json`), not raw UUIDs — the mod resolves via `ENTITY_BY_ALIAS`/`resolveEntity`, and a GUID that is absent from the current state resolves to `cast_failed`/`target_missing`.
 
 ### Result (`result_<id>.json`)
 

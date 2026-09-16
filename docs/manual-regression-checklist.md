@@ -112,3 +112,41 @@ Mod emits only a combat-shaped state (`captureCombatState`), never the non-comba
 
 Next: wire the non-combat state emitters (spells / dialogue / exploration) into `bg3_to_neuro.json`,
 then re-run the blocked §9.5 items against the full stack.
+
+## Run 2026-09-16 (v0.8.31, direct IPC drive — no Randy/C#, no WS, no Neuro)
+
+Bridge: PAK v0.8.31, `21 actions registered`, `autopilot.enabled=false` in `config.json` (only
+deterministic injects act). Driving = a helper script writes `neuro_to_bg3.json` and waits for
+`result_<id>.json` (RESULT_DIR = IPC_DIR).
+
+### Combat — passed
+- [x] **state_capture** — full fresh state written (turn_actor, enemies with aliases + distances, spells).
+- [x] **movement**: `move_to_target` Astarion→goblin (clamped 9/10.8 m), Cleric by position (9 m),
+      Tav→goblin_tracker_1 (4.2 m) — next state shows distance 6.0→2.2 m.
+- [x] **attack**: Tav→goblin_tracker_1 @2.2 m SUCCESS (AP 1→0, enemy HP 9→6); Astarion→bugbear_1 @2.0 m
+      SUCCESS (AP 1→0 **and** BA 1→0 — the engine spends both natively for a dual-wield/offhand setup, not a bug).
+- [x] **cast_spell**: Astarion `Projectile_FireBolt` SUCCESS (AP 1→0); Shadowheart `Target_HealingWord` on
+      self SUCCESS (BA 1→0, HP 9→14); Gale `Projectile_FireBolt` SUCCESS (AP 1→0; target HP unchanged — miss).
+- [x] **resource snapshots**: `resource_snapshot_{id}_before/after.json` written for every
+      AP/BA-costing action (AP/BA/Movement/Reaction/WeaponActionPoint + cooldowns) — honest economy
+      acceptance criterion verified on the bench.
+- [x] **end_turn**: all 4 party members (Tav/Astarion/Shadowheart/Gale) — two-phase result
+      (`success:true, ended:true`), next acting character reported in `acting_after`.
+
+### Findings / corrections (state + action semantics)
+- [x] **The mod reads ONLY `neuro_to_bg3.json`** (singleton). `action_<id>.json` is written by C# for
+      tests/debug but is NOT polled by the mod; an action placed only in `action_<id>.json` never executes.
+- [x] **Target ids must be state aliases** (`goblin_tracker_1`, `bugbear_1`), not raw UUID/GUID strings:
+      `resolveEntity`/`ENTITY_BY_ALIAS` only resolves by alias; a GUID that is present in initiative but
+      absent from `state.enemies` (a dead/phantom entity) → `cast_failed` "Каст прерван/провален".
+- [x] **`cast_failed` "Каст прерван/провален" originates in the mod's `finalizeCast` (cancelled=true)**,
+      not from the engine — always pair it with the actual error path (out-of-range, target changed,
+      double action spend).
+- [x] **`cast_spell.targets_in_range`/`spell.range` in the state are unreliable**: `spellRangeAndAoe`
+      reads `TargetRadius` from `Ext.Stats.Get`, which is nil for Target/Shout-type spells (`Target_*`),
+      so the fallback of 1.5 m is bogus for most spells. Prefer `distance` (per-enemy, meters) over range.
+- [x] **Check `distance` before casting/attacking**: melee/actions succeed at ≤~2.2 m; Target-type casts
+      on a distant enemy hung in `running:true` forever (no `CastedSpell` event) — e.g. Shadowheart
+      `Target_SacredFlame` @16.8 m. All successful casts below were at targets already in range.
+- [x] **Verify offhand**: `bonus_action.offhand_attack` SUCCESS only when the offhand weapon is equipped
+      (`Osi.HasSpell(actor, "OffhandAttack")` gate); Tav BA already 0 → `cast_failed`.

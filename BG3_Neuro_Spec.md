@@ -115,8 +115,8 @@ Research fact: **there is no native named pipe in BG3SE** (details: `.scratch/bg
 
 `<BG3ScriptExtender appdata>/BG3Neuro/`:
 - `bg3_to_neuro.json` — game state (written by the mod)
-- `neuro_to_bg3.json` — action commands (written by C#)
-- `action_<id>.json` — a specific action command
+- `neuro_to_bg3.json` — action commands (written by C#) — **the only command file the mod polls** (singleton, one in-flight action)
+- `action_<id>.json` — C#-side trace/log of the dispatched action (tests, debug — **NOT read by the mod**; bench-verified 2026-09-16)
 - `result_<id>.json` — execution result (written by the mod)
 - `heartbeat.json` — mod heartbeat (written every **2 s**; stale threshold **10 s**)
 
@@ -483,8 +483,8 @@ Note: free-form parameters (`cast_spell.spell_name`, `interact_with.interaction_
 
 ### 6.1 Execution Loop
 
-1. C# validates the schema + target existence + prechecks against state (`IsInCombat`, `CanAllPartiesLongRest`, spell existence in `SpellBook`) → writes `action_<id>.json`.
-2. Server Lua poll: `Ext.Timer.WaitForRealtime(100–250ms)` → reads → dispatches → immediately writes `result_<id>.json` (`Ext.Json.Stringify` + `Ext.IO.SaveFile`): `{success, error_code, error_detail}`.
+1. C# validates the schema + target existence + prechecks against state (`IsInCombat`, `CanAllPartiesLongRest`, spell existence in `SpellBook`) → writes the single `neuro_to_bg3.json` command file (plus an `action_<id>.json` trace copy).
+2. Server Lua poll: `Ext.Timer.WaitForRealtime(100–250ms)` → reads `neuro_to_bg3.json` → dispatches → immediately writes `result_<id>.json` (`Ext.Json.Stringify` + `Ext.IO.SaveFile`): `{success, error_code, error_detail}`.
 3. Long actions (movement/cast) → intermediate `success:true, running:true` + final via a `RegisterListener` event (`CastedSpell`, `CharacterMoveToCancelled`) — never block the thread with `WaitFor`.
 4. Timeout: **5 s** ACK from C#; missing result file after N polls = error per the dictionary (§6.5). No timer-based waits for game effects in Lua.
 5. BG3SE Lua single-threading confirmed → commands are serialized: one in-flight action per context, queues in C# and Lua.
