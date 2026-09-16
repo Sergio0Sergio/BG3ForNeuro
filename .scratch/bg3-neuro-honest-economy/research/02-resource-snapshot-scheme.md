@@ -56,12 +56,14 @@ Rule: every call strictly inside `pcall`; on `nil`/error — the field gets the 
 
 ## 4. Capture points (BG3SE is single-threaded — event points only)
 
-- `before` — in dispatch (executeCast / executeAttack / executeMoveToTarget / bonus_action), AFTER `cancelActiveMove`, BEFORE the pipeline/movement starts.
-- `after` — from the game's completion event, NOT `WaitFor`:
-  - cast/attack: the `CastedSpell` / `CastSpellFailed` (finalizeCast) listener;
-  - movement: `EntityEvent` by `event == activeMove.event` (BG3Neuro.lua:1235) or `CharacterMoveToCancelled` (currently no-op, 1218).
+> **Status (v0.8.28):** the `before` snapshot exists for `executeCast` (BG3Neuro.lua:3003), `executeAttack` (3392) and `executeBonusAction` (3585); the `after` snapshot is written for the honest cast/attack finalize (`finalizeCast`, 2837) and for the `Osi.Attack` one-shot fallback (3528). The movement points below are **planned/aspirational**, not implemented yet — aligned with followup 02 (movement manual cost) in `bg3-neuro-followups`.
 
-On movement cancel/interruption (`cancelActiveMove`) the `after` snapshot is written in `CharacterMoveToCancelled` (the decision point for the spent distance of the interrupted run).
+- `before` — planned in dispatch (executeCast / executeAttack / `executeMoveToTarget` / `bonus_action` — the last three not yet all wired), AFTER `cancelActiveMove`, BEFORE the pipeline/movement starts.
+- `after` — from the game's completion event, NOT `WaitFor`:
+  - cast/attack: the `CastedSpell` / `CastSpellFailed` (finalizeCast) listener — implemented;
+  - movement: planned via `EntityEvent` by `event == activeMove.event` (BG3Neuro.lua:2198) or `CharacterMoveToCancelled` (2181, currently a no-op ack).
+
+On movement cancel/interruption (`cancelActiveMove`) the `after` snapshot is planned to be written in `CharacterMoveToCancelled` — **not implemented** (see followup 02).
 
 ## 5. What to compare (expected deltas)
 

@@ -11,7 +11,6 @@
 -- Никакой записи в IPC-файлы: состояние пишет только серверная половина (Q3=а).
 
 local DIALOGUE_CHANNEL = "BG3NeuroDialogue"
-local UI_DEBUG = false             -- подробный дамп дерева для живой отладки
 local OPTION_DEPTH_CAP = 12
 local MAX_VISITED = 3000
 local DIALOGUE_HINTS = { "dialog", "dialogue", "conversation" }
@@ -78,6 +77,28 @@ local function hintsMatch(hay, hints)
     return false
 end
 
+-- SE Array (ArrayProxy): userdata с __len и 1-based __index.
+local function arrLen(a)
+    if a == nil then
+        return 0
+    end
+    if type(a) == "table" then
+        return #a
+    end
+    return safe(function() return tonumber(#a) end) or 0
+end
+
+local function arrGet(a, i)
+    if a == nil then
+        return nil
+    end
+    return safe(function() return a[i] end)
+end
+
+local function fileName(el)
+    return safe(function() return tostring(el.FileName) end)
+end
+
 -- Обход поддерева в глубину (pre-order = визуальный порядок, верх→низ).
 -- Использует FrameworkElement.Child; при пустом — фолбэк Visual.VisualChild.
 local function walk(el, depth, visited, cb)
@@ -89,21 +110,22 @@ local function walk(el, depth, visited, cb)
 
     local cnt = nil
     if (type(el) == "userdata" or type(el) == "table") then
-        cnt = safe(function() return tonumber(el.ChildrenCount) end)
-        if cnt == nil then
-            cnt = safe(function() return tonumber(el.VisualChildrenCount) end)
-        end
-        if cnt == nil then
-            cnt = 0
+        -- Логические дети (XAML tree) и визуальные дети (виджеты/оверлеи) —
+        -- оба являются валидными детьми, берём максимум.
+        cnt = safe(function() return tonumber(el.ChildrenCount) end) or 0
+        local vcnt = safe(function() return tonumber(el.VisualChildrenCount) end) or 0
+        if vcnt > cnt then
+            cnt = vcnt
         end
     else
         cnt = 0
     end
 
-    for i = 0, cnt - 1 do
-        local ch = safe(function() return el:Child(i) end)
-        if ch == nil then
-            ch = safe(function() return el:VisualChild(i) end)
+    -- Child/VisualChild принимают 1-based индекс (используем 1-based j)
+    for j = 1, cnt do
+        local ch = safe(function() return el:Child(j) end)
+        if ch == nil and j <= (safe(function() return tonumber(el.VisualChildrenCount) end) or 0) then
+            ch = safe(function() return el:VisualChild(j) end)
         end
         if ch ~= nil then
             if #visited > MAX_VISITED then
@@ -112,10 +134,31 @@ local function walk(el, depth, visited, cb)
             walk(ch, depth + 1, visited, cb)
         end
     end
-end
 
-local function fileName(el)
-    return safe(function() return tostring(el.FileName) end)
+    -- ContentControl/UserControl прячет контент в свойстве Content (не в детях).
+    if cnt == 0 then
+        local content = safe(function() return el.Content end)
+        if content ~= nil and content ~= el then
+            if #visited > MAX_VISITED then
+                return
+            end
+            walk(content, depth + 1, visited, cb)
+        end
+        -- ItemsControl — варианты во Items
+        local items = safe(function() return el.Items end)
+        local n = arrLen(items)
+        if n > 0 then
+            for i = 1, n do
+                local it = arrGet(items, i)
+                if it ~= nil then
+                    if #visited > MAX_VISITED then
+                        return
+                    end
+                    walk(it, depth + 1, visited, cb)
+                end
+            end
+        end
+    end
 end
 
 -- Кандидаты-корни: активные виджеты UI (со state machine) или корень всего дерева.
@@ -127,16 +170,22 @@ local function collectRoots()
         local state = safe(function() return sm.State end)
         if state ~= nil then
             local widgets = safe(function() return state.Widgets end)
-            if type(widgets) == "table" then
-                for _, w in ipairs(widgets) do
-                    if w ~= nil then
-                        roots[#roots + 1] = w
-                    end
+            local n = arrLen(widgets)
+            for i = 1, n do
+                local w = arrGet(widgets, i)
+                if w ~= nil then
+                    roots[#roots + 1] = w
                 end
             end
-        end
-        if UI_DEBUG then
-            log("roots from state machine: %d", #roots)
+            -- StateWidgets — коллекция UIElement'ов активного состояния, тоже валидные корни
+            local stateWidgets = safe(function() return state.StateWidgets end)
+            local m = arrLen(stateWidgets)
+            for i = 1, m do
+                local w = arrGet(stateWidgets, i)
+                if w ~= nil then
+                    roots[#roots + 1] = w
+                end
+            end
         end
     end
 
@@ -144,26 +193,58 @@ local function collectRoots()
         local root = safe(function() return Ext.UI.GetRoot() end)
         if root ~= nil then
             roots[1] = root
-            if UI_DEBUG then
-                log("roots fallback: entire tree root")
-            end
         end
     end
     return roots
 end
 
--- Собирает зу options внутри root: candidates (Button-ish с Command, в порядке
--- обхода), плюс первой строку диалога (line) — первый текст на верхних уровнях.
+-- Извлечение вариантов из виджета DCDialogue: активный диалог — тот, у которого
+-- Answers непустой. line = текст текущей фразы NPC (BodyText активного диалога).
+-- Возвращает (candidates, line), candidates[i].el = элемент ответа (BaseComponent).
+local function extractFromDialogueWidget(w)
+    local data = safe(function() return w.Data end)
+    if data == nil then
+        return {}, nil
+    end
+    local dialogues = safe(function() return data.Dialogues end)
+    local dn = arrLen(dialogues)
+    for i = 1, dn do
+        local d = arrGet(dialogues, i)
+        if d ~= nil then
+            local answers = safe(function() return d.Answers end)
+            local an = arrLen(answers)
+            if an > 0 then
+                local line = safe(function() return tostring(d.BodyText) end)
+                if line == nil or line == "" then
+                    line = nil
+                end
+                local cands = {}
+                for j = 1, an do
+                    local a = arrGet(answers, j)
+                    if a ~= nil then
+                        local text = safe(function() return tostring(a.BodyText) end)
+                        cands[#cands + 1] = { el = a, widget = w, text = text }
+                    end
+                end
+                return cands, line
+            end
+        end
+    end
+    return {}, nil
+end
+
+-- Собирает candidates и line внутри root. Приоритет — DCDialogue (Data.Dialogues);
+-- фолбэк для прочих виджетов — кнопки Button+Command в дереве.
 local function collectFromRoot(root)
     local candidates = {}
     local line = nil
+    local dcd = {}
     local visited = {}
     walk(root, 0, visited, function(el, depth)
-        if UI_DEBUG and depth <= 2 then
-            log("  [%s] type=%s name=%s", tostring(depth),
-                tostring(elType(el) or "?"), tostring(elProp(el, "Name") or ""))
-        end
         local typ = elType(el)
+        if typ ~= nil and string.find(string.lower(typ), "dcdialogue") ~= nil then
+            dcd[#dcd + 1] = el
+        end
         if isButtonish(typ) and hasCommand(el) then
             candidates[#candidates + 1] = { el = el, text = elText(el) }
         end
@@ -172,6 +253,16 @@ local function collectFromRoot(root)
             line = elText(el)
         end
     end)
+
+    -- Если нашли DCDialogue — берём его варианты вместо кнопок-фолбэка.
+    for _, w in ipairs(dcd) do
+        local cands, dline = extractFromDialogueWidget(w)
+        if #cands > 0 then
+            candidates = cands
+            line = dline
+            break
+        end
+    end
 
     -- line не должен совпадать с текстом варианта
     for _, c in ipairs(candidates) do
@@ -222,29 +313,54 @@ local function collectDialogue()
     end
 
     local best = scored[1]
-    if UI_DEBUG then
-        log("dialogue root: type=%s file=%s options=%d",
-            tostring(elType(best.root) or "?"), tostring(fileName(best.root) or ""), #best.candidates)
-        for i, c in ipairs(best.candidates) do
-            log("  option[%d] text=%q", i, tostring(c.text or ""))
-        end
-    end
     return best.candidates, best.line, nil
 end
 
--- Клик по элементу через Command:Execute() (Noesis ICommand). Вернёт (true, nil)
--- или (false, reason).
-local function clickElement(el)
-    if el == nil then
+-- SDL-сканкоды верхнего ряда цифр: "1"=30 ... "9"=38. В BG3 опции диалога
+-- выбираются этими клавишами (BoundEvent=UISelectSlotN у вариантов).
+local SDL_DIGIT_SCANCODES = {
+    [1] = 30, [2] = 31, [3] = 32, [4] = 33, [5] = 34,
+    [6] = 35, [7] = 36, [8] = 37, [9] = 38, [10] = 39,
+}
+
+-- Клик по варианту диалога (index 1-based). Приоритет — инъекция нажатия
+-- цифровой клавиши слота (настоящий пользовательский ввод). Фолбэк —
+-- SelectAnswerCommand:Execute(CtxAnswer) виджета DCDialogue.
+-- Вернёт (true, nil) или (false, reason).
+local function clickElement(c, index)
+    if c == nil or c.el == nil then
         return false, "element is nil"
     end
-    local cmd = elProp(el, "Command")
-    if cmd == nil then
-        return false, "element has no Command"
+
+    -- 1) Клавиша цифры (как если бы игрок нажал 1..9)
+    if index ~= nil then
+        local sc = SDL_DIGIT_SCANCODES[index]
+        if sc ~= nil then
+            local okKey = pcall(function() Ext.Input.InjectKeyPress(sc) end)
+            if okKey then
+                return true, nil
+            else
+                log("key-inject failed: scancode=%d", sc)
+            end
+        end
     end
-    local ok = pcall(function() cmd:Execute() end)
+
+    -- 2) SelectAnswerCommand виджета DCDialogue (прямой вызов команды)
+    local w = c.widget
+    if w == nil then
+        return false, "widget is nil"
+    end
+    local cmd = elProp(w, "SelectAnswerCommand")
+    if cmd == nil then
+        return false, "widget has no SelectAnswerCommand"
+    end
+    local param = elProp(c.el, "CtxAnswer")
+    if param == nil then
+        param = c.el
+    end
+    local ok = pcall(function() cmd:Execute(param) end)
     if not ok then
-        return false, "Command:Execute() threw"
+        return false, "SelectAnswerCommand:Execute() threw"
     end
     return true, nil
 end
@@ -307,7 +423,7 @@ local function performClick(msg)
             reason = "option not found (index=" .. tostring(index) .. ", text=" .. tostring(expected or "nil") .. ")" }
     end
 
-    local ok, clickReason = clickElement(target.el)
+    local ok, clickReason = clickElement(target, index)
     if not ok then
         log("click failed: %s", tostring(clickReason))
         return { kind = "bg3neuro_dialogue_click_result", action_id = actionId, ok = false,

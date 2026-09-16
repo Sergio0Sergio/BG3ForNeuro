@@ -547,24 +547,35 @@ local function characterPartyFlags(g)
         return nil
     end
     local raw = {}
-    local function grabRaw(tag, f)
-        local ok, v = pcall(function() return comp[f] end)
-        if ok then
+    local decoded = {}
+    local function grabDecoded(tag, f)
+        local okE2, v = pcall(function() return comp[f] end)
+        if okE2 then
             raw[tag] = tostring(v) .. " (" .. type(v) .. ")"
+            local tv = type(v)
+            if tv == "boolean" then
+                decoded[tag] = v
+            elseif tv == "number" then
+                decoded[tag] = v ~= 0
+            elseif tv == "string" then
+                decoded[tag] = v ~= "" and v ~= "0"
+            else
+                decoded[tag] = nil -- FixedString/userdata: нет булева смысла
+            end
         else
             raw[tag] = "ERR: " .. tostring(v)
+            decoded[tag] = nil
         end
     end
-    grabRaw("InParty", "InParty")
-    grabRaw("IsPlayer", "IsPlayer")
-    grabRaw("PartyFollower", "PartyFollower")
-    local truthy = function(tag)
-        return raw[tag] ~= nil and raw[tag] ~= "false (boolean)" and raw[tag] ~= "0 (number)" and raw[tag] ~= "ERR"
-    end
+    grabDecoded("InParty", "InParty")
+    grabDecoded("IsPlayer", "IsPlayer")
+    grabDecoded("PartyFollower", "PartyFollower")
+    -- v0.8.28 (followup 07): честный boolean|nil вместо сравнения строк-литералов
+    -- ("false (boolean)"/"0 (number)"/"ERR"); nil = поле отсутствует/ошибка чтения.
     return {
-        in_party = truthy("InParty"),
-        is_player = truthy("IsPlayer"),
-        party_follower = truthy("PartyFollower"),
+        in_party = decoded.InParty == true,
+        is_player = decoded.IsPlayer == true,
+        party_follower = decoded.PartyFollower == true,
         raw = raw,
     }
 end
@@ -1724,6 +1735,21 @@ local function dialogueFingerprint(snapshot)
     return table.concat(parts, "|")
 end
 
+-- Зеркало гейта captureCombatState: у ходящего есть TurnBased.CombatTeam/Combat,
+-- т.е. вне боя возвращает false и тик свободного режима пишет exploration.
+local function inTurnBasedCombat(actor)
+    local clean = actingCleanOf(actor)
+    if clean == nil or clean == "" then
+        return false
+    end
+    local okE, ent = pcall(Ext.Entity.Get, clean)
+    if not okE or ent == nil then
+        return false
+    end
+    local tb = turnComponent(ent)
+    return tb ~= nil and (fieldOf(tb, "CombatTeam") ~= nil or fieldOf(tb, "Combat") ~= nil)
+end
+
 local function currentMode(acting)
     -- Единый приоритет режимов для всех эмиттеров: диалог > комбат > экран > свободный режим.
     if dialogActive then
@@ -1739,21 +1765,6 @@ local function currentMode(acting)
         return "inventory"
     end
     return "exploration"
-end
-
-local function inTurnBasedCombat(actor)
-    -- Зеркало гейта captureCombatState: у ходящего есть TurnBased.CombatTeam/Combat,
-    -- т.е. вне боя возвращает false и тик свободного режима пишет exploration.
-    local clean = actingCleanOf(actor)
-    if clean == nil or clean == "" then
-        return false
-    end
-    local okE, ent = pcall(Ext.Entity.Get, clean)
-    if not okE or ent == nil then
-        return false
-    end
-    local tb = turnComponent(ent)
-    return tb ~= nil and (fieldOf(tb, "CombatTeam") ~= nil or fieldOf(tb, "Combat") ~= nil)
 end
 
 local function currentRegionName()
@@ -2557,7 +2568,22 @@ local function detectIsPlayer(actorUuid)
     return false, "non-player"
 end
 
-local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, posZ, spellType, insertAtFront, queueName, forceFlags, bonusAction)
+-- v0.8.28 (followup 04): единый options-таблица вместо 11 позиционных аргументов
+-- { spellName, target, pos, spellType, insertAtFront, queueName, forceFlags, bonusAction }.
+local function enqueueCastRequest(actorUuid, opts)
+    local spellName = opts.spellName
+    local targetUuid = opts.target
+    local pos = opts.pos
+    local posX, posY, posZ
+    if pos ~= nil then
+        posX, posY, posZ = pos.x, pos.y, pos.z
+    end
+    local spellType = opts.spellType or "Target"
+    local insertAtFront = opts.insertAtFront == true
+    local queueName = opts.queueName
+    local forceFlags = opts.forceFlags == true
+    local bonusAction = opts.bonusAction == true
+
     local apiOk, serverCastRequest = pcall(function() return Ext.System.ServerCastRequest end)
     if not apiOk or serverCastRequest == nil then
         return nil, "ServerCastRequest недоступен на этой сборке BG3SE"
@@ -2799,6 +2825,69 @@ local function enqueueCastRequest(actorUuid, spellName, targetUuid, posX, posY, 
     return nil, tostring(enqPushErr)
 end
 
+-- v0.8.28 (followup 07): общий двухпроходный фильтр кандидатов. Сначала имена из
+-- книги кастера (Osi.HasSpell == "1"), затем остальные как fallback-порядок.
+-- Три сайта (executeCast use_osi_spell, executeAttack, executeBonusAction) были
+-- копиями этого блока; поведение перенесено один-в-один.
+local function knownSpellCandidates(actor, candidates)
+    local knownNames = {}
+    local knownAdded = {}
+    for _, sid in ipairs(candidates) do
+        if Osi and Osi.HasSpell then
+            local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
+            if hOK and tostring(hRes) == "1" and not knownAdded[sid] then
+                knownNames[#knownNames + 1] = sid
+                knownAdded[sid] = true
+            end
+        end
+    end
+    for _, sid in ipairs(candidates) do
+        if not knownAdded[sid] then
+            knownNames[#knownNames + 1] = sid
+        end
+    end
+    return knownNames
+end
+
+-- v0.8.28 (followup 07): честный enqueue-проход по кандидатам (был продублирован
+-- в executeAttack/executeBonusAction; отличался только флагом bonusAction).
+-- Логика та же: Ext.Stats.Get → SpellType, enqueueCastRequest с формулой followup 04
+-- (enqOk and tostring(enqErr) or tostring(enqRes)), успех — pipelineSucceeded().
+-- Возвращает (usedSid, err): usedSid — имя победившего кандидата или nil; err —
+-- причина сбоя последней попытки (в оригинале запись поверх на каждой неудаче).
+local function honestEnqueue(actor, target, knownNames, opts)
+    local usedSid
+    local lastErr
+    for _, sid in ipairs(knownNames) do
+        if usedSid == nil then
+            local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
+            local sType = "Target"
+            if stOK and stRes and stRes.SpellType then
+                sType = stRes.SpellType
+            end
+            local castOpts = { spellName = sid, target = target, spellType = sType }
+            if opts then
+                for k, v in pairs(opts) do
+                    if v ~= nil then
+                        castOpts[k] = v
+                    end
+                end
+            end
+            local enqOK, enqRes, enqErr = pcall(function()
+                return enqueueCastRequest(actor, castOpts)
+            end)
+            if enqOK and enqRes == true then
+                usedSid = sid
+                -- v0.8.25 (03): успех честного пути сбрасывает счётчик сбоев.
+                pipelineSucceeded()
+            else
+                lastErr = enqOK and tostring(enqErr) or tostring(enqRes)
+            end
+        end
+    end
+    return usedSid, lastErr
+end
+
 -- Финал каста по игровым событиям (долгие/канальные заклинания): running:false.
 -- Если событие не пришло — правда всё равно уходит через следующий state (Канал B).
 local function finalizeCast(caster, spellName, cancelled)
@@ -3016,22 +3105,7 @@ local function executeCast(action)
         --    (без withoutMove: строка в нём давала "Number expected for argument 6").
         -- Пробуем кандидатов, приоритет у имён из книги кастера.
         local spellCandidates = { spellName, "Projectile_" .. spellName, "Target_" .. spellName }
-        local knownNames = {}
-        local knownAdded = {}
-        for _, sid in ipairs(spellCandidates) do
-            if Osi and Osi.HasSpell then
-                local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
-                if hOK and tostring(hRes) == "1" and not knownAdded[sid] then
-                    knownNames[#knownNames + 1] = sid
-                    knownAdded[sid] = true
-                end
-            end
-        end
-        for _, sid in ipairs(spellCandidates) do
-            if not knownAdded[sid] then
-                knownNames[#knownNames + 1] = sid
-            end
-        end
+        local knownNames = knownSpellCandidates(actor, spellCandidates)
         if target then
             for _, sid in ipairs(knownNames) do
                 if not oseiOk then
@@ -3052,15 +3126,29 @@ local function executeCast(action)
             err = oseiOk and nil or tostring(oseiRes)
         end
     else
+        -- v0.8.28 (followup 04): единый options-таблица + прокидывание причины enqueue.
+        -- QA-гард: enqueue при логическом отказе возвращает (nil, "причина") → pcall
+        -- даёт (true, nil, "причина") — причина в enqErr; при ИСКЛЮЧЕНИИ pcall даёт
+        -- (false, "текст") — причина в enqRes. Формула: enqOk и tostring(enqErr) или
+        -- tostring(enqRes). Раньше (executeAttack/executeBonusAction) причина не
+        -- прокидывалась вообще, err оставался nil до падения legacy-фолбэка.
         local enqOk, enqRes, enqErr = pcall(function()
-            return enqueueCastRequest(actor, spellName, target, pos and pos.x, pos and pos.y, pos and pos.z, spellType, insertAtFront, queueName, forceFlags)
+            return enqueueCastRequest(actor, {
+                spellName = spellName,
+                target = target,
+                pos = pos,
+                spellType = spellType,
+                insertAtFront = insertAtFront,
+                queueName = queueName,
+                forceFlags = forceFlags,
+            })
         end)
         if enqOk and enqRes == true then
             ok, err = true, nil
             pipelineSucceeded()
         else
             ok = false
-            err = enqOk and enqErr or tostring(enqRes)
+            err = enqOk and tostring(enqErr) or tostring(enqRes)
         end
     end
     if not ok and not useOsiSpell then
@@ -3178,12 +3266,25 @@ local function beginDialogueSnapshotRequest()
     dialogueSnapshotPending = true
     dialogueSnapshotSeq = dialogueSnapshotSeq + 1
     local seq = dialogueSnapshotSeq
-    local ok, err = pcall(function()
-        dialogueBridge:RequestToClient({ kind = "bg3neuro_dialogue_snapshot" }, nil, function(reply)
-            dialogueSnapshotPending = false
-            onDialogueSnapshotReply(reply)
-        end)
+    local ok = true
+    local err = nil
+    local pc, msg = pcall(function()
+        -- RequestToClient требует characterGuid (не работает с nil в SP).
+        -- Правильный путь для запрос-ответ в singleplayer — BroadcastMessage
+        -- с requestHandler (клиент ответит по reply_id через PostMessageToServer).
+        Ext.Net.BroadcastMessage(DIALOGUE_CHANNEL,
+            Ext.Json.Stringify({ kind = "bg3neuro_dialogue_snapshot" }),
+            nil, ModuleUUID or MOD_NAME,
+            function(reply, binary)
+                dialogueSnapshotPending = false
+                onDialogueSnapshotReply(Ext.Json.Parse(reply, binary))
+            end,
+            nil, false)
     end)
+    if not pc then
+        ok = false
+        err = msg
+    end
     if not ok then
         dialogueSnapshotPending = false
         dialogueUnavailable = true
@@ -3282,12 +3383,12 @@ local function executeDialogueOption(action)
 
     local text = data.option_text
     local ok, err = pcall(function()
-        dialogueBridge:SendToClient({
+        dialogueBridge:Broadcast({
             kind = "bg3neuro_dialogue_click",
             index = index,
             text = text,
             action_id = action.id,
-        }, nil)
+        })
     end)
     if not ok then
         return false, nil, "not_supported", "ClientAutoselectExecutor send failed: " .. tostring(err)
@@ -3356,26 +3457,28 @@ local function executeAttack(action)
     -- v0.8.22 (fallback 1, доказан вживую): Osi.UseSpell по прототипному имени ОСЕЙ
     -- оружейной атаки + ручное списание 1 AP (Osiris игнорирует ресурсы сам).
     -- (fallback 2, NPC): Osi.Attack (one-shot, без ресурсов).
-    local attackCandidates = {
-        "MainHandAttack", "Projectile_MainHandAttack", "Target_MainHandAttack",
-        "MainHandRangedAttack", "Projectile_MainHandRangedAttack", "Target_MainHandRangedAttack",
-    }
-    local knownNames = {}
-    local knownAdded = {}
-    for _, sid in ipairs(attackCandidates) do
-        if Osi and Osi.HasSpell then
-            local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
-            if hOK and tostring(hRes) == "1" and not knownAdded[sid] then
-                knownNames[#knownNames + 1] = sid
-                knownAdded[sid] = true
-            end
-        end
+    -- v0.8.28 (followup 03): сужен до двух РЕАЛЬНЫХ прототипов базовой атаки vanilla
+    -- (research 01): Target_MainHandAttack (melee) и Projectile_MainHandAttack (ranged).
+    -- Остальные четыре имени из прежнего набора — фантомы (0 в стат-индексе).
+    -- Порядок кандидатов — по оружию актёра (Osi.Has{Melee,Ranged}WeaponEquipped,
+    -- тот же дискриминатор, что Brawl Pick.lua: melee-оружие → Target_, ranged → Projectile_);
+    -- сам список остаётся толерантным фолбэком (невооружённый/ничего — Target_ первым).
+    local meleeArmed, rangedArmed = false, false
+    pcall(function()
+        local mOK, mRes = pcall(Osi.HasMeleeWeaponEquipped, actor, "Any")
+        local rOK, rRes = pcall(Osi.HasRangedWeaponEquipped, actor, "Any")
+        meleeArmed = mOK and tostring(mRes) == "1"
+        rangedArmed = rOK and tostring(rRes) == "1"
+    end)
+    local attackCandidates
+    if meleeArmed then
+        attackCandidates = { "Target_MainHandAttack", "Projectile_MainHandAttack" }
+    elseif rangedArmed then
+        attackCandidates = { "Projectile_MainHandAttack", "Target_MainHandAttack" }
+    else
+        attackCandidates = { "Target_MainHandAttack", "Projectile_MainHandAttack" }
     end
-    for _, sid in ipairs(attackCandidates) do
-        if not knownAdded[sid] then
-            knownNames[#knownNames + 1] = sid
-        end
-    end
+    local knownNames = knownSpellCandidates(actor, attackCandidates)
 
     local ok, err
     local usedWeaponSpell = false
@@ -3388,25 +3491,16 @@ local function executeAttack(action)
     -- Честный путь (§6.4): ServerCastRequest.OsirisCastRequests, spell из книги
     -- кастера (нативные ресурсы/кулдауны). Пробуем кандидатов из книги сначала.
     if not legacyNow then
-        for _, sid in ipairs(knownNames) do
-            if not honestUsed then
-                local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
-                local sType = "Target"
-                if stOK and stRes and stRes.SpellType then
-                    sType = stRes.SpellType
-                end
-                local enqOK, enqRes, enqErr = pcall(function()
-                    return enqueueCastRequest(actor, sid, target, nil, nil, nil, sType, false, nil, false)
-                end)
-                if enqOK and enqRes == true then
-                    honestUsed = true
-                    usedWeaponSpell = true
-                    usedSid = sid
-                    ok = true
-                    -- v0.8.25 (03): успех честного пути сбрасывает счётчик сбоев.
-                    pipelineSucceeded()
-                end
-            end
+        local enqSid, enqErr = honestEnqueue(actor, target, knownNames)
+        if enqSid ~= nil then
+            honestUsed = true
+            usedWeaponSpell = true
+            usedSid = enqSid
+            ok = true
+        else
+            -- v0.8.28 (followup 04): причина честного пути не теряется (см.
+            -- honestEnqueue — формула enqOk and tostring(enqErr) or tostring(enqRes)).
+            err = enqErr
         end
     end
 
@@ -3448,15 +3542,18 @@ local function executeAttack(action)
 
     -- Финализация (running -> результат после броска) через CastedSpell/CastSpellFailed,
     -- как у каста: запись в pendingCasts матчится finalizeCast по списку-префиксам.
-    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = usedSid or "MainHandAttack", caster = actor }
-    -- Если сработал fallback Osi.Attack — событий CastedSpell/CastSpellFailed может
-    -- не быть; финализируем результат сразу (one-shot завершился).
-    if not usedWeaponSpell then
-        pcall(writeResourceSnapshot, action.id, actor, "after")
-        writeResult(action.id, true, false, nil, nil)
-        return true, false, nil, nil
+    -- v0.8.28 (followup 03): дефолт — реальный прототип Target_MainHandAttack (фантом
+    -- "MainHandAttack" не существует в стат-индексе и никогда не совпал бы с событием).
+    if usedWeaponSpell then
+        pendingCasts[#pendingCasts + 1] = { id = action.id, spell = usedSid or "Target_MainHandAttack", caster = actor }
+        return true, true, nil, nil -- success, running (финал — событие оружейной атаки)
     end
-    return true, true, nil, nil -- success, running (финал — событие оружейной атаки)
+    -- Если сработал fallback Osi.Attack — событий CastedSpell/CastSpellFailed может
+    -- не быть; финализируем результат сразу (one-shot завершился) и в pendingCasts
+    -- не пишем (висячая запись ложно матчна бы с любым поздним кастом кастера).
+    pcall(writeResourceSnapshot, action.id, actor, "after")
+    writeResult(action.id, true, false, nil, nil)
+    return true, false, nil, nil
 end
 
 -- ============================================================
@@ -3517,26 +3614,14 @@ local function executeBonusAction(action)
     -- а не MainHandAttack с флагом. Опции CastOffhand в SpellCastOptions этой версии
     -- игры НЕТ (валидные: IgnoreHasSpell..AvoidDangerousAuras) — попытка вставить её
     -- валит весь маппинг запроса ("not a valid 'SpellCastOptions' bitfield value").
+    -- v0.8.28 (followup 07): MeleeOffHandWeaponAttack/RangedOffHandWeaponAttack —
+    -- это имена AttackType (атаки в hand), НЕ spell entries (в стат-индексе нет
+    -- new entry) — удалены как мусор, который второй проход фильтра тащил в честный
+    -- enqueue. Resolved-набор из тикета 05: OffhandAttack, Target_/Projectile_.
     local bonusCandidates = {
         "OffhandAttack", "Projectile_OffhandAttack", "Target_OffhandAttack",
-        "MeleeOffHandWeaponAttack", "RangedOffHandWeaponAttack",
     }
-    local knownNames = {}
-    local knownAdded = {}
-    for _, sid in ipairs(bonusCandidates) do
-        if Osi and Osi.HasSpell then
-            local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
-            if hOK and tostring(hRes) == "1" and not knownAdded[sid] then
-                knownNames[#knownNames + 1] = sid
-                knownAdded[sid] = true
-            end
-        end
-    end
-    for _, sid in ipairs(bonusCandidates) do
-        if not knownAdded[sid] then
-            knownNames[#knownNames + 1] = sid
-        end
-    end
+    local knownNames = knownSpellCandidates(actor, bonusCandidates)
 
     local ok, err
     local honestUsed = false
@@ -3545,23 +3630,15 @@ local function executeBonusAction(action)
 
     -- Честный путь: ServerCastRequest + bonusAction=true ("CastOffhand" в CastOptions).
     if not legacyNow then
-        for _, sid in ipairs(knownNames) do
-            if not honestUsed then
-                local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
-                local sType = "Target"
-                if stOK and stRes and stRes.SpellType then
-                    sType = stRes.SpellType
-                end
-                local enqOK, enqRes, enqErr = pcall(function()
-                    return enqueueCastRequest(actor, sid, target, nil, nil, nil, sType, false, nil, false, true)
-                end)
-                if enqOK and enqRes == true then
-                    honestUsed = true
-                    usedSid = sid
-                    ok = true
-                    pipelineSucceeded()
-                end
-            end
+        local enqSid, enqErr = honestEnqueue(actor, target, knownNames, { bonusAction = true })
+        if enqSid ~= nil then
+            honestUsed = true
+            usedSid = enqSid
+            ok = true
+        else
+            -- v0.8.28 (followup 04): причина честного пути не теряется
+            -- (см. honestEnqueue — формула enqOk and tostring(enqErr) or tostring(enqRes)).
+            err = enqErr
         end
     end
 
