@@ -150,3 +150,30 @@ deterministic injects act). Driving = a helper script writes `neuro_to_bg3.json`
       `Target_SacredFlame` @16.8 m. All successful casts below were at targets already in range.
 - [x] **Verify offhand**: `bonus_action.offhand_attack` SUCCESS only when the offhand weapon is equipped
       (`Osi.HasSpell(actor, "OffhandAttack")` gate); Tav BA already 0 → `cast_failed`.
+
+## Run 2026-09-17 (v0.8.33 → v0.8.34, shared-turn `end_turn` fix)
+
+Bridge: PAK v0.8.33, SE v32, direct IPC (`drive_action.ps1`). Combat at the grove gate.
+
+### Finding — `end_turn` blocked on a shared turn
+- [x] **Symptom**: `end_turn` for `origin_astarion` → `success:false, error_code: action_failed,
+      error_detail: "Turn did not change within the deadline (30 s)"` (`ended:false`); `turn_actor` stuck
+      ~13 min while the game stayed responsive (fresh heartbeat, no Lua errors).
+- [x] **Root cause**: a BG3 active turn can be **shared** by several allies (same initiative slot). The engine
+      ends it only when `TurnBased.RequestedEndTurn` is set on **all** co-active characters; the mod set it on
+      the single `acting` actor only → `TurnEnded` never fires. The state hid the co-actives: `acting now` is
+      computed only for `turn_actor` (`BG3Neuro.lua:1669`).
+- [x] **Proof**: with Astarion stuck, `end_turn {"actor":"tav"}` → `ended:true`,
+      `acting_after = S_DEN_GoblinRaider_Captain_22d80f21-…`, `turn_actor` advanced. Matches Command Console's
+      `!sailor_endturn` ("ends the turn for all creatures on the active turn").
+- [x] **Ruled out**: `Ext.Entity.UuidToHandle(TurnBased.CombatTeam)` → `nil` for the player's own combat
+      (`combat_handle:"nil"`), but the `CombatState.Participants` fallback scan works (`stats_probe` = 12 guids),
+      so a valid handle was pushed; the blocker was the per-character flag, not the handle.
+- Why 2026-09-16 passed: initiatives there were separate (one actor per turn); the bug needs a shared turn.
+
+### Fix (v0.8.34) — pending live verify
+- [x] `requestEngineEndTurn` now also sets `RequestedEndTurn=true` on every entity with
+      `TurnBased.IsActiveCombatTurn == true` (new helper `activeTurnEntities()`); handle push unchanged.
+- [x] luaparse OK (5.3); PAK built (v040, `Mods/BG3Neuro/…`, MD5 `84FCF350CDC770BE135BA4944BC351AB`).
+- [ ] **Install + verify**: PAK v040 + `modsettings.lsx` MD5; on a shared turn a single `end_turn` must advance
+      (`ended:true`). Requires graceful game restart (PAK locked while bg3 runs).

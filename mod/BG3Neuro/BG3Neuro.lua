@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.31"
+local MOD_VERSION = "0.8.34"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -66,7 +66,7 @@ local function writeInitialState()
         mode = "loading",
         generated_at = nowIso(),
         entities = {},
-        message = "Мод инициализирован, состояние загружается",
+        message = "Mod initialized, state loading",
     }
     local ok, err = pcall(Ext.IO.SaveFile, STATE_FILE, Ext.Json.Stringify(state))
     if not ok then
@@ -280,7 +280,7 @@ local function pipelineFailed(where)
             .. "): " .. legacyFailCount .. "/" .. legacyFailLimit)
         if legacyFailCount >= legacyFailLimit then
             legacyStable = true
-            _P("[BG3Neuro] stable legacy ON (честный путь отключён до перезапуска)")
+            _P("[BG3Neuro] stable legacy ON (honest path disabled until restart)")
         end
     end
     return true
@@ -773,7 +773,7 @@ function entityTurnComponentDump(guid)
     end
     local okE, ent = pcall(Ext.Entity.Get, guid)
     if not okE or ent == nil then
-        return { available = false, error = "нет сущности" }
+        return { available = false, error = "no entity" }
     end
     local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
     if okC and comp ~= nil then
@@ -1246,6 +1246,25 @@ local function combatHandleForEndTurn(acting)
     return nil
 end
 
+local function activeTurnEntities()
+    -- v0.8.34 (shared-turn fix): при общей инициативе ход принадлежит нескольким
+    -- персонажам, и движок завершает ход только когда RequestedEndTurn выставлен у
+    -- ВСЕХ соактивных. Собираем их по TurnBased.IsActiveCombatTurn == true —
+    -- аналог !sailor_endturn («ends the turn for all creatures on the active turn»).
+    local out = {}
+    local okAll, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("TurnBased") end)
+    if not okAll or handles == nil then
+        return out
+    end
+    for i = 1, #handles do
+        local tb = turnComponent(handles[i])
+        if tb ~= nil and fieldOf(tb, "IsActiveCombatTurn") == true then
+            out[#out + 1] = handles[i]
+        end
+    end
+    return out
+end
+
 local function requestEngineEndTurn(acting)
     local ok, err = pcall(function()
         local combatHandle = combatHandleForEndTurn(acting)
@@ -1254,6 +1273,15 @@ local function requestEngineEndTurn(acting)
             local okC, comp = pcall(function() return ent:GetComponent("TurnBased") end)
             if okC and comp ~= nil then
                 pcall(function() comp.RequestedEndTurn = true end)
+            end
+        end
+        -- v0.8.34: завершить общий ход за всех соактивных персонажей. Иначе движок
+        -- ждёт остальных (у них RequestedEndTurn == false), TurnEnded не наступает, и
+        -- end_turn вечно возвращает ended=false.
+        for _, coEnt in ipairs(activeTurnEntities()) do
+            local coComp = turnComponent(coEnt)
+            if coComp ~= nil then
+                pcall(function() coComp.RequestedEndTurn = true end)
             end
         end
         if combatHandle ~= nil then
@@ -2030,6 +2058,16 @@ local function partySetOf()
             out[p] = true
         end
     end
+    -- v0.8.33: спутники-партийцы по серверным флагам ServerCharacter
+    -- (InParty/IsPlayer/PartyFollower) — DB_Avatars/UserAvatar в тестовом лобби
+    -- покрывают не всю партию, из-за чего allies собирались неполными, а спутники
+    -- уходили в objects.
+    for _, g in ipairs(allEntityGuids("ServerCharacter")) do
+        local pf = characterPartyFlags(g)
+        if pf ~= nil and (pf.in_party or pf.is_player or pf.party_follower) then
+            out[g] = true
+        end
+    end
     return out
 end
 
@@ -2055,7 +2093,24 @@ function buildExplorationState(trigger)
     }
     local acting = resolveActingCharacter("")
     if acting == nil or acting == "" then
-        return state
+        -- Свободный режим: resolveActingCharacter("") пуст вне боя
+        -- (Osi.GetCurrentCharacter не отдаёт героя, пока не выбран экшн на нём),
+        -- поэтому ранний return оставлял exploration-стейт пустым и Neuro не
+        -- видела ни объектов, ни спутников в небоевом режиме. Точка отсчёта —
+        -- первый аватар партии (DB_Avatars/UserAvatar) или текущий персонаж.
+        for g in pairs(partyAvatars()) do
+            acting = g
+            break
+        end
+        if acting == nil or acting == "" then
+            local cc = currentCharacters()
+            if #cc > 0 then
+                acting = cc[1].character
+            end
+        end
+        if acting == nil or acting == "" then
+            return state
+        end
     end
     local ax, ay, az = positionOf(acting)
     local party = partySetOf()
@@ -2141,13 +2196,13 @@ local function buildDialogueState(trigger, dialogId)
 
     local events
     if dialogueBridgeOk() == false then
-        events = { "Диалог открыт. Клиентский источник вариантов недоступен (NetChannel не создан) — select_dialogue_option вернёт not_supported (Q4)." }
+        events = { "Dialogue opened. Client-side option source unavailable (NetChannel not created) — select_dialogue_option will return not_supported (Q4)." }
     elseif dialogueClientAlive == false then
-        events = { "Диалог открыт. Клиентская половина не отвечает на снапшот — select_dialogue_option вернёт not_supported (Q4)." }
+        events = { "Dialogue opened. Client half is not answering the snapshot — select_dialogue_option will return not_supported (Q4)." }
     elseif #options > 0 then
-        events = { "Диалог: " .. #options .. " вариантов ответа (клиентский источник)." }
+        events = { "Dialogue: " .. #options .. " response options (client-side source)." }
     else
-        events = { "Диалог открыт. Варианты ответа собираются из клиентского UI (NetChannel)." }
+        events = { "Dialogue opened. Response options are being collected from the client UI (NetChannel)." }
     end
 
     local state = {
@@ -2296,7 +2351,7 @@ local function readCastQueues()
     local sys
     local sysOk, sysErr = pcall(function() return Ext.System.ServerCastRequest end)
     if not sysOk or sysErr == nil then
-        return { error = "ServerCastRequest недоступен (" .. tostring(sysErr) .. ")" }
+        return { error = "ServerCastRequest unavailable (" .. tostring(sysErr) .. ")" }
     end
     sys = sysErr
     local queues = {}
@@ -2645,7 +2700,7 @@ local function enqueueCastRequest(actorUuid, opts)
 
     local apiOk, serverCastRequest = pcall(function() return Ext.System.ServerCastRequest end)
     if not apiOk or serverCastRequest == nil then
-        return nil, "ServerCastRequest недоступен на этой сборке BG3SE"
+        return nil, "ServerCastRequest unavailable on this BG3SE build"
     end
 
     local casterEntity
@@ -2654,7 +2709,7 @@ local function enqueueCastRequest(actorUuid, opts)
         casterEntity = getErr
     end
     if casterEntity == nil then
-        return nil, "Не удалось получить сущность кастера"
+        return nil, "Failed to get the caster entity"
     end
 
     -- v0.8.18: buildSpell как в brawl — для игроков берём источник из
@@ -2726,7 +2781,7 @@ local function enqueueCastRequest(actorUuid, opts)
             targetEntity = tErr
         end
         if targetEntity == nil then
-            return nil, "Не удалось получить сущность цели"
+            return nil, "Failed to get the target entity"
         end
         -- v0.8.18: как brawl — позиция цели всегда добавляется в Target.
         local target = { Target = targetEntity, TargetingType = spellType }
@@ -2751,7 +2806,7 @@ local function enqueueCastRequest(actorUuid, opts)
         queue = qErr
     end
     if queue == nil then
-        return nil, (queueId == "network" and "NetworkStartRequests" or "OsirisCastRequests") .. " недоступен"
+        return nil, (queueId == "network" and "NetworkStartRequests" or "OsirisCastRequests") .. " unavailable"
     end
 
     local castOptions
@@ -2969,7 +3024,7 @@ local function finalizeCast(caster, spellName, cancelled)
             -- v0.8.24: снапшот ресурсов после действия (тикет 02) — каст/атака завершились.
             pcall(writeResourceSnapshot, pc.id, caster, "after")
             writeResult(pc.id, true, false, cancelled and "cast_failed" or nil,
-                cancelled and "Каст прерван/провален" or nil)
+                cancelled and "Cast interrupted/failed" or nil)
             return
         end
     end
@@ -3130,7 +3185,7 @@ local function executeCast(action)
     end
 
     -- Прерываем активное движение (каст и движение не пересекаются)
-    cancelActiveMove("Движение прервано кастом", action.id)
+    cancelActiveMove("Movement interrupted by cast", action.id)
 
     -- v0.8.24: снапшот ресурсов до действия (тикет 02, критерий честной экономики).
     pcall(writeResourceSnapshot, action.id, actor, "before")
@@ -3279,7 +3334,7 @@ local function initDialogueBridge()
                         table.remove(pendingDialogue, i)
                         _P("[BG3Neuro] dialogue: click failed: " .. tostring(msg.reason or "unknown"))
                         writeResult(pd.id, false, nil, "not_supported",
-                            "ClientAutoselectExecutor: клик по варианту не выполнен клиентом: "
+                            "ClientAutoselectExecutor: click on the option was not executed by the client: "
                             .. tostring(msg.reason or "unknown"))
                         return
                     end
@@ -3314,7 +3369,7 @@ local function beginDialogueSnapshotRequest()
     if dialogueBridgeOk() == false then
         if dialogueUnavailable == false then
             dialogueUnavailable = true
-            _P("[BG3Neuro] dialogue: client bridge unavailable (Ext.Net/канал не создан) — Q4")
+            _P("[BG3Neuro] dialogue: client bridge unavailable (Ext.Net/channel not created) — Q4")
             writeDialogueStateIfChanged("dialog_state", true)
         end
         return
@@ -3355,8 +3410,8 @@ local function beginDialogueSnapshotRequest()
         if dialogueSnapshotPending and seq == dialogueSnapshotSeq then
             dialogueSnapshotPending = false
             dialogueClientAlive = false
-            _P("[BG3Neuro] dialogue: client не ответил за " .. DIALOGUE_CLIENT_TIMEOUT_MS
-                .. "ms — клик недоступен (Q4)")
+            _P("[BG3Neuro] dialogue: client did not answer within " .. DIALOGUE_CLIENT_TIMEOUT_MS
+                .. "ms — click unavailable (Q4)")
             writeDialogueStateIfChanged("dialog_state", true)
         end
     end)
@@ -3387,7 +3442,7 @@ onDialogueSnapshotReply = function(reply)
             local pd = pendingDialogue[i]
             if pd.fp ~= nil and fp ~= pd.fp then
                 table.remove(pendingDialogue, i)
-                _P("[BG3Neuro] dialogue: click advanced dialogue (новый state) — выбранный вариант сработал")
+                _P("[BG3Neuro] dialogue: click advanced dialogue (new state) — the selected option fired")
                 writeResult(pd.id, true, false, nil, nil)
             else
                 i = i + 1
@@ -3433,11 +3488,11 @@ local function executeDialogueOption(action)
     -- в клиентскую половину мода (BG3NeuroClient.lua + BootstrapClient.lua).
     if dialogueBridgeOk() == false then
         return false, nil, "not_supported",
-            "ClientAutoselectExecutor unavailable: NetChannel не создан — клиентская половина мода не установлена (Q4)"
+            "ClientAutoselectExecutor unavailable: NetChannel not created — client half of the mod not installed (Q4)"
     end
     if dialogueClientAlive == false or dialogueUnavailable then
         return false, nil, "not_supported",
-            "ClientAutoselectExecutor unavailable: клиентская половина не ответила на снапшот — клик отклонён (Q4)"
+            "ClientAutoselectExecutor unavailable: client half did not answer the snapshot — click rejected (Q4)"
     end
 
     local text = data.option_text
@@ -3472,7 +3527,7 @@ local function executeMoveToTarget(action)
     end
 
     -- Прерываем предыдущее движение (interruption path, событие cancel)
-    cancelActiveMove("Движение прервано новым действием", action.id)
+    cancelActiveMove("Movement interrupted by a new action", action.id)
 
     -- v0.8.29 (followup 02): бюджет движения по Movement-метрам (GetActionResourceValuePersonal).
     -- Писателя метров нет (bench 16.09), поэтому дистанция клампится до доступного пула —
@@ -3543,7 +3598,7 @@ local function executeAttack(action)
     end
 
     -- Прерываем активное движение (движение и атака не пересекаются)
-    cancelActiveMove("Движение прервано атакой", action.id)
+    cancelActiveMove("Movement interrupted by attack", action.id)
 
     -- v0.8.24: снапшот ресурсов до действия (тикет 02, критерий честной экономики).
     pcall(writeResourceSnapshot, action.id, actor, "before")
@@ -3675,7 +3730,7 @@ local function executeBonusAction(action)
     if not BONUS_ACTIONS_V1[actionType] then
         return false, nil, "not_supported",
             "bonus_action '" .. tostring(actionType)
-            .. "' не реализован в v0.8.25 (доступно: offhand_attack)"
+            .. "' not implemented in v0.8.25 (available: offhand_attack)"
     end
 
     local actor = resolveCombatActor(data.actor)
@@ -3713,7 +3768,7 @@ local function executeBonusAction(action)
     end
 
     -- Прерываем активное движение (бонусная атака и движение не пересекаются).
-    cancelActiveMove("Движение прервано bonus_action", action.id)
+    cancelActiveMove("Movement interrupted by bonus_action", action.id)
     -- v0.8.24: снапшот ресурсов до действия (критерий честной экономики 05).
     pcall(writeResourceSnapshot, action.id, actor, "before")
 
@@ -3806,11 +3861,11 @@ Ext.Osiris.RegisterListener("LongRestFinished", 0, "after", function()
 end)
 
 Ext.Osiris.RegisterListener("LongRestCancelled", 0, "after", function()
-    finalizeRest(false, "Отдых прерван/отменён")
+    finalizeRest(false, "Rest interrupted/cancelled")
 end)
 
 Ext.Osiris.RegisterListener("LongRestStartFailed", 0, "after", function()
-    finalizeRest(false, "Отдых не начался (нет лагеря/припасов)")
+    finalizeRest(false, "Rest did not start (no camp/supplies)")
 end)
 
 local function executeInteract(action)
@@ -3825,7 +3880,7 @@ local function executeInteract(action)
     end
 
     -- РњРёСЂРЅРѕРµ РІР·Р°РёРјРѕРґРµР№СЃС‚РІРёРµ СЃ РѕР±СЉРµРєС‚РѕРј (§8 research): useItem=0, isInteraction=1.
-    cancelActiveMove("Движение прервано взаимодействием", action.id)
+    cancelActiveMove("Movement interrupted by interaction", action.id)
     local ok, err = pcall(Osi.Use, actor, target, 0, 1, "")
     if not ok then
         return false, nil, "action_failed", tostring(err)
@@ -3847,7 +3902,7 @@ local function executeLoot(action)
 
     -- Серверный автоподбор: MoveAllLootableItemsTo(from, to, equipArmor=0, equipWeapons=0,
     -- clrOwner=1, vanityClothing=0). UI-вариант (OpenCharacterLootUI) — client-часть.
-    cancelActiveMove("Движение прервано сбором добычи", action.id)
+    cancelActiveMove("Movement interrupted by loot pickup", action.id)
     local ok, err = pcall(Osi.MoveAllLootableItemsTo, target, actor, 0, 0, 1, 0)
     if not ok then
         return false, nil, "action_failed", tostring(err)
@@ -3900,7 +3955,7 @@ local function executeOpenScreen(action)
     elseif action.name == "open_inventory" then
         currentScreen = "inventory"
     end
-    cancelActiveMove("Движение прервано открытием экрана", action.id)
+    cancelActiveMove("Movement interrupted by opening a screen", action.id)
     pcall(captureCurrentState, "screen_" .. tostring(currentScreen), true)
     return true, true, nil, nil -- success, running (экран — следующий state)
 end
@@ -3958,7 +4013,7 @@ local function executeAction(action)
         -- end_turn прерывает незавершённое движение: иначе EndTurn ждёт
         -- движения и ход не переключается (ended=false). Движение уже
         -- завершилось событием CharacterMoveToFinished — activeMove null, no-op.
-        cancelActiveMove("Ход завершён, движение прервано", action.id)
+        cancelActiveMove("Turn ended, movement interrupted", action.id)
         -- v0.8.13: передаём id, который Ext.Entity.Get находит (prefixed), а не
         -- чистый guid: чистый ("c7c13742-...") Ext.Entity.Get НЕ находит, и тогда
         -- флаг RequestedEndTurn не выставится и очередь EndTurn не пушится.
