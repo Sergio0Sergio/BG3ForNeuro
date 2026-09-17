@@ -393,8 +393,26 @@ public sealed class ActionRouter
             string.Equals(s.SpellName, spellName, StringComparison.OrdinalIgnoreCase));
         if (spell is null)
         {
-            var known = combatState.Spells.Select(s => s.SpellName).OrderBy(n => n, StringComparer.Ordinal).ToList();
+            // v0.8.35 (тикет 09): Neuro зовёт способности по понятному имени
+            // (state.spells[].name, напр. "flourish"); принимаем и его, и stat-id.
+            spell = combatState.Spells.FirstOrDefault(s =>
+                !string.IsNullOrWhiteSpace(s.Name) &&
+                string.Equals(s.Name, spellName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (spell is null)
+        {
+            var known = combatState.Spells
+                .Select(s => string.IsNullOrWhiteSpace(s.Name) ? s.SpellName : s.Name)
+                .OrderBy(n => n, StringComparer.Ordinal)
+                .ToList();
             return ValidationResult.Fail(ErrorCode.NoSpell, $"Spell '{spellName}' unavailable. Known: {string.Join(", ", known)}");
+        }
+
+        // Понятное имя -> движковый stat-id: мод исполняет по stat-id (проверено на Flourish).
+        if (!string.Equals(spell.SpellName, spellName, StringComparison.OrdinalIgnoreCase))
+        {
+            data["spell_name"] = spell.SpellName;
         }
 
         if (spell.OnCooldown)

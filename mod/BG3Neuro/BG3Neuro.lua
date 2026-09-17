@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.34"
+local MOD_VERSION = "0.8.35"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1460,6 +1460,151 @@ local function spellSlotFromUseCosts(useCosts)
     return seg:match(":(%d+)$")
 end
 
+-- ============================================================
+-- v0.8.35 (тикет 09): каталог способностей — понятное имя + стоимость.
+-- Оружейные действия (Flourish = Target_OpeningAttack) и прочие подготовленные
+-- способности уже попадают в state.spells движковым stat-id; здесь добавляем
+-- `name` (нейрочитаемое имя) и `cost` (action/bonus_action/reaction/free),
+-- чтобы Neuro мог выбирать их, не зная внутренних UID движка.
+-- ============================================================
+
+-- Фолбэк-имена (engine stat -> friendly), если локализация недоступна.
+-- Приоритет у Ext.Loca (DisplayName); таблица — страховка для статов без текста.
+local ABILITY_NAME_FALLBACK = {
+    Target_OpeningAttack = "flourish",
+    Target_PiercingThrust = "piercing_thrust",
+    Target_HinderingSmash = "hindering_smash",
+    Target_Backbreaker = "backbreaker",
+    Target_Lacerate = "lacerate",
+    Target_ConcussiveSmash = "concussive_smash",
+    Target_WeakeningStrike = "weakening_strike",
+    Target_Topple = "topple",
+    Target_RecklessAttack = "reckless_attack",
+    Target_PommelStrike = "pommel_strike",
+    Projectile_HamstringShot = "hamstring_shot",
+    Projectile_MobileShot = "mobile_shot",
+    Projectile_Brace = "brace",
+    Shout_SecondWind = "second_wind",
+    Shout_ActionSurge = "action_surge",
+    Shout_Dash = "dash",
+    Shout_Disengage = "disengage",
+    Shout_Hide = "hide",
+    Target_Shove = "shove",
+    Target_Dip = "dip",
+    Target_Help = "help",
+    Throw_Throw = "throw",
+    Throw_ImprovisedWeapon = "improvised_weapon",
+    Projectile_Jump = "jump",
+    Target_MainHandAttack = "main_hand_attack",
+    Projectile_MainHandAttack = "main_hand_attack",
+    Target_OffhandAttack = "offhand_attack",
+    Projectile_OffhandAttack = "offhand_attack",
+}
+
+local function looksLikeLocaHandle(s)
+    -- GetTranslatedString отдаёт исходный handle, если перевода нет ("h1234abcd",
+    -- "ls:..."). Такое значение как имя использовать нельзя.
+    s = tostring(s or "")
+    if #s == 0 or #s > 60 then
+        return true
+    end
+    return s:match("^h%x+$") ~= nil or s:match("^ls:") ~= nil
+end
+
+local function abilityDisplayName(statId, stats)
+    -- 1) Локализованное имя: stats.DisplayName (handle) -> Ext.Loca.
+    local display = fieldOf(stats, "DisplayName")
+    if display ~= nil and tostring(display) ~= "" then
+        local okL, loca = pcall(function() return Ext.Loca end)
+        if okL and loca ~= nil then
+            local okT, text = pcall(function() return loca.GetTranslatedString(display) end)
+            if okT and text ~= nil and not looksLikeLocaHandle(text) then
+                local s = slug(text)
+                if s ~= "" and s ~= "entity" then
+                    return s
+                end
+            end
+        end
+    end
+    -- 2) Курируемый фолбэк.
+    local alias = ABILITY_NAME_FALLBACK[statId]
+    if alias ~= nil then
+        return alias
+    end
+    -- 3) Производное имя из stat-id: "Target_OpeningAttack" -> "opening_attack".
+    local bare = tostring(statId or ""):gsub("^%a+_", "")
+    return slug(bare)
+end
+
+local function abilityCostOf(useCosts)
+    -- UseCosts реальных способностей: "ActionPoint:1;BonusActionPoint:1" и т.п.
+    -- Порядок важен: "ReactionActionPoint"/"BonusActionPoint" содержат "ActionPoint".
+    if type(useCosts) ~= "string" or useCosts == "" then
+        return "free"
+    end
+    if useCosts:find("ReactionActionPoint", 1, true) then
+        return "reaction"
+    end
+    if useCosts:find("BonusActionPoint", 1, true) then
+        return "bonus_action"
+    end
+    if useCosts:find("ActionPoint", 1, true) or useCosts:find("SpellSlotsGroup", 1, true) then
+        return "action"
+    end
+    return "free"
+end
+
+local function preparedSpellStatId(ps)
+    -- Engine stat-id подготовленной способности (как в buildCombatSpellsBlock).
+    local okO, origin = pcall(function() return ps.OriginatorPrototype end)
+    if okO and origin ~= nil and tostring(origin) ~= "" then
+        return tostring(origin)
+    end
+    local okT, proto = pcall(function() return ps.Prototype end)
+    if okT and proto ~= nil and tostring(proto) ~= "" then
+        return tostring(proto)
+    end
+    return nil
+end
+
+local function resolveAbilityStatName(actor, nameOrId)
+    -- Роутер принимает и движковый stat-id, и понятное имя (name из state.spells).
+    if nameOrId == nil or nameOrId == "" then
+        return nil
+    end
+    local okS, stats = pcall(Ext.Stats.Get, nameOrId)
+    if okS and stats ~= nil then
+        return nameOrId
+    end
+    local wanted = slug(nameOrId)
+    local okE, ent = pcall(Ext.Entity.Get, actor)
+    if okE and ent ~= nil then
+        local okP, prepared = pcall(function()
+            if ent.SpellBookPrepares and ent.SpellBookPrepares.PreparedSpells then
+                return ent.SpellBookPrepares.PreparedSpells
+            end
+            return {}
+        end)
+        if okP and prepared ~= nil then
+            for i = 1, #prepared do
+                local sid = preparedSpellStatId(prepared[i])
+                if sid ~= nil then
+                    local okG, statsG = pcall(Ext.Stats.Get, sid)
+                    if okG and statsG ~= nil and abilityDisplayName(sid, statsG) == wanted then
+                        return sid
+                    end
+                end
+            end
+        end
+    end
+    for sid, alias in pairs(ABILITY_NAME_FALLBACK) do
+        if alias == wanted then
+            return sid
+        end
+    end
+    return nil
+end
+
 local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
     -- casterId — raw acting (префиксный/датч id). Ext.Entity.Get НЕ резолвит чистые
     -- guid'ы (ревизия v0.8.13): при неудаче маппим id как в endTurnEntityId.
@@ -1488,23 +1633,17 @@ local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
     local list = {}
     for i = 1, #prepared do
         local ps = prepared[i]
-        local statId
-        local okO, origin = pcall(function() return ps.OriginatorPrototype end)
-        if okO and origin ~= nil and tostring(origin) ~= "" then
-            statId = tostring(origin)
-        else
-            local okT, proto = pcall(function() return ps.Prototype end)
-            if okT and proto ~= nil and tostring(proto) ~= "" then
-                statId = tostring(proto)
-            end
-        end
+        local statId = preparedSpellStatId(ps)
         if statId ~= nil and not seen[statId] then
             seen[statId] = true
             local range, aoe = spellRangeAndAoe(statId)
-            local slot
+            local slot, cost, abilityName
             local okG, statsG = pcall(Ext.Stats.Get, statId)
             if okG and statsG ~= nil then
-                slot = spellSlotFromUseCosts(fieldOf(statsG, "UseCosts")) or levelSlotOf(statsG)
+                local useCosts = fieldOf(statsG, "UseCosts")
+                slot = spellSlotFromUseCosts(useCosts) or levelSlotOf(statsG)
+                cost = abilityCostOf(useCosts)
+                abilityName = abilityDisplayName(statId, statsG)
             end
 
             local targets = {}
@@ -1521,6 +1660,8 @@ local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
             end
             list[#list + 1] = {
                 spell_name = statId,
+                name = abilityName,
+                cost = cost or "free",
                 slot = slot,
                 range = round1(range) or 0,
                 aoe = round1(aoe) or 0,
@@ -1741,6 +1882,23 @@ function captureCombatState(event, force)
     -- v0.8.26 (тикет 05): подготовленные заклинания активного кастера -> state.spells.
     -- Передаём raw acting: buildCombatSpellsBlock сам резолвит id (как endTurnEntityId).
     buildCombatSpellsBlock(state, acting, actingPosX, actingPosY)
+
+    -- v0.8.35 (тикет 09): рекламируем способности кастера понятными именами —
+    -- Neuro выбирает их по name (fallback stat-id), не зная внутренних UID движка.
+    local castNames = {}
+    for _, s in ipairs(state.spells or {}) do
+        local n = s.name
+        if n == nil or n == "" then
+            n = s.spell_name
+        end
+        if n ~= nil and n ~= "" then
+            castNames[#castNames + 1] = n
+        end
+    end
+    if #castNames > 0 then
+        state.available_actions[#state.available_actions + 1] =
+            "cast_spell: [" .. table.concat(castNames, ", ") .. "]"
+    end
 
     writeStateFile(state)
     diag.stage = "done"
@@ -3164,6 +3322,15 @@ local function executeCast(action)
     end
     if spellName == nil or spellName == "" then
         return false, nil, "action_failed", "spell_name is required"
+    end
+
+    -- v0.8.35 (тикет 09): принимаем и понятное имя (state.spells[].name, напр.
+    -- "flourish"), и движковый stat-id (Target_OpeningAttack) — как в state, так и
+    -- при прямом инжекте. Неизвестное имя остаётся как есть: ниже сработает
+    -- префиксный матч книги/движка с внятной ошибкой.
+    local resolvedSpell = resolveAbilityStatName(actor, spellName)
+    if resolvedSpell ~= nil then
+        spellName = resolvedSpell
     end
 
     -- v0.8.19: "только в свой ход" по CanActInCombat кастера, а не по actingChar:

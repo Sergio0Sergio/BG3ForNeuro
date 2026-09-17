@@ -507,4 +507,51 @@ public class StateSerializerTests
         Assert.Equal("goblin_1", state.Spells[0].TargetsInRange[0]);
         Assert.Empty(state.Spells[1].TargetsInRange);
     }
+
+    [Fact]
+    public void Parse_SpellsWithFriendlyNameAndCost_ParsesAbilityCatalog()
+    {
+        // v0.8.35 (тикет 09): buildCombatSpellsBlock добавляет name (понятное имя) и
+        // cost (action/bonus_action/reaction/free) каждой подготовленной способности.
+        var state = StateSerializer.Parse("""
+            {
+              "version": 2,
+              "mode": "combat",
+              "turn_actor": "tav",
+              "allies": [ { "alias": "tav", "name": "Tav", "hp": 30, "max_hp": 30, "distance": 0, "position_x": 0, "position_y": 0 } ],
+              "enemies": [ { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 1.2, "position_x": 1, "position_y": 0 } ],
+              "spells": [
+                { "spell_name": "Target_OpeningAttack", "name": "flourish", "cost": "bonus_action", "slot": "0", "range": 1.5, "aoe": 0, "targets_in_range": ["goblin_1"] },
+                { "spell_name": "Projectile_FireBolt", "name": "fire_bolt", "cost": "action", "slot": "0", "range": 18, "aoe": 0, "targets_in_range": ["goblin_1"] }
+              ],
+              "available_actions": ["end_turn", "cast_spell: [flourish, fire_bolt]"]
+            }
+            """)!;
+
+        Assert.Equal("flourish", state.Spells[0].Name);
+        Assert.Equal("bonus_action", state.Spells[0].Cost);
+        Assert.Equal("Target_OpeningAttack", state.Spells[0].SpellName);
+        Assert.Equal("action", state.Spells[1].Cost);
+    }
+
+    [Fact]
+    public void ToMarkdown_FriendlyAbility_RendersNameEngineIdAndCost_OmitsZeroSlot()
+    {
+        var state = StateSerializer.Parse("""
+            {
+              "mode": "combat",
+              "turn_actor": "tav",
+              "allies": [ { "alias": "tav", "name": "Tav", "hp": 30, "max_hp": 30, "distance": 0, "position_x": 0, "position_y": 0 } ],
+              "enemies": [ { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 1.2, "position_x": 1, "position_y": 0 } ],
+              "spells": [ { "spell_name": "Target_OpeningAttack", "name": "flourish", "cost": "bonus_action", "slot": "0", "range": 1.5, "aoe": 0, "targets_in_range": ["goblin_1"] } ],
+              "available_actions": ["cast_spell: [flourish]"]
+            }
+            """)!;
+
+        var md = StateSerializer.ToMarkdown(state);
+
+        Assert.Contains("- flourish (Target_OpeningAttack): cost bonus_action, range 1.5m → in range: [goblin_1]", md);
+        Assert.Contains("- cast_spell: [flourish]", md);
+        Assert.DoesNotContain("slot 0", md);
+    }
 }

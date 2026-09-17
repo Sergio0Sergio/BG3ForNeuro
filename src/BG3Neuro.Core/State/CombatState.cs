@@ -78,6 +78,8 @@ public sealed class Combatant
 public sealed class SpellInfo
 {
     public required string SpellName { get; set; }
+    public string? Name { get; set; }
+    public string? Cost { get; set; }
     public string? Slot { get; set; }
     public double Range { get; set; }
     public double Aoe { get; set; }

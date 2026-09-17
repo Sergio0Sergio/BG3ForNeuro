@@ -1,7 +1,7 @@
 # 09 — Expose character abilities (weapon actions / bonus actions) to Neuro by friendly name
 
 Type: task (state + router)
-Status: ready-for-agent
+Status: implemented (bench-pending)
 Blocked by: —
 
 ## Finding (live bench 2026-09-17, PAK v0.8.34)
@@ -22,32 +22,58 @@ Note: the router data key for the cast is **`spell_name`** (not `spell`; `spell`
 
 ## Gap
 
-Even though the engine route works, Neuro cannot discover or use such abilities:
+Even though the engine route works, Neuro could not discover or use such abilities:
 
-1. **No ability catalog in the state.** `available_actions` lists only `end_turn` /
-   `attack_entity` / `move_to_target`; `state.spells` is empty for a martial like Tav. Neuro has no
-   way to learn that Flourish exists, what it costs, or its targeting rules.
+1. **State listed engine UIDs only — correction to the earlier note.** `state.spells` is **not**
+   empty in combat: `buildCombatSpellsBlock` already emits the caster's whole `preparedSpells`
+   (18 entries for Tav, `Target_OpeningAttack` among them). But each entry carried only the raw
+   engine `spell_name` (stat id) with no friendly name and no cost type (`slot` was `0` for every
+   weapon action, since they have no `SpellSlotsGroup`). `available_actions` did not advertise
+   `cast_spell` at all (only `end_turn` / `attack_entity` / `move_to_target`). So Neuro saw a raw
+   UID but could not tell what it is or what it costs.
+   (The earlier claim "`state.spells` is empty for a martial like Tav" came from an **exploration**
+   capture — combat was not active — and is wrong.)
 2. **`bonus_action` is hardcoded to `offhand_attack` only** (`BONUS_ACTIONS_V1`,
    `BG3Neuro.lua:3720`); any other `action_type` → `not_supported`. Flourish (a bonus action) is
    therefore unreachable through `bonus_action`.
 3. **Engine UID vs friendly name.** The working route needs the internal id (`Target_OpeningAttack`);
-   Neuro cannot be expected to know ids. There is no friendly-name → UID mapping.
+   Neuro cannot be expected to know ids. There was no friendly-name → UID mapping.
 
-## Fix direction
+## Implementation (v0.8.35, 2026-09-17)
 
-1. **State** — emit an abilities list for the acting character, each entry with a Neuro-readable
-   name plus what it needs to decide: e.g.
-   `{ "name":"flourish", "engine_id":"Target_OpeningAttack", "cost":"bonus_action",
-      "uses":<n>, "target":"enemy", "range":"weapon" }`.
-   Source candidates: `preparedSpells` (SourceType `Boost`/`WeaponSpell`) + resource costs /
-   `Osi.HasSpell`. Open question to verify: a reliable way to derive the **cost type**
-   (Action vs Bonus vs Reaction) per entry — `GetActionResourceValuePersonal` gives the pool, not
-   the per-ability cost; may need the stat's `UseCosts`/`SpellCost` or `Osi` helpers.
-2. **Router** — accept friendly names in `bonus_action` (and/or `cast_spell`) and map them to engine
-   ids (table like `flourish → Target_OpeningAttack`, `offhand_attack → OffhandAttack`), so the
-   contract doesn't leak internal ids. Keep `offhand_attack`'s off-hand-weapon gate.
-3. Bench assertion: with a scimitar/shortsword/rapier in the main hand, a single `bonus_action`
-   (or `cast_spell`) with the friendly name `flourish` spends exactly one BA and applies Off Balance.
+1. **State — ability catalog.** Each `state.spells` entry now carries:
+   - `name` — Neuro-readable name: `slug` of the localized name (`Ext.Stats.Get(id).DisplayName` →
+     `Ext.Loca.GetTranslatedString`), with a curated fallback table (`ABILITY_NAME_FALLBACK`,
+     e.g. `Target_OpeningAttack → flourish`) and, last, a derived slug (`Target_OpeningAttack →
+     opening_attack`). So `flourish`, `piercing_thrust`, `hamstring_shot`, `second_wind`, … appear
+     instead of raw ids (localization is the primary source, the table is a safety net).
+   - `cost` — `action` / `bonus_action` / `reaction` / `free`, derived from the stat's `UseCosts`
+     (`ReactionActionPoint`/`BonusActionPoint` checked before `ActionPoint`, which they contain as a
+     substring). This answers the open cost-type question without `Osi` helpers.
+   - `available_actions` now advertises `cast_spell: [<names>]`.
+   (`BG3Neuro.lua`: `abilityDisplayName`, `abilityCostOf`, `preparedSpellStatId`,
+   `resolveAbilityStatName`; `buildCombatSpellsBlock`; `captureCombatState`.)
+2. **Router — friendly names.** `ActionRouter.ValidateCast` (C#) accepts `spell_name` matching either
+   `SpellInfo.SpellName` (engine id) or `SpellInfo.Name` (friendly); on a friendly match it rewrites
+   the payload `spell_name` to the engine id before writing `action_*.json`, so the mod contract stays
+   on engine ids. The Lua `executeCast` also resolves friendly names defensively
+   (`resolveAbilityStatName`), covering direct injects.
+3. **`cast_spell` is the working path for bonus-action abilities** (proven for Flourish: BA 1.0 → 0.0
+   natively). `bonus_action` stays offhand-only for now (its own gate/ticket); it is not needed to
+   reach Flourish.
+
+Tests (pure, no game): `StateSerializerTests` (catalog parse + rendering
+`- flourish (Target_OpeningAttack): cost bonus_action, range 1.5m`) and `ActionRouterTests`
+(friendly → engine rewrite; engine id passthrough; unknown name lists friendly names). 94/94 green in
+the `State` namespace; the solution builds clean. PAK v041 built
+(`Mods/BG3Neuro/…`, MD5 `3C1274B11D48EB97F3588CAED8E72CFD`) — **not installed** (game running).
+
+## Bench assertion (pending)
+
+With a scimitar/shortsword/rapier in the main hand, `state.spells` must contain
+`{"name":"flourish","spell_name":"Target_OpeningAttack","cost":"bonus_action"}`, `available_actions`
+must list `cast_spell: [… flourish …]`, and one `cast_spell {"spell_name":"flourish", …}` must spend
+exactly one BA and apply Off Balance (same result as the raw-id inject).
 
 ## Evidence
 

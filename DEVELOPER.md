@@ -71,7 +71,7 @@ The C# process considers the mod dead if heartbeat is older than 10 seconds (con
 
 Emitted on game events (TurnStarted, DialogStarted, SessionLoaded, etc.). Branches by scenario:
 
-- **Combat** — turn order, current actor, resources (AP/BA), positions, available actions
+- **Combat** — turn order, current actor, resources (AP/BA), positions, available actions. `spells[]` is the acting character's ability catalog: `spell_name` (engine stat id), `name` (friendly, e.g. `flourish`), `cost` (`action`/`bonus_action`/`reaction`/`free`), `slot`, `range`, `aoe`, `targets_in_range`. `cast_spell.spell_name` accepts the friendly `name` or the engine id.
 - **Dialog** — conversation options (index + text), speaker, context
 - **Exploration** — visible objects, regions, inventory, rest availability
 

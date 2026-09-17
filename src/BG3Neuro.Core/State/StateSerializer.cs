@@ -101,9 +101,26 @@ public static class StateSerializer
             sb.Append("## Spells (").Append(activeName).Append(')').AppendLine();
             foreach (var spell in state.Spells)
             {
-                sb.Append("- ").Append(spell.SpellName)
-                  .Append(": slot ").Append(string.IsNullOrWhiteSpace(spell.Slot) ? "—" : spell.Slot)
-                  .Append(", range ").Append(FormatDistance(spell.Range)).Append('m');
+                var friendly = string.IsNullOrWhiteSpace(spell.Name) ? spell.SpellName : spell.Name;
+                sb.Append("- ").Append(friendly);
+                if (!string.IsNullOrWhiteSpace(spell.Name) &&
+                    !string.Equals(spell.Name, spell.SpellName, StringComparison.OrdinalIgnoreCase))
+                {
+                    sb.Append(" (").Append(spell.SpellName).Append(')');
+                }
+
+                sb.Append(": ");
+                if (!string.IsNullOrWhiteSpace(spell.Cost))
+                {
+                    sb.Append("cost ").Append(spell.Cost).Append(", ");
+                }
+
+                if (!string.IsNullOrWhiteSpace(spell.Slot) && spell.Slot != "0")
+                {
+                    sb.Append("slot ").Append(spell.Slot).Append(", ");
+                }
+
+                sb.Append("range ").Append(FormatDistance(spell.Range)).Append('m');
                 if (spell.Aoe > 0)
                 {
                     sb.Append(", AoE ").Append(FormatDistance(spell.Aoe)).Append('m');

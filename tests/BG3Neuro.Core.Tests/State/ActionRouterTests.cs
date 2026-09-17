@@ -256,6 +256,50 @@ public class ActionRouterTests : IDisposable
     }
 
     [Fact]
+    public void CastSpell_ByFriendlyAbilityName_RewritesToEngineSpellName()
+    {
+        // v0.8.35 (тикет 09): Neuro зовёт способность по name ("flourish"), мод исполняет
+        // по движковому stat-id (Target_OpeningAttack) — роутер подменяет spell_name.
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Target_OpeningAttack", Name = "flourish", Cost = "bonus_action", Range = 60 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"flourish","target_id":"goblin_1"}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+        var file = File.ReadAllText(Path.Combine(_tmpDir, "action_act-1.json"));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(file)!;
+        var dataNode = System.Text.Json.Nodes.JsonNode.Parse(node["data"]!.GetValue<string>())!;
+        Assert.Equal("Target_OpeningAttack", dataNode["spell_name"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void CastSpell_ByEngineSpellName_StillSucceeds()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Target_OpeningAttack", Name = "flourish", Cost = "bonus_action", Range = 60 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"Target_OpeningAttack","target_id":"goblin_1"}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public void CastSpell_UnknownFriendlyName_ListsKnownFriendlyNames()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Target_OpeningAttack", Name = "flourish", Cost = "bonus_action", Range = 60 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"parry"}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.NoSpell, result.ErrorCode);
+        Assert.Contains("flourish", result.ErrorDetail);
+    }
+
+    [Fact]
     public void CastSpell_OnCooldown_NoSpell()
     {
         var router = CreateRouter();

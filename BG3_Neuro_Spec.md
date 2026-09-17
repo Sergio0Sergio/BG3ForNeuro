@@ -140,10 +140,11 @@ Markdown, no `#` top-level, structure via `##`. Meters as the distance unit (the
 - goblin_1 (Goblin Raider): HP 12/18, distance 6m, status: —
 ## Spells (Karlach)
 - Fireball: slot 3, radius 18m, AoE 4m → in range: [goblin_1, goblin_2]
+- flourish (Target_OpeningAttack): cost bonus_action, range 1.5m → in range: [goblin_1]
 ## Available actions (Karlach)
 - move_to_target: [<move targets>]
 - attack_entity: [goblin_1, goblin_2]
-- cast_spell: [Fireball, Magic Missile] (slot 3: 2)
+- cast_spell: [Fireball, Magic Missile, flourish]
 - throw: [health_potion, javelin] → [goblin_1, goblin_2]
 - use_item: [health_potion]
 - bonus_action: [offhand_attack, help, shove]
@@ -289,7 +290,7 @@ Principles:
 Details:
 - **`move_to_target`**: schema `{ "type": "object", "required": ["target_id"], "properties": { "target_id": {"type": "string"}, "actor": {"type": "string"} } }`. Neuro sees available targets in state.
 - **`attack_entity`**: `target_id` + `actor` (main hand always, no `weapon_slot` — offhand only via `bonus_action`).
-- **`cast_spell`** (AoE): `actor` + `spell_name` — from state (source of truth); `coverage` (optional) — desired victim list, the plugin centers the blast on the coverage optimum, failure with a list if not everything is reachable; `position` (optional) — raw center coordinates `{x, y, z}` (BG3SE API 3D), fallback (enabled via config, disabled by default). AoE coverage and range are computed by the plugin — a single code path with StateSerializer.
+- **`cast_spell`** (AoE): `actor` + `spell_name` — from state (source of truth); `coverage` (optional) — desired victim list, the plugin centers the blast on the coverage optimum, failure with a list if not everything is reachable; `position` (optional) — raw center coordinates `{x, y, z}` (BG3SE API 3D), fallback (enabled via config, disabled by default). AoE coverage and range are computed by the plugin — a single code path with StateSerializer. **v0.8.35:** this is also the path for weapon actions / bonus-action abilities (e.g. Flourish). `spell_name` accepts **either** the engine stat id (`Target_OpeningAttack`) **or** the friendly `name` from the state (`flourish`); the plugin resolves the friendly name to the engine id before dispatch. The plugin spends the ability's own resource cost (a bonus-action ability spends BA) natively — `bonus_action` stays `offhand_attack`-only.
 - **`use_item`**: `actor` + item + target. Drinking a potion as an action — here (both paths: `use_item` and `bonus_action.drink_potion`).
 - **`throw`**: `actor` + `item_id` + `target_id`. Present in the schema, but in v1 the validator returns `not_supported` (no public Osiris call) — an honest "implemented later" failure, not silence.
 - **`bonus_action.action_type`** (full, fixed enum):
@@ -505,7 +506,7 @@ Note: free-form parameters (`cast_spell.spell_name`, `interact_with.interaction_
 | Stealth | **no public function** → §5.3 (X3) | ✘ |
 | Loot | `Osi.Pickup`, `Osi.OpenCharacterLootUI`, `Osi.MoveAllLootableItemsTo`, `Osi.ToInventory` | ✔ |
 | Turn/combat | Events `TurnStarted/TurnEnded/CombatStarted/CombatEnded/CombatRoundStarted`, `Osi.CombatGetActiveEntity`, `Osi.EndTurn` | ✔ |
-| Spell list | `Ext.Entity.Get(char).SpellBook.Spells` + `Ext.Stats.GetStats("SpellData")` + `Ext.Stats.Get(name)` (UseCosts/SpellType/Range) | ✔ |
+| Spell/ability list | `Ext.Entity.Get(char).SpellBookPrepares.PreparedSpells` (full stat id via `OriginatorPrototype`/`Prototype`) + `Ext.Stats.Get(name)` (`UseCosts` → `cost`, `SpellType`/`TargetRadius`/`AreaRadius` → range/AoE) + `Ext.Stats.Get(name).DisplayName` → `Ext.Loca.GetTranslatedString` (friendly `name`, slugged; curated `ABILITY_NAME_FALLBACK` when there is no translation) | ✔ |
 | Inventory | `Ext.Entity.Get(char).Inventory` + `Osi.IterateInventory`, `Osi.GetGold` | ✔ |
 | Turn order | `Ext.Entity.Get(combatGuid).TurnOrder` (`EocCombatTurnOrderComponent.Groups/Groups2/field_40`=round) | ✔ |
 

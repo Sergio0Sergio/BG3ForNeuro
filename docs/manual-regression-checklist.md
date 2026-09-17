@@ -189,3 +189,19 @@ Bridge: PAK v0.8.33, SE v32, direct IPC (`drive_action.ps1`). Combat at the grov
 - [x] **new finding (filed)**: `state.enemies` again contains friendly NPCs (`zevlor_1` was `turn_actor` for the
       combat's first turn) — faction misclassification in the state emitter; see
       `.scratch/bg3-neuro-followups/issues/08-enemies-faction-misclassification.md`.
+
+### Run 2026-09-17 (v0.8.35) — ability catalog / friendly names (PENDING — not installed)
+
+PAK v041 built (`Mods/BG3Neuro/…`, MD5 `3C1274B11D48EB97F3588CAED8E72CFD`); install + app restart still
+required (the game was running, so the PAK could not be swapped). Steps, on a fresh combat:
+
+- [ ] **catalog present**: `state.spells` for Tav (scimitar/shortsword/rapier in the main hand) contains
+      `{"name":"flourish","spell_name":"Target_OpeningAttack","cost":"bonus_action"}` — friendly `name` +
+      `cost` on every weapon action (not `slot 0` with a raw id).
+- [ ] **advertised**: `available_actions` lists `cast_spell: [… flourish …]`.
+- [ ] **friendly-name cast**: `cast_spell {"actor":"tav","spell_name":"flourish","target_id":"<enemy>"}` →
+      `success:true`, spends exactly one BA (`BonusActionPoint` 1.0 → 0.0), applies Off Balance; the
+      `action_<id>.json` trace shows `spell_name` rewritten to `Target_OpeningAttack`.
+- [ ] **engine id still works**: the same inject with `spell_name":"Target_OpeningAttack"` → `success:true`.
+- [ ] **C# rendering**: the app's `bg3_to_neuro.json` mirror renders `- flourish (Target_OpeningAttack): cost
+      bonus_action, …` (needs the app restarted on the ticket-09 build).
