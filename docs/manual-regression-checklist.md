@@ -171,9 +171,21 @@ Bridge: PAK v0.8.33, SE v32, direct IPC (`drive_action.ps1`). Combat at the grov
       so a valid handle was pushed; the blocker was the per-character flag, not the handle.
 - Why 2026-09-16 passed: initiatives there were separate (one actor per turn); the bug needs a shared turn.
 
-### Fix (v0.8.34) — pending live verify
+### Fix (v0.8.34) — verified live
 - [x] `requestEngineEndTurn` now also sets `RequestedEndTurn=true` on every entity with
       `TurnBased.IsActiveCombatTurn == true` (new helper `activeTurnEntities()`); handle push unchanged.
 - [x] luaparse OK (5.3); PAK built (v040, `Mods/BG3Neuro/…`, MD5 `84FCF350CDC770BE135BA4944BC351AB`).
-- [ ] **Install + verify**: PAK v040 + `modsettings.lsx` MD5; on a shared turn a single `end_turn` must advance
-      (`ended:true`). Requires graceful game restart (PAK locked while bg3 runs).
+- [x] **Install + verify**: PAK v040 installed (`modsettings.lsx` MD5 in both entries); SE log shows
+      `v0.8.34 loaded` (server+client), no errors. On a **shared** turn a **single** `end_turn` now advances:
+      `end_turn {"actor":"origin_astarion"}` → `ended:true`, `acting_after = S_DEN_GoblinRaider_Captain…`,
+      state `turn_actor` `origin_astarion` → `za_krug_1` (init 10/18) — the exact call that used to return
+      `ended=false` and hang. Fix confirmed.
+
+### Run 2026-09-17 (v0.8.34) — exploration → combat transition (observed)
+- [x] **exploration → dialogue → combat**: from `mode=exploration, trigger=free_roam` (35 objects, 0 enemies),
+      `move_to_target {"actor":"tav","target_id":"goblin_tracker_1"}` → `mode=dialogue` (`dialog_state`,
+      1 response option); `select_dialogue_option {"option_index":1}` → `mode=combat` (`trigger=TurnStarted`,
+      14 enemies, `turn_actor=zevlor_1`). The gate encounter is gated by a dialogue, not a pure proximity trigger.
+- [x] **new finding (filed)**: `state.enemies` again contains friendly NPCs (`zevlor_1` was `turn_actor` for the
+      combat's first turn) — faction misclassification in the state emitter; see
+      `.scratch/bg3-neuro-followups/issues/08-enemies-faction-misclassification.md`.

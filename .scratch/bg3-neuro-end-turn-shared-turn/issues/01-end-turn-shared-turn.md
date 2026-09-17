@@ -1,8 +1,7 @@
 # 01 — end_turn does not advance when the active turn is shared by several characters
 
 Type: task (live bench)
-Status: resolved (code) / bench-pending (install + verify)
-Blocked by: game restart (PAK reinstall)
+Status: resolved
 
 ## Symptom
 
@@ -48,5 +47,15 @@ The combat-handle queue push is unchanged (once). Files:
 ## Answer
 
 Implemented + luaparse-OK (5.3) + PAK built (v040, `Mods/BG3Neuro/…`, MD5
-`84FCF350CDC770BE135BA4944BC351AB`). Install + live verify (single-actor `end_turn` must advance
-the turn) pending game restart — PAK is locked while bg3 runs.
+`84FCF350CDC770BE135BA4944BC351AB`).
+
+**Verified live (2026-09-17, PAK v040 installed, SE v32):** SE log shows `[BG3Neuro] v0.8.34 loaded`
+(server + client), no errors. Reproduced the same shared-turn scene (exploration → dialogue →
+combat, `turn_actor=origin_astarion`, init 3/18) and sent **one** `end_turn`:
+
+- `end_turn {"actor":"origin_astarion"}` → `success:true, ended:true`,
+  `acting_after = S_DEN_GoblinRaider_Captain_22d80f21-…`; state `turn_actor` advanced
+  `origin_astarion` → `za_krug_1` (init 10/18).
+
+This is the exact call that previously returned `ended=false` and hung for ~13 min. Fix confirmed;
+bench record in `docs/manual-regression-checklist.md` (Run 2026-09-17).

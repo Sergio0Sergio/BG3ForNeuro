@@ -12,6 +12,7 @@ Tracker: local markdown (`.scratch/<effort>/`), conventions of `issue-tracker-lo
 - [x] 05-alias-statslug-fallback — done (already fixed in HEAD 7697f11: statSlug guards vs~=""/non-ASCII/"entity" -> nil, registerAlias falls back to slug(rawName))
 - [x] 06-docs-consistency — done (spec §6.4b snapshot set, map over-claim, stale GetConfig claims, research/02 aspirational markers)
 - [x] 07-duplication-smells — done (extracted knownSpellCandidates + honestEnqueue, characterPartyFlags boolean|nil decode, bonusCandidates trimmed to resolved AttackType-free set; PAK 5B4925F2)
+- [ ] 08-enemies-faction-misclassification — open (state `enemies` includes allied NPCs `wyll_1`/`zevlor_1`/`remira_1`/`aradin_1`/`barth_1` and the object `overgrown_portcullis_1`; classifier at `BG3Neuro.lua:1673` uses `CombatTeam`, not a real hostility signal. Filed 2026-09-17 from the v0.8.34 verification run; `ready-for-agent`)
 
 ## Fixed before commit (not tickets)
 - auto `insertAtFront` now uses `detectIsPlayer` (ServerCharacter) instead of `actor:find("Player")` — `executeCast`.

@@ -1,5 +1,9 @@
 # Handoff — end_turn shared-turn fix (v0.8.34)
 
+> **DONE (2026-09-17).** PAK v040 installed and the fix verified live: a single
+> `end_turn {"actor":"origin_astarion"}` on a shared turn → `ended:true` (see
+> `issues/01-end-turn-shared-turn.md`). Kept for history; no action needed.
+
 ## What this is
 
 Continuation of the BG3Neuro live-combat bench. The blocker "`end_turn` does not switch the
