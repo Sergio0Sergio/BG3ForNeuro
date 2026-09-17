@@ -1,7 +1,7 @@
 # 09 — Expose character abilities (weapon actions / bonus actions) to Neuro by friendly name
 
 Type: task (state + router)
-Status: implemented (bench-pending)
+Status: verified (live bench 2026-09-17, v0.8.35 / PAK v041)
 Blocked by: —
 
 ## Finding (live bench 2026-09-17, PAK v0.8.34)
@@ -66,14 +66,31 @@ Tests (pure, no game): `StateSerializerTests` (catalog parse + rendering
 `- flourish (Target_OpeningAttack): cost bonus_action, range 1.5m`) and `ActionRouterTests`
 (friendly → engine rewrite; engine id passthrough; unknown name lists friendly names). 94/94 green in
 the `State` namespace; the solution builds clean. PAK v041 built
-(`Mods/BG3Neuro/…`, MD5 `3C1274B11D48EB97F3588CAED8E72CFD`) — **not installed** (game running).
+(`Mods/BG3Neuro/…`, MD5 `3C1274B11D48EB97F3588CAED8E72CFD`).
 
-## Bench assertion (pending)
+## Bench — VERIFIED (2026-09-17, PAK v041, combat at the grove gate, `turn_actor=tav`)
 
-With a scimitar/shortsword/rapier in the main hand, `state.spells` must contain
-`{"name":"flourish","spell_name":"Target_OpeningAttack","cost":"bonus_action"}`, `available_actions`
-must list `cast_spell: [… flourish …]`, and one `cast_spell {"spell_name":"flourish", …}` must spend
-exactly one BA and apply Off Balance (same result as the raw-id inject).
+1. **Catalog present.** `state.spells` (18 entries) carries `name` + `cost`; e.g.
+   `Target_OpeningAttack → {name:"flourish", cost:"bonus_action", range:1.5,
+   targets_in_range:["goblin_tracker_4"]}`. Localization wins over the fallback table, as designed
+   (`Target_HinderingSmash → "weakening_strike"`, `Target_PiercingThrust → "piercing_strike"`).
+2. **Advertised.** `available_actions` includes `cast_spell: [ … flourish, piercing_strike,
+   weakening_strike]`.
+3. **Router (friendly → engine).** Injected over a local WS server (so the C# `ActionRouter` runs):
+   `cast_spell {"actor":"tav","spell_name":"flourish","target_id":"goblin_tracker_4"}` →
+   `action_b9r1.json` shows `spell_name` rewritten to `Target_OpeningAttack`; `result_b9r1.json`
+   `success:true`; `BonusActionPoint` **1.0 → 0.0**, AP/Movement unchanged.
+4. **Lua safety net.** Direct `neuro_to_bg3.json` inject with the friendly name `piercing_strike`
+   (router bypassed) → `cast_debug.json` `spellName: Target_PiercingThrust`, `success:true`,
+   `ActionPoint` **1.0 → 0.0**.
+5. **Engine id passthrough.** `spell_name":"Target_MainHandAttack"` → `action_b9r3.json` unchanged
+   (no bogus rewrite).
+
+Not verified live: the C# **markdown rendering** — with `autopilot.enabled=false` the app never sends
+the state markdown (`DecisionLoop.cs:102`); it stays covered by the unit test.
+
+Off-shoot found during the bench (not this ticket): a failed cast is reported as `success:true`
+(`BG3Neuro.lua:3184`, `CastSpellFailed` path) — see ticket 11.
 
 ## Evidence
 

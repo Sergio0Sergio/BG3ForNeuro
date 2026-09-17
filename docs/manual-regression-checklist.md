@@ -190,18 +190,49 @@ Bridge: PAK v0.8.33, SE v32, direct IPC (`drive_action.ps1`). Combat at the grov
       combat's first turn) — faction misclassification in the state emitter; see
       `.scratch/bg3-neuro-followups/issues/08-enemies-faction-misclassification.md`.
 
-### Run 2026-09-17 (v0.8.35) — ability catalog / friendly names (PENDING — not installed)
+### Run 2026-09-17 (v0.8.35) — ability catalog / friendly names (VERIFIED)
 
-PAK v041 built (`Mods/BG3Neuro/…`, MD5 `3C1274B11D48EB97F3588CAED8E72CFD`); install + app restart still
-required (the game was running, so the PAK could not be swapped). Steps, on a fresh combat:
+PAK v041 (`Mods/BG3Neuro/…`, MD5 `3C1274B11D48EB97F3588CAED8E72CFD`) installed; SE log `v0.8.35`,
+heartbeat `version 0.8.35`. Combat at the grove gate, `turn_actor=tav`. Actions injected via a local
+WS server on `:8000` (so the C# `ActionRouter` runs), and (for the safety net) straight into
+`neuro_to_bg3.json`.
 
-- [ ] **catalog present**: `state.spells` for Tav (scimitar/shortsword/rapier in the main hand) contains
-      `{"name":"flourish","spell_name":"Target_OpeningAttack","cost":"bonus_action"}` — friendly `name` +
-      `cost` on every weapon action (not `slot 0` with a raw id).
-- [ ] **advertised**: `available_actions` lists `cast_spell: [… flourish …]`.
-- [ ] **friendly-name cast**: `cast_spell {"actor":"tav","spell_name":"flourish","target_id":"<enemy>"}` →
-      `success:true`, spends exactly one BA (`BonusActionPoint` 1.0 → 0.0), applies Off Balance; the
-      `action_<id>.json` trace shows `spell_name` rewritten to `Target_OpeningAttack`.
-- [ ] **engine id still works**: the same inject with `spell_name":"Target_OpeningAttack"` → `success:true`.
-- [ ] **C# rendering**: the app's `bg3_to_neuro.json` mirror renders `- flourish (Target_OpeningAttack): cost
-      bonus_action, …` (needs the app restarted on the ticket-09 build).
+- [x] **catalog present**: `state.spells` (18 entries for Tav) carries `name` + `cost`, e.g.
+      `{"spell_name":"Target_OpeningAttack","name":"flourish","cost":"bonus_action","range":1.5,
+      "targets_in_range":["goblin_tracker_4"]}`; also `piercing_strike` (`Target_PiercingThrust`,
+      action), `weakening_strike` (`Target_HinderingSmash`, action), `jump`/`dip`/`shove` (bonus_action).
+- [x] **advertised**: `available_actions` lists
+      `cast_spell: [jump, dip, hide, shove, throw, improvised_melee_weapon, dash, help, disengage,
+      fire_bolt, main_hand_attack, second_wind, hamstring_shot, action_surge, ranged_attack,
+      flourish, piercing_strike, weakening_strike]`.
+- [x] **friendly-name cast (C# router)**: WS inject
+      `cast_spell {"actor":"tav","spell_name":"flourish","target_id":"goblin_tracker_4"}` →
+      app logged the action; **`action_b9r1.json` trace shows `spell_name` rewritten to
+      `Target_OpeningAttack`**; `result_b9r1.json` `success:true`; snapshots
+      `resource_snapshot_b9r1_before/after.json` → **BonusActionPoint 1.0 → 0.0**, AP/Movement unchanged.
+- [x] **Lua safety net (direct inject)**: writing `neuro_to_bg3.json` with the friendly name
+      `piercing_strike` (bypassing the router) → `cast_debug.json` `spellName: Target_PiercingThrust`,
+      `result_b9r2.json` `success:true`, ActionPoint **1.0 → 0.0** (BA unchanged). The mod resolves
+      friendly → engine id on its own.
+- [x] **engine id passthrough**: WS inject with `spell_name":"Target_MainHandAttack"` →
+      `action_b9r3.json` shows `spell_name` **unchanged** (no bogus rewrite). (The cast itself failed —
+      AP had been spent — see the new finding below.)
+- [ ] **C# markdown rendering** — NOT observable live: with `autopilot.enabled=false`,
+      `DecisionLoop.MaybeForceAsync` returns early (`DecisionLoop.cs:102`) and the app never sends the
+      state markdown. Coverage is the unit test
+      `StateSerializerTests.ToMarkdown_FriendlyAbility_RendersNameEngineIdAndCost_OmitsZeroSlot`.
+      To see it live, temporarily set `autopilot.enabled=true` and capture the WS `context` frame.
+
+#### New finding — false success on a failed cast (fixed in v0.8.36, ticket 11)
+- [x] **Before:** `CastSpellFailed` → `finalizeCast(caster, spell, true)` → the old
+      `writeResult(pc.id, **true**, false, "cast_failed", "Cast interrupted/failed")` wrote
+      `success:true` together with `error_code:cast_failed` (`result_b9r3.json`), and the app
+      forwarded `success:true` to Neuro.
+- [x] **Fix (v0.8.36):** `success = not cancelled` at `finalizeCast`, plus a `writeResult` invariant
+      (`error_code` present ⇒ force `success=false`, logged). PAK v042 (`B2C762EA1FDA30573DB00A51795C89E6`)
+      installed; SE/heartbeat `v0.8.36`.
+- [x] **Verified live:** `c10a` `flourish` (friendly, router) → `success:true`, BA 1.0 → 0.0; `c10b`
+      `Target_MainHandAttack` → `success:true`, AP 1.0 → 0.0; `c10c` the same cast again at AP=0 →
+      `result_c10c.json` **`success:false, error_code:cast_failed`**, and the WS frame was
+      `{"id":"c10c","success":false,"message":"Cast interrupted/failed"}`. The exact call that used to
+      report success now reports failure.

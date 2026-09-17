@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.31 — файловой IPC-мост (тикеты 01 + 03-09 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.36 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.35"
+local MOD_VERSION = "0.8.36"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -93,6 +93,14 @@ local function readInFlightAction()
 end
 
 local function writeResult(actionId, success, running, errorCode, errorDetail, extra)
+    -- v0.8.36 (тикет 11): инвариант — error_code означает провал. Страховка от
+    -- противоречивых payload (CastSpellFailed писал success=true + cast_failed,
+    -- и Neuro видела успех у провалившегося каста).
+    if errorCode and success then
+        _P("[BG3Neuro] writeResult: error_code=" .. tostring(errorCode)
+            .. " with success=true for " .. tostring(actionId) .. " -> forcing success=false")
+        success = false
+    end
     local payload = { id = actionId, success = success }
     if running then
         payload.running = true
@@ -3181,7 +3189,7 @@ local function finalizeCast(caster, spellName, cancelled)
             table.remove(pendingCasts, i)
             -- v0.8.24: снапшот ресурсов после действия (тикет 02) — каст/атака завершились.
             pcall(writeResourceSnapshot, pc.id, caster, "after")
-            writeResult(pc.id, true, false, cancelled and "cast_failed" or nil,
+            writeResult(pc.id, not cancelled, false, cancelled and "cast_failed" or nil,
                 cancelled and "Cast interrupted/failed" or nil)
             return
         end
