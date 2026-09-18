@@ -122,3 +122,28 @@ Fix (**v0.8.44**): presence-only guard (`x ~= nil`) in `hostilityApis()` and in 
 `fmtCall`; the calls stay raw `pcall`, which handles the `__call` proxy. Side note for a future
 ticket: `displayName` uses the same `type(Osi.GetDisplayName) == "function"` guard
 (`BG3Neuro.lua:721`, `:941`), so it likely never takes the Osiris path either.
+
+### Live attempt (2026-09-18, v0.8.44) — bare `Osi.<member>` indexing raises
+
+`stats_probe` this time errored: `probe_error: [string "BG3Neuro/BG3Neuro.lua"]:1507: attempt to
+call a nil value` — L1507 was `global_has_IsEnemy = Osi ~= nil and (Osi.IsEnemy ~= nil) or false`.
+Meanwhile `state_capture` did not refresh the state file (`bg3_to_neuro.json` held a stale capture:
+`actor=""`, `allies(4)`, `enemies(0)`), i.e. `captureCombatState` likely raised in `hostilityApis()`
+too. Contradiction with v0.8.43, where `type(Osi.IsEnemy)` printed **userdata** without raising —
+so the exact raising construct was still unproven.
+
+Fix (**v0.8.45**): every access to an Osi proxy is now inside a `pcall` **closure** — not just the
+call (`pcall(api.IsEnemy, …)`) but the indexing too (`pcall(function() return api[name] ~= nil end)`
+and `pcall(function() return api.IsEnemy(ref, g) end)`). `hostilityApis()` uses `apiHasMethod(api,
+name)`; `hostilityWithRef` wraps both `IsEnemy` and `IsAlly`. The probe was rewritten around a
+`try(desc, fn)` helper that reports `desc=ok|err:<value>` **per expression** (`type(Osi)`,
+`Osi.IsEnemy~=nil`, `Osi.IsAlly~=nil`, `Osi.IsCharacter~=nil`, `type(Ext.Osi)`,
+`Ext.Osi.IsEnemy~=nil`, `Osi.GetHostCharacter()`) and per participant (`IsEnemy`/`IsAlly` for the
+raw, clean-uuid and host-character refs, `IsCharacter`, `IsItem`) — so a single run names both the
+raising expression and the working call. Version → 0.8.45 (`791ad90`), `luaparse` OK, installed as
+PAK v051 (`49F3D2404FD4A8FAE3532E5BA07BD323`, backup `BG3Neuro.pak.bak-v050`).
+
+**Not yet done:** the v0.8.45 bench run. Result will settle the ticket. If `IsEnemy` works and
+returns truthy for the goblinoids/worgs only, and the 5 tieflings + portcullis drop out, close the
+ticket per `## Verification` above (add `## Answer`, `Status: resolved`, tick `map.md`, append
+`docs/manual-regression-checklist.md`, commit).
