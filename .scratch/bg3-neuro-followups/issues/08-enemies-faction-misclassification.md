@@ -1,7 +1,7 @@
 # 08 — Combat state misclassifies allied NPCs (and a scripted object) as `enemies`
 
-Type: task (state emitter)
-Status: ready-for-agent
+Type: research
+Status: resolved
 Blocked by: —
 
 ## Symptom
@@ -54,3 +54,12 @@ confirm before coding.
 
 - `docs/manual-regression-checklist.md` — "Run 2026-09-17 (v0.8.34) — exploration → combat transition".
 - Live `bg3_to_neuro.json` (IPC dir) during the gate combat, 2026-09-17.
+
+## Answer (research, 2026-09-18)
+
+Full write-up: `research/08-enemies-hostility-relation-api.md`.
+
+- Open question answered: `TurnBased.CombatTeam` is a **per-combat side/team GUID**, not the shared combat GUID and not a faction. `Combat` (same component) is the combat GUID; `EocCombatStateComponent.MyGuid` too. The team field is part of team-keyed turn order (`TurnBasedGroup.Team`/`IsPlayer`); allied factions land on different teams → exactly the reproduced misclassification. The acting Astarion's `db9418f5-…` is *one side's* team, consistent with the diagnosis.
+- Hostility signal to use: `Osi.IsAlly(partyRef, participant)` / `Osi.IsEnemy(partyRef, participant)` (verified in current Osi.lua:1492/1556; Brawl pattern `== 1`; use truthy check). Complement parses: party member → first; `IsEnemy()==1` → enemy; `IsEnemy()==0`/`IsAlly()==1` → ally/neutral.
+- Creature filter: presence of `ServerCharacter` (Character.h:62) or `Osi.IsCharacter` (Osi.lua:1504). Doors/portcullises are items (ServerItem, Item.h:10) — no ServerCharacter. `Health`/`Stats`/`Data` are NOT safe discriminators.
+- Recommended predicate + bench steps (incl. runtime verification of the `1/0` vs `true` return shape and the team-GUID probe) are in the research file §5/§7.
