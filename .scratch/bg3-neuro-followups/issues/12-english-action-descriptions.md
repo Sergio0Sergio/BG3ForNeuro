@@ -72,11 +72,19 @@ descriptions — e.g. `move_to_target='Move to the specified target.'`,
 
 Sweep of the rest of the Neuro-facing surface — **no unintended Cyrillic**:
 
-- `src/**/*.cs` and non-`.cs` assets under `src/` — zero Cyrillic occurrences. (Checked with a
-  UTF-8-aware read: `Select-String` on PowerShell 5.1 decodes UTF-8 as CP1251 and reports em-dashes
-  `—` as Cyrillic mojibake — a false positive.)
+- `src/**` (product code): Cyrillic appears **only in `///` / `//` comments** (~26 lines: XML doc
+  comments in `AutopilotConfig.cs`, `DialogueConfig.cs`, `ActionRouter.cs`, `CoverageAuto.cs`,
+  `DecisionLoop.cs`, `ErrorMapper.cs`). No user- or model-facing **string** in `src/` is Russian, so
+  there is nothing else to translate. `src/` non-`.cs` assets: no Cyrillic.
+- Test project: Russian strings exist only in fixtures/assert messages (simulated localized game text),
+  not in anything the app emits to Neuro or the user.
 - `mod/BG3Neuro/*.lua` — Cyrillic appears only in `--` comments and in the intentional Russian→Latin
   `translitMap` (`BG3Neuro.lua:830-837`). No user/model-facing string literal is Russian.
+
+Re-check caveat (corrected evidence): the first sweep used the glob `src/**/*.cs`, which PowerShell 5.1
+does **not** expand recursively, so it trivially returned "clean". The numbers above come from a proper
+`Get-ChildItem -Recurse` pass. Also note `Select-String` on PS 5.1 decodes UTF-8 as CP1251 and reports
+em-dashes `—` as Cyrillic mojibake — a false positive.
 
 Scope: only 17 descriptions reach the model after ticket 10, but all 24 were translated and the
 file-wide test guards the `internal` entries too, per `AGENTS.md`.
