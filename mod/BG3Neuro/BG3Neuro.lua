@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.41 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.42 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.41"
+local MOD_VERSION = "0.8.42"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1015,7 +1015,7 @@ local function healthOf(ent)
 end
 
 -- ============================================================
--- Состояния бойца (v0.8.41, тикет 13): реальные conditions из
+-- Состояния бойца (v0.8.42, тикет 13): реальные conditions из
 -- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
 -- а не "доступность действий". StatusId - движковый англоязычный id
 -- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
@@ -1069,7 +1069,7 @@ local function statusIsInternal(id)
 end
 
 local function statusVisible(meta)
-    -- Живой прогон (v0.8.41): DisplayName заполнен у ВСЕХ статусов (внутренние
+    -- Живой прогон (v0.8.42): DisplayName заполнен у ВСЕХ статусов (внутренние
     -- тоже), поэтому не различает; Visible-поля в статах нет. Icon же заполнен
     -- только у игровых (FLANKED=True; AI_*/ENABLE_*/HEALTHBOOST*/GOBLIN_HC=False).
     -- Отбрасываем статус только когда Icon достоверно пуст; если статистика
@@ -1269,7 +1269,7 @@ local function conditionsOf(ent, limit)
             -- Visible==false отбрасываем, при отсутствии флага решает blacklist.
             if statusVisible(meta) then
                 local entry = { id = id, name = statusDisplayName(id) }
-                -- Живой прогон (v0.8.41): TurnTimer - секундный таймер тика
+                -- Живой прогон (v0.8.42): TurnTimer - секундный таймер тика
                 -- (не раунды), LifeTime=-1 у постоянных статусов. Поэтому
                 -- turns_left не выводим (движок не отдаёт остаток ходов;
                 -- Osi.*Status* в рантайме отсутствуют), а duration_left -
@@ -1652,26 +1652,6 @@ local function requestEngineEndTurn(acting)
     return true, (not okS) and tostring(errS) or nil
 end
 
-local function teamOf(guid, cache, covered)
-    -- CombatTeam участника (Guid) с кэшем по закешированным в этом тике сущностям.
-    if cache ~= nil and cache[guid] ~= nil then
-        return cache[guid]
-    end
-    local okE, ent = pcall(Ext.Entity.Get, guid)
-    if okE and ent ~= nil then
-        local tb = turnComponent(ent)
-        local tg = fieldOf(tb, "CombatTeam") or fieldOf(tb, "Combat")
-        if cache ~= nil then
-            cache[guid] = (tg ~= nil and tg ~= "") and tostring(tg) or nil
-        end
-        if covered ~= nil then
-            covered[guid] = true
-        end
-        return cache ~= nil and cache[guid] or nil
-    end
-    return nil
-end
-
 local function writeStateFile(payload)
     local ok, err = pcall(Ext.IO.SaveFile, STATE_FILE, Ext.Json.Stringify(payload))
     if not ok then
@@ -2025,6 +2005,63 @@ local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
     state.spells = list
 end
 
+-- v0.8.42 (тикет 14): настоящая враждебность вместо сравнения CombatTeam.
+-- CombatTeam — ключ группировки хода (союзные фракции сидят на разных командах),
+-- поэтому союзник/враг определяется движковым Osiris-предикатом относительно
+-- партийного персонажа. Участники-предметы (двери) отсекаются по ServerCharacter.
+local function entityIsCharacter(ent)
+    if ent == nil then
+        return false
+    end
+    local okC, comp = pcall(function() return ent:GetComponent("ServerCharacter") end)
+    return okC and comp ~= nil
+end
+
+-- Osiris bool (1/0 либо true/false) -> true/false; nil - вызов не удался.
+local function osiBool(ok, res)
+    if not ok or res == nil then
+        return nil
+    end
+    if res == 1 or res == true then
+        return true
+    end
+    if res == 0 or res == false then
+        return false
+    end
+    return true
+end
+
+-- "enemy" | "ally" | "neutral" | nil (Osiris недоступен/ошибка) для g относительно partyRef.
+local function hostilityOf(partyRef, g, diag)
+    if partyRef == nil or partyRef == "" or Osi == nil or type(Osi.IsEnemy) ~= "function" then
+        if diag ~= nil then
+            diag.osi_hostility = false
+        end
+        return nil
+    end
+    local okE, resE = pcall(Osi.IsEnemy, partyRef, g)
+    local okA, resA = pcall(Osi.IsAlly, partyRef, g)
+    local enemy = osiBool(okE, resE)
+    local ally = osiBool(okA, resA)
+    if diag ~= nil then
+        diag.osi_hostility = true
+        diag.hostility_raw = diag.hostility_raw or {}
+        diag.hostility_raw[#diag.hostility_raw + 1] = string.format(
+            "%s isEnemy=%s/%s isAlly=%s/%s", tostring(g),
+            tostring(okE), tostring(resE), tostring(okA), tostring(resA))
+    end
+    if enemy == true then
+        return "enemy"
+    end
+    if ally == true then
+        return "ally"
+    end
+    if enemy == nil and ally == nil then
+        return nil
+    end
+    return "neutral"
+end
+
 function captureCombatState(event, force)
     -- Полный combat-state: глобальная функция, чтобы её мог вызвать уже
     -- зарегистрированный listener TurnStarted (резолвится в runtime).
@@ -2097,36 +2134,33 @@ function captureCombatState(event, force)
         end
     end
 
-    -- команда партии: CombatTeam первого партийца-участника, fallback — команда ходящего
-    local teamCache = {}
-    local alliesTeam = nil
-    for _, g in ipairs(parts) do
-        if avatars[g] or controlled[g] then
-            alliesTeam = teamOf(g, teamCache)
-            if alliesTeam ~= nil then
+    -- v0.8.42 (тикет 14): референс-персонаж партии для Osiris-проверки враждебности.
+    -- Нужен реальный GUID (алиасы Osiris не понимает) и именно партиец: ходящий, если
+    -- он партийный, иначе первый участник-партиец. CombatTeam больше не используется.
+    local partyRef = nil
+    if avatars[actingClean] or controlled[actingClean] then
+        partyRef = actingClean
+    end
+    if partyRef == nil then
+        for _, g in ipairs(parts) do
+            if avatars[g] or controlled[g] then
+                partyRef = g
                 break
             end
         end
     end
-    if alliesTeam == nil then
-        alliesTeam = teamOf(actingClean, teamCache)
+    if partyRef == nil then
+        partyRef = actingClean
     end
     if diag ~= nil then
         diag.acting_clean = actingClean
-        diag.party_avatars = nil
+        diag.party_ref = partyRef or nil
+        diag.osi_hostility = Osi ~= nil and type(Osi.IsEnemy) == "function" or false
         local nA = 0
         for _ in pairs(avatars) do
             nA = nA + 1
         end
         diag.party_avatars = nA
-        local teams = {}
-        for _, g in ipairs(parts) do
-            local t = teamOf(g, teamCache)
-            local k = t ~= nil and t or "nil"
-            teams[k] = (teams[k] or 0) + 1
-        end
-        diag.teams = teams
-        diag.allies_team = alliesTeam or nil
     end
 
     -- партия по серверному Character-компоненту (InParty/IsPlayer/PartyFollower)
@@ -2161,56 +2195,82 @@ function captureCombatState(event, force)
     end
 
     for i, g in ipairs(parts) do
-        local isControlled = controlled[g] or false
-        local team = teamOf(g, teamCache)
-        local isAlly = isControlled or avatars[g] or partyFlag[g] or (team ~= nil and team == alliesTeam)
-        local alias = registerAlias(g, isControlled or avatars[g] or partyFlag[g], taken)
-        local ent
         local okG, e = pcall(Ext.Entity.Get, g)
-        ent = okG and e or nil
-        local hp, maxHp = healthOf(ent)
-        local tb = turnComponent(ent)
-        local canAct = fieldOf(tb, "CanActInCombat")
-        local px, py, pz = positionOf(g)
-        local dist = nil
-        if px ~= nil and actingPosX ~= nil then
-            dist = round1(distance3(actingPosX, actingPosY, actingPosZ, px, py, pz))
-        end
-        local combatant = {
-            alias = alias,
-            name = displayName(g),
-            hp = hp or 0,
-            max_hp = maxHp or 0,
-            distance = dist or 0,
-            position_x = round1(px or 0),
-            position_y = round1(py or 0),
-        }
-        local conditions = conditionsOf(ent)
-        if #conditions > 0 then
-            combatant.conditions = conditions
-        end
-        if isAlly then
-            local fx = {}
-            if g == actingClean then
-                fx[#fx + 1] = "acting now"
+        local ent = okG and e or nil
+        if not entityIsCharacter(ent) then
+            -- Дверь/предмет: участвует в бою, но не персонаж — не allies и не enemies.
+            if diag ~= nil then
+                diag.skipped_non_character = (diag.skipped_non_character or 0) + 1
             end
-            fx[#fx + 1] = canAct and "can act" or "cannot act"
-            combatant.availability = table.concat(fx, ", ")
         else
-            if hp ~= nil and hp <= 0 then
-                combatant.status = "defeated"
-            elseif canAct == false then
-                combatant.status = "cannot act"
+            local isControlled = controlled[g] or false
+            local partyMember = isControlled or avatars[g] or partyFlag[g]
+            local isAlly = partyMember and true or false
+            local isEnemy = false
+            if not partyMember then
+                local verdict = hostilityOf(partyRef, g, diag)
+                if verdict == "enemy" then
+                    isEnemy = true
+                elseif verdict == "ally" then
+                    isAlly = true
+                elseif verdict == nil then
+                    -- Osiris-предикат недоступен: деградируем до прежнего поведения
+                    -- (все не-партийцы считаются врагами).
+                    isEnemy = true
+                end
             end
-        end
-        if isAlly then
-            state.allies[#state.allies + 1] = combatant
-        else
-            state.enemies[#state.enemies + 1] = combatant
-        end
-        if g == actingClean then
-            state.turn_actor = alias
-            state.turn_initiative_index = i
+            if diag ~= nil then
+                local bucket = isAlly and "ally" or (isEnemy and "enemy" or "neutral")
+                diag.hostility = diag.hostility or {}
+                diag.hostility[bucket] = (diag.hostility[bucket] or 0) + 1
+            end
+            if isAlly or isEnemy then
+                local alias = registerAlias(g, partyMember, taken)
+                local hp, maxHp = healthOf(ent)
+                local tb = turnComponent(ent)
+                local canAct = fieldOf(tb, "CanActInCombat")
+                local px, py, pz = positionOf(g)
+                local dist = nil
+                if px ~= nil and actingPosX ~= nil then
+                    dist = round1(distance3(actingPosX, actingPosY, actingPosZ, px, py, pz))
+                end
+                local combatant = {
+                    alias = alias,
+                    name = displayName(g),
+                    hp = hp or 0,
+                    max_hp = maxHp or 0,
+                    distance = dist or 0,
+                    position_x = round1(px or 0),
+                    position_y = round1(py or 0),
+                }
+                local conditions = conditionsOf(ent)
+                if #conditions > 0 then
+                    combatant.conditions = conditions
+                end
+                if isAlly then
+                    local fx = {}
+                    if g == actingClean then
+                        fx[#fx + 1] = "acting now"
+                    end
+                    fx[#fx + 1] = canAct and "can act" or "cannot act"
+                    combatant.availability = table.concat(fx, ", ")
+                else
+                    if hp ~= nil and hp <= 0 then
+                        combatant.status = "defeated"
+                    elseif canAct == false then
+                        combatant.status = "cannot act"
+                    end
+                end
+                if isAlly then
+                    state.allies[#state.allies + 1] = combatant
+                else
+                    state.enemies[#state.enemies + 1] = combatant
+                end
+                if g == actingClean then
+                    state.turn_actor = alias
+                    state.turn_initiative_index = i
+                end
+            end
         end
     end
 

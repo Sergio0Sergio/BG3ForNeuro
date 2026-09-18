@@ -1,7 +1,7 @@
 # 14 — Classify enemies by engine hostility (and skip non-character participants)
 
 Type: task (state emitter)
-Status: ready-for-agent
+Status: claimed
 Blocked by: 08 (resolved)
 
 ## Decision (from ticket 08's research)
@@ -66,3 +66,28 @@ The research could not verify these from primary sources — the fix must tolera
 - `mod/BG3Neuro/BG3Neuro.lua:1673` (classifier), `:1820-1867` (per-participant emit).
 - Previous version bump precedent: mod version goes to `0.8.37`, PAK rebuild + install (game must be
   closed gracefully — `AGENTS.md`).
+
+## Implementation (2026-09-18, v0.8.42, pending live verification)
+
+`mod/BG3Neuro/BG3Neuro.lua`:
+
+- **Removed** `teamOf` and the `CombatTeam`-based `alliesTeam`/`teamCache` plumbing from the
+  classifier. (The remaining `CombatTeam`/`Combat` reads are the combat-GUID lookup in
+  `captureCombatState` / `combatStateComponentOf` — a different concern.)
+- **New helpers** (before `captureCombatState`): `entityIsCharacter(ent)` (non-nil
+  `ServerCharacter`), `osiBool(ok, res)` (1/0 or true/false → boolean), and
+  `hostilityOf(partyRef, g, diag)` → `"enemy" | "ally" | "neutral" | nil` (`nil` = Osiris
+  unavailable/errored).
+- **partyRef** = `actingClean` when it is a party avatar / controlled character, else the first
+  participant that is one, else `actingClean` (best effort) — so the reference is always on the party
+  side even when an NPC is acting.
+- **Classify**: party signals (`controlled`/`avatars`/`partyFlag`) → ally (cheap fast path, no Osiris
+  round-trip); otherwise `hostilityOf` → `enemy` / `ally` / `neutral`. `neutral` goes into **neither**
+  list; `nil` (API unavailable) degrades to the previous behaviour (non-party ⇒ enemy).
+- **Skip objects**: a participant without `ServerCharacter` (the portcullis) is not emitted at all,
+  counted in `diag.skipped_non_character`.
+- **Diagnostics**: `diag.party_ref`, `diag.osi_hostility`, `diag.hostility` (verdict counts) and
+  `diag.hostility_raw` (per participant `isEnemy=<ok>/<val> isAlly=<ok>/<val>`), so one bench run
+  answers the ticket's open runtime questions (return shape, door component, mid-combat hostility).
+
+Version → 0.8.42; `luaparse` OK on both Lua files. C# schema unchanged.
