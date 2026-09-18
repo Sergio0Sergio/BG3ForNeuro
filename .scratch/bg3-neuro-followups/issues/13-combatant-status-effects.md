@@ -156,8 +156,22 @@ readable, so it cannot silently drop everything). The probe tags each raw status
 `__icon`, `__flags`, `__spf` so one run shows which gate fires for `FLANKED` / `FEATHER_FALL` vs the
 internal ids.
 
-**Still to do (needs the game):** re-probe on v0.8.40 to confirm `DisplayName` / `Icon` discriminate
-player-facing statuses, then finalise `## Answer`.
+### Live probe (2026-09-18, v0.8.40) — `Icon` is the discriminator
+
+`stats_probe` over the 12 combatants: `__display_name` is **True for every** status (internal ones
+included), so `DisplayName` does not discriminate; `Flags` is unreadable as a number and
+`StatusPropertyFlags` comes back as an opaque userdata (`tostring` → `table: 0x…`). The stats `Icon`
+field discriminates exactly as needed: `FLANKED` → `Icon=True`; `AI_NO_LOOK_AT_BATTLE`, `ENABLE_AOO`,
+`HEALTHBOOST_HARDCORE`, `GOBLIN_HARDCORE` → `Icon=False`. (`FEATHER_FALL` sits on `wyll_1`, who is not
+a `stats_probe` participant, so its icon is validated through the state instead.)
+
+Fix (**v0.8.41**): the visibility gate is now `statusVisible(meta)` — drop only when `Icon` is
+definitively empty (`meta.has_icon == false`) or `Visible` is false; keep the status when the stats
+lookup fails (`nil`). The blacklist stays as the fallback for unreadable stats.
+
+**Still to do (needs the game):** confirm on v0.8.41 that the state still shows `FLANKED` and
+`FEATHER_FALL` (i.e. `Icon` is set for `FEATHER_FALL` too) and nothing else, then finalise
+`## Answer`.
 
 Bench note: Astarion's spell list in this save has no `flourish`; the closest status-applying
 attacks are `hamstring_shot` (applies `HAMSTRUNG`) and `piercing_strike`. A `hamstring_shot` at

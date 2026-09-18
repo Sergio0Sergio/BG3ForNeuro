@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.40 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.41 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.40"
+local MOD_VERSION = "0.8.41"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1015,7 +1015,7 @@ local function healthOf(ent)
 end
 
 -- ============================================================
--- Состояния бойца (v0.8.40, тикет 13): реальные conditions из
+-- Состояния бойца (v0.8.41, тикет 13): реальные conditions из
 -- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
 -- а не "доступность действий". StatusId - движковый англоязычный id
 -- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
@@ -1066,6 +1066,21 @@ local function statusIsInternal(id)
         end
     end
     return STATUS_INTERNAL_EXACT[s] == true
+end
+
+local function statusVisible(meta)
+    -- Живой прогон (v0.8.41): DisplayName заполнен у ВСЕХ статусов (внутренние
+    -- тоже), поэтому не различает; Visible-поля в статах нет. Icon же заполнен
+    -- только у игровых (FLANKED=True; AI_*/ENABLE_*/HEALTHBOOST*/GOBLIN_HC=False).
+    -- Отбрасываем статус только когда Icon достоверно пуст; если статистика
+    -- недоступна (nil) - не трогаем.
+    if meta.has_icon == false then
+        return false
+    end
+    if meta.visible == false then
+        return false
+    end
+    return true
 end
 
 local function statusMeta(id)
@@ -1252,9 +1267,9 @@ local function conditionsOf(ent, limit)
             local meta = statusMeta(id)
             -- Оставляем только статусы, которые игра показывает игроку:
             -- Visible==false отбрасываем, при отсутствии флага решает blacklist.
-            if meta.visible ~= false and meta.has_display_name ~= false then
+            if statusVisible(meta) then
                 local entry = { id = id, name = statusDisplayName(id) }
-                -- Живой прогон (v0.8.40): TurnTimer - секундный таймер тика
+                -- Живой прогон (v0.8.41): TurnTimer - секундный таймер тика
                 -- (не раунды), LifeTime=-1 у постоянных статусов. Поэтому
                 -- turns_left не выводим (движок не отдаёт остаток ходов;
                 -- Osi.*Status* в рантайме отсутствуют), а duration_left -
