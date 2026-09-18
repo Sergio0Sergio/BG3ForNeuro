@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.42 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.43 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.42"
+local MOD_VERSION = "0.8.43"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1015,7 +1015,7 @@ local function healthOf(ent)
 end
 
 -- ============================================================
--- Состояния бойца (v0.8.42, тикет 13): реальные conditions из
+-- Состояния бойца (v0.8.43, тикет 13): реальные conditions из
 -- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
 -- а не "доступность действий". StatusId - движковый англоязычный id
 -- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
@@ -1069,7 +1069,7 @@ local function statusIsInternal(id)
 end
 
 local function statusVisible(meta)
-    -- Живой прогон (v0.8.42): DisplayName заполнен у ВСЕХ статусов (внутренние
+    -- Живой прогон (v0.8.43): DisplayName заполнен у ВСЕХ статусов (внутренние
     -- тоже), поэтому не различает; Visible-поля в статах нет. Icon же заполнен
     -- только у игровых (FLANKED=True; AI_*/ENABLE_*/HEALTHBOOST*/GOBLIN_HC=False).
     -- Отбрасываем статус только когда Icon достоверно пуст; если статистика
@@ -1269,7 +1269,7 @@ local function conditionsOf(ent, limit)
             -- Visible==false отбрасываем, при отсутствии флага решает blacklist.
             if statusVisible(meta) then
                 local entry = { id = id, name = statusDisplayName(id) }
-                -- Живой прогон (v0.8.42): TurnTimer - секундный таймер тика
+                -- Живой прогон (v0.8.43): TurnTimer - секундный таймер тика
                 -- (не раунды), LifeTime=-1 у постоянных статусов. Поэтому
                 -- turns_left не выводим (движок не отдаёт остаток ходов;
                 -- Osi.*Status* в рантайме отсутствуют), а duration_left -
@@ -1499,8 +1499,33 @@ local function probeCombatStats()
         end
     end
     out.guids = guids
+    local actingRaw = resolveActingCharacter("")
+    local actingCleanProbe = actingCleanOf(actingRaw)
+    local okHost, hostChar = pcall(Osi.GetHostCharacter)
+    out.osi_api = {
+        global = Osi ~= nil and type(Osi.IsEnemy) or nil,
+        ext = Ext ~= nil and Ext.Osi ~= nil and type(Ext.Osi.IsEnemy) or nil,
+        get_host_character = tostring(okHost) .. "/" .. tostring(hostChar),
+        acting_raw = actingRaw,
+        acting_clean = actingCleanProbe,
+    }
+    local function fmtCall(fn, ...)
+        if type(fn) ~= "function" then
+            return "<not a function>"
+        end
+        local ok, res = pcall(fn, ...)
+        return (ok and "ok" or "err") .. "/" .. tostring(res)
+    end
     for _, g in ipairs(guids) do
         local entry = { guid = g }
+        entry.osi = {
+            isEnemy_actingRaw = fmtCall(Osi and Osi.IsEnemy, actingRaw, g),
+            isEnemy_actingClean = fmtCall(Osi and Osi.IsEnemy, actingCleanProbe, g),
+            isEnemy_host = fmtCall(Osi and Osi.IsEnemy, hostChar, g),
+            isEnemy_ext = fmtCall(Ext ~= nil and Ext.Osi and Ext.Osi.IsEnemy, hostChar, g),
+            isAlly_host = fmtCall(Osi and Osi.IsAlly, hostChar, g),
+            isCharacter = fmtCall(Osi and Osi.IsCharacter, g),
+        }
         local okO1, sid1 = pcall(Osi.CharacterGetStatsId, g)
         entry.osi_CharacterGetStatsId = okO1 and tostring(sid1) or "<err: " .. tostring(sid1) .. ">"
         local okO2, rows2 = pcall(Osi.DB_CharacterStatsId, g)
@@ -2005,7 +2030,7 @@ local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
     state.spells = list
 end
 
--- v0.8.42 (тикет 14): настоящая враждебность вместо сравнения CombatTeam.
+-- v0.8.43 (тикет 14): настоящая враждебность вместо сравнения CombatTeam.
 -- CombatTeam — ключ группировки хода (союзные фракции сидят на разных командах),
 -- поэтому союзник/враг определяется движковым Osiris-предикатом относительно
 -- партийного персонажа. Участники-предметы (двери) отсекаются по ServerCharacter.
@@ -2031,25 +2056,27 @@ local function osiBool(ok, res)
     return true
 end
 
--- "enemy" | "ally" | "neutral" | nil (Osiris недоступен/ошибка) для g относительно partyRef.
-local function hostilityOf(partyRef, g, diag)
-    if partyRef == nil or partyRef == "" or Osi == nil or type(Osi.IsEnemy) ~= "function" then
-        if diag ~= nil then
-            diag.osi_hostility = false
-        end
+-- Доступные Osiris-API враждебности: глобальный Osi и/или Ext.Osi (SE-версии
+-- расходятся, поэтому пробуем оба и берём тот, что реально отвечает).
+local function hostilityApis()
+    local apis = {}
+    if Osi ~= nil and type(Osi.IsEnemy) == "function" then
+        apis[#apis + 1] = Osi
+    end
+    if Ext ~= nil and Ext.Osi ~= nil and Ext.Osi ~= Osi and type(Ext.Osi.IsEnemy) == "function" then
+        apis[#apis + 1] = Ext.Osi
+    end
+    return apis
+end
+
+local function hostilityWithRef(api, ref, g)
+    if api == nil or ref == nil or ref == "" then
         return nil
     end
-    local okE, resE = pcall(Osi.IsEnemy, partyRef, g)
-    local okA, resA = pcall(Osi.IsAlly, partyRef, g)
+    local okE, resE = pcall(api.IsEnemy, ref, g)
     local enemy = osiBool(okE, resE)
+    local okA, resA = pcall(api.IsAlly, ref, g)
     local ally = osiBool(okA, resA)
-    if diag ~= nil then
-        diag.osi_hostility = true
-        diag.hostility_raw = diag.hostility_raw or {}
-        diag.hostility_raw[#diag.hostility_raw + 1] = string.format(
-            "%s isEnemy=%s/%s isAlly=%s/%s", tostring(g),
-            tostring(okE), tostring(resE), tostring(okA), tostring(resA))
-    end
     if enemy == true then
         return "enemy"
     end
@@ -2060,6 +2087,36 @@ local function hostilityOf(partyRef, g, diag)
         return nil
     end
     return "neutral"
+end
+
+-- "enemy" | "ally" | "neutral" | nil (Osiris недоступен/ошибка) для g относительно
+-- любого из refs. Ищем первое решительное (enemy/ally) вердикт: форма ссылки
+-- (чистый uuid vs префиксный id) и API различаются между сборками SE.
+local function hostilityOf(refs, g, diag)
+    local apis = hostilityApis()
+    if diag ~= nil then
+        diag.osi_hostility = #apis > 0
+    end
+    local fallback = nil
+    for _, api in ipairs(apis) do
+        for _, ref in ipairs(refs or {}) do
+            local verdict = hostilityWithRef(api, ref, g)
+            if diag ~= nil then
+                diag.hostility_raw = diag.hostility_raw or {}
+                if #diag.hostility_raw < 40 then
+                    diag.hostility_raw[#diag.hostility_raw + 1] = string.format(
+                        "%s ref=%s -> %s", tostring(g), tostring(ref), tostring(verdict))
+                end
+            end
+            if verdict == "enemy" or verdict == "ally" then
+                return verdict
+            end
+            if verdict ~= nil then
+                fallback = verdict
+            end
+        end
+    end
+    return fallback
 end
 
 function captureCombatState(event, force)
@@ -2134,28 +2191,45 @@ function captureCombatState(event, force)
         end
     end
 
-    -- v0.8.42 (тикет 14): референс-персонаж партии для Osiris-проверки враждебности.
-    -- Нужен реальный GUID (алиасы Osiris не понимает) и именно партиец: ходящий, если
-    -- он партийный, иначе первый участник-партиец. CombatTeam больше не используется.
-    local partyRef = nil
+    -- v0.8.43 (тикет 14): референс-персонаж партии для Osiris-проверки враждебности.
+    -- Нужен реальный GUID и именно партиец: ходящий, если он партийный, иначе
+    -- первый участник-партиец. CombatTeam больше не используется. Даём оба
+    -- представления id (чистый uuid и префиксный, как их отдаёт Osiris) — сборки
+    -- SE расходятся в том, какую форму принимают IsEnemy/IsAlly.
+    local partyUuid = nil
     if avatars[actingClean] or controlled[actingClean] then
-        partyRef = actingClean
+        partyUuid = actingClean
     end
-    if partyRef == nil then
+    if partyUuid == nil then
         for _, g in ipairs(parts) do
             if avatars[g] or controlled[g] then
-                partyRef = g
+                partyUuid = g
                 break
             end
         end
     end
-    if partyRef == nil then
-        partyRef = actingClean
+    if partyUuid == nil then
+        partyUuid = actingClean
     end
+    local partyRefs = {}
+    local function addRef(r)
+        if r ~= nil and r ~= "" then
+            for _, x in ipairs(partyRefs) do
+                if x == r then
+                    return
+                end
+            end
+            partyRefs[#partyRefs + 1] = r
+        end
+    end
+    addRef(partyUuid)
+    addRef(acting)
     if diag ~= nil then
         diag.acting_clean = actingClean
-        diag.party_ref = partyRef or nil
-        diag.osi_hostility = Osi ~= nil and type(Osi.IsEnemy) == "function" or false
+        diag.acting_raw = acting or ""
+        diag.party_refs = partyRefs
+        local apis = hostilityApis()
+        diag.osi_hostility = #apis > 0
         local nA = 0
         for _ in pairs(avatars) do
             nA = nA + 1
@@ -2208,7 +2282,7 @@ function captureCombatState(event, force)
             local isAlly = partyMember and true or false
             local isEnemy = false
             if not partyMember then
-                local verdict = hostilityOf(partyRef, g, diag)
+                local verdict = hostilityOf(partyRefs, g, diag)
                 if verdict == "enemy" then
                     isEnemy = true
                 elseif verdict == "ally" then

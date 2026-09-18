@@ -91,3 +91,20 @@ The research could not verify these from primary sources — the fix must tolera
   answers the ticket's open runtime questions (return shape, door component, mid-combat hostility).
 
 Version → 0.8.42; `luaparse` OK on both Lua files. C# schema unchanged.
+
+### Live attempt (2026-09-18, v0.8.42) — allies still in `enemies`; cause not visible
+
+State: `allies` = `tav`/`poc_player_cleric`/`origin_astarion`/`poc_player_wizard` (correct), but
+`enemies` = 13, still including `wyll_1`/`zevlor_1`/`remira_1`/`aradin_1`/`barth_1` next to the 8
+goblinoids/worg. `state_capture`'s result does not surface `diag`, so it was not visible whether
+Osiris returned "enemy" for the tieflings or the call failed and the `nil` → "non-party ⇒ enemy"
+fallback ran.
+
+Fix (**v0.8.43**): `hostilityOf` now tries **both** hostility APIs (global `Osi` and `Ext.Osi`, when
+either exposes `IsEnemy`) and **both** id forms for the party reference (the pure entity uuid and the
+prefixed id `resolveActingCharacter` returns), returning the first decisive `enemy`/`ally` verdict —
+covers the SE-version divergence in API location and id form without another guess. `stats_probe` now
+also returns `out.osi_api` plus per-participant `entry.osi`
+(`isEnemy_actingRaw` / `isEnemy_actingClean` / `isEnemy_host` / `isEnemy_ext` / `isAlly_host` /
+`isCharacter`, each `ok|err/<value>`), so one run pins the working call and the `ServerCharacter`
+case.
