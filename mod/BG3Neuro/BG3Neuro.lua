@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.47 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.48 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.47"
+local MOD_VERSION = "0.8.48"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -4661,7 +4661,31 @@ local function executeAction(action)
     local data = action.data
     if type(data) == "string" then
         local ok, parsed = pcall(Ext.Json.Parse, data)
-        data = ok and parsed or {}
+        if ok and parsed ~= nil then
+            data = parsed
+        else
+            -- v0.8.48 (тикет 17): данные пришли строкой, но не декодировались —
+            -- ground truth: что именно прочитал мод в момент сбоя. Командный
+            -- файл ещё не очищен (clearInFlight идёт ПОСЛЕ executeAction), так что
+            -- в файле лежат ровно те байты, что читал LoadFile.
+            local echoRaw, echoErr = pcall(function()
+                local _, rawContent = pcall(Ext.IO.LoadFile, NEURO_TO_BG3_FILE)
+                Ext.IO.SaveFile(RESULT_DIR .. "/cast_data_debug.json",
+                    Ext.Json.Stringify({
+                        id = action.id,
+                        name = action.name,
+                        data_raw = data,
+                        data_raw_len = #data,
+                        file_raw = rawContent or "<read error>",
+                        file_raw_len = rawContent and #rawContent or -1,
+                        mtime = os.time(),
+                    }))
+            end)
+            if not echoRaw then
+                _P("[BG3Neuro] cast_data_debug save failed: " .. tostring(echoErr))
+            end
+            data = {}
+        end
     end
     if data == nil then
         data = {}
