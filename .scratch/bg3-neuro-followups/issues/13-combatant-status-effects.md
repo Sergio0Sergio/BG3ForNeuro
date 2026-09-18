@@ -50,6 +50,10 @@ So Off Balance, Prone, Burning, Haste, etc. are invisible to the app and to the 
 - Bench (gate fight, `turn_actor=tav`): cast `flourish` (`Target_OpeningAttack`) at an adjacent enemy,
   then read `bg3_to_neuro.json` and assert the target's effects contain `off_balance` with a positive
   `turns_left`; and confirm the field is populated for enemies as well as allies.
+- **Amended 2026-09-18 (live):** "positive `turns_left`" is not achievable — the engine exposes no
+  remaining-turns value (`Osi.*Status*` absent from the runtime table; `TurnTimer` is a seconds tick
+  countdown, `TickType = 0`). The assertion therefore becomes: `conditions` contains the status id
+  and, for finite statuses, a `duration_left` in seconds; no `turns_left` is emitted.
 
 ## Evidence
 
@@ -131,9 +135,29 @@ emitted condition (only `duration_left`, seconds, for finite statuses remains). 
 tags each raw status with `__internal` / `__visible` / `__status_type` so one run shows which gate
 does the work.
 
-**Still to do (needs the game):** re-probe on v0.8.39 to confirm `Ext.Stats.Get(id).Visible` exists
-and that the state now shows only player-facing conditions (`FLANKED`, `FEATHER_FALL`, …), then
-finalise `## Answer`.
+### Live probe (2026-09-18, v0.8.39) — filter works; `Visible` is not a stats field
+
+State after the filter: internal statuses (`HEALTHBOOST_HARDCORE`, `ENABLE_AOO`, `AI_NO_LOOK_AT_BATTLE`,
+`GOBLIN_HARDCORE`, `INSURFACE`) are gone; only player-facing ones remain — `goblin_tracker_4` →
+`FLANKED`, `wyll_1` → `FEATHER_FALL (dl=29.9)`; the portcullis with no statuses emits no `conditions`.
+
+The gate doing the work, though, is the **blacklist**, not a flag: `stats_probe` shows `__visible`
+empty for **every** status including `FLANKED` — `Ext.Stats.Get(id).Visible` does not exist. What does
+exist on the stats proxy: `StatusType` (string, `"BOOST"` for every observed status — useless as a
+filter) and, per `Stats/Prototype.h:140-164` / `ExtIdeHelpers.lua:22962`, the fields `Flags` (uint8),
+`StatusPropertyFlags` (uint64), `StatusGroups` (uint64), `TickType`, `StackType`, `Description`.
+`StatsStatusPrototype` has **no** visibility field, so player-visibility has to come from the generic
+stat fields (`DisplayName` / `Icon`).
+
+Fix (**v0.8.40**): `statusMeta` also reads `DisplayName`, `Icon`, `Flags`, `StatusPropertyFlags`,
+`StatusGroups`; `conditionsOf` drops a status when `statusIsInternal(id)` **or** `meta.visible == false`
+**or** `meta.has_display_name == false` (the `DisplayName` gate applies only when the field is actually
+readable, so it cannot silently drop everything). The probe tags each raw status with `__display_name`,
+`__icon`, `__flags`, `__spf` so one run shows which gate fires for `FLANKED` / `FEATHER_FALL` vs the
+internal ids.
+
+**Still to do (needs the game):** re-probe on v0.8.40 to confirm `DisplayName` / `Icon` discriminate
+player-facing statuses, then finalise `## Answer`.
 
 Bench note: Astarion's spell list in this save has no `flourish`; the closest status-applying
 attacks are `hamstring_shot` (applies `HAMSTRUNG`) and `piercing_strike`. A `hamstring_shot` at
