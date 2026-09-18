@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.46 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.47 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.46"
+local MOD_VERSION = "0.8.47"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -688,6 +688,27 @@ end
 
 local entityTurnComponentDump
 
+-- v0.8.47 (тикет 15): name via Osi.GetDisplayName, вызываем напрямую в pcall.
+-- Osi — ленивый резолвер имён (AGENTS.md): первый резолв имени может бросать
+-- ошибку и кэширует прокси; presence-проверки (type(x)=="function" и т.п.) всегда
+-- ложны и могут сами бросить. ok=false трактуем как "недоступно", прогрев убирает
+-- потерю вердикта на первой попытке.
+local osiNameWarmed = false
+local function osiDisplayNameOf(guid)
+    if guid == nil or guid == "" then
+        return nil
+    end
+    if not osiNameWarmed then
+        osiNameWarmed = true
+        pcall(function() return Osi.GetDisplayName end)
+    end
+    local ok, n = pcall(function() return Osi.GetDisplayName(guid) end)
+    if ok and n ~= nil then
+        return tostring(n)
+    end
+    return nil
+end
+
 local function probeGameState()
     -- Диагностика для StateExtractor-сида: кто ходит сейчас, кто в бою.
     -- Каждый шаг независим: падение одного не лишает остальных данных.
@@ -717,15 +738,10 @@ local function probeGameState()
     end)
     out.combat_states = okCs and cs or nil
     for _, cc in ipairs(currentCharacters()) do
-        local name = nil
-        if type(Osi.GetDisplayName) == "function" then
-            local okN, n = pcall(Osi.GetDisplayName, cc.character)
-            name = okN and n or nil
-        end
         out.current_characters[#out.current_characters + 1] = {
             user = cc.user,
             character = cc.character,
-            display_name = name,
+            display_name = osiDisplayNameOf(cc.character),
         }
     end
     return out
@@ -938,11 +954,9 @@ local function displayName(guid)
             end
         end
     end
-    if type(Osi.GetDisplayName) == "function" then
-        local ok, n = pcall(Osi.GetDisplayName, guid)
-        if ok and n ~= nil then
-            return tostring(n)
-        end
+    local n = osiDisplayNameOf(guid)
+    if n ~= nil then
+        return n
     end
     return tostring(guid)
 end
