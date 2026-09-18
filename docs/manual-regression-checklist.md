@@ -261,3 +261,24 @@ no C#/WS/Neuro). Ticket 13.
       before capture. Covered by `FLANKED` / `FEATHER_FALL`; retry on a high-HP target for `HAMSTRUNG`.
 - [ ] **C# markdown `conditions:` line** — same limitation as the v0.8.35 run (autopilot off ⇒ no
       context frame); covered by `StateSerializerTests` (155/155).
+
+### Run 2026-09-18 (v0.8.46) — hostility-based enemy classification (VERIFIED)
+
+PAK v052 (`Mods/BG3Neuro/…`, MD5 `F5930A1130DCBA2036E49C244B6927E0`) installed; heartbeat
+`version 0.8.46`. Grove-gate combat driven through `neuro_to_bg3.json` (`drive_action.ps1`). Ticket 14.
+
+- [x] **engine hostility drives the split**: `state_capture` result `diag` →
+      `osi_hostility:true`, `hostility:{ally:9, enemy:8}`, `skipped_non_character:1`, `participants:18`.
+- [x] **allies no longer misclassified**: state `allies` = 9 — party
+      (`tav`/`poc_player_cleric`/`origin_astarion`/`poc_player_wizard`) **plus** the 5 tieflings
+      (`wyll_1`/`zevlor_1`/`remira_1`/`aradin_1`/`barth_1`) that ticket 08's reproduction listed as
+      enemies.
+- [x] **enemies = hostiles only**: 8 entries — `worg_1`, `goblin_booyahg_1`, `bugbear_1`, `za_krug_1`,
+      `goblin_brawler_1`, `goblin_tracker_1/2/3` (no tieflings).
+- [x] **non-character skipped**: the portcullis is excluded (`diag.skipped_non_character = 1`) — no
+      `objects` entry, no `enemies` entry.
+- [x] **root cause captured**: `Osi.__index` is BG3SE's lazy C name resolver
+      (`LuaNameResolver.inl`); the first access to each name throws `attempt to call a nil value` but
+      caches the proxy, so `Osi.IsEnemy ~= nil` always fails while `Osi.IsEnemy(a,b)` works. `stats_probe`
+      v0.8.45 confirmed: party `IsEnemy=0/IsAlly=1`, goblinoids/worg `IsEnemy=1/IsAlly=0`. The fix calls
+      the proxies directly and warms the resolver.

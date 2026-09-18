@@ -1,7 +1,7 @@
 # 14 — Classify enemies by engine hostility (and skip non-character participants)
 
 Type: task (state emitter)
-Status: claimed
+Status: resolved
 Blocked by: 08 (resolved)
 
 ## Decision (from ticket 08's research)
@@ -147,3 +147,57 @@ PAK v051 (`49F3D2404FD4A8FAE3532E5BA07BD323`, backup `BG3Neuro.pak.bak-v050`).
 returns truthy for the goblinoids/worgs only, and the 5 tieflings + portcullis drop out, close the
 ticket per `## Verification` above (add `## Answer`, `Status: resolved`, tick `map.md`, append
 `docs/manual-regression-checklist.md`, commit).
+
+### Root cause nailed (2026-09-18, v0.8.45 probe) — `Osi.__index` is a lazy C resolver that throws on first use
+
+The v0.8.45 probe worked and returned the decisive facts:
+
+- `type(Osi)` = **`table`**; `Osi.GetHostCharacter()` = OK (uuid).
+- `Osi.IsEnemy ~= nil` / `Osi.IsAlly ~= nil` / `Osi.IsCharacter ~= nil` → **`err: attempt to call a
+  nil value`**, while the actual calls in the per-entity loop all succeeded
+  (`Osi.IsEnemy(raw, g)` = `ok:1` for hostiles, `ok:0` for the party; `Osi.IsAlly` the inverse).
+- BG3SE source settles it: `Osi` is a plain table whose metatable `__index = LuaIndexResolverTable`
+  (`BG3Extender/Lua/Osiris/LuaNameResolver.inl`), a C function that lazily resolves a symbol and
+  `lua_rawset`s the callable proxy into `Osi` **as a side effect**. The first resolve of each name
+  raises `attempt to call a nil value`, but caches the proxy, so all later accesses/calls work. Hence
+  any presence check of the form `Osi.X ~= nil` fails, while `Osi.X(...)` succeeds.
+
+Fix (**v0.8.46**, `941a3c1`): `hostilityApis()` no longer probes members — it returns `Osi`
+(and `Ext.Osi` when present) and **warms the lazy resolver** with `pcall(function() return
+Osi.IsEnemy end)` / `Osi.IsAlly` so the one-shot throw cannot cost the first verdict; `hostilityWithRef`
+keeps calling `IsEnemy`/`IsAlly` inside `pcall` closures. The probe was simplified to a real
+self-call (`Osi.IsEnemy(clean, clean)`) plus per-entity calls. `state_capture`'s result now also
+carries `diag` (`osi_hostility`, `hostility` counts, `party_refs`, `skipped_non_character`, …).
+Version → 0.8.46, `luaparse` OK, PAK v052 (`F5930A1130DCBA2036E49C244B6927E0`, backup
+`BG3Neuro.pak.bak-v051`).
+
+### Live verification (2026-09-18, v0.8.46) — PASS
+
+`state_capture` in the gate fight:
+
+- `diag.osi_hostility = true`, `diag.hostility = { ally = 9, enemy = 8 }`,
+  `diag.skipped_non_character = 1`, `diag.participants = 18`, `diag.combat_path = "scan_has_acting"`.
+- `allies` = **9**: `tav`, `poc_player_cleric`, `origin_astarion`, `poc_player_wizard`, `wyll_1`,
+  `zevlor_1`, `remira_1`, `aradin_1`, `barth_1`.
+- `enemies` = **8**: `worg_1`, `goblin_booyahg_1`, `bugbear_1`, `za_krug_1`, `goblin_brawler_1`,
+  `goblin_tracker_1/2/3` — i.e. exactly the goblinoids + worg, no tieflings, no portcullis
+  (the 5 tieflings that were misclassified as enemies in ticket 08 are now allies via `Osi.IsAlly`;
+  the door is skipped by the `ServerCharacter` filter).
+
+## Answer
+
+Enemy classification is now engine-driven and live-verified. `captureCombatState` resolves a
+`partyRef` (clean uuid + prefixed id) and, for every participant with a `ServerCharacter` component,
+asks `Osi.IsEnemy`/`Osi.IsAlly(partyRef, g)`; party fast-path (`controlled`/`avatars`/`partyFlag`)
+still short-circuits, `enemy`/`ally` verdicts bucket participants, `neutral` is dropped, and a `nil`
+verdict (Osiris unavailable) degrades to the old "non-party ⇒ enemy" behaviour. Non-character
+participants (doors) are skipped.
+
+The earlier misclassification was **not** a bad API or a bad id form: `Osi` is a table whose
+`__index` is BG3SE's lazy symbol resolver, which throws `attempt to call a nil value` on the *first*
+access to a name (caching the proxy afterwards). Presence checks like `Osi.IsEnemy ~= nil`
+therefore always failed, so the classifier fell back to "all non-party = enemy". The fix calls the
+proxies directly (with a one-time warm-up), never probing them.
+
+Gate-fight result: `allies`=9 (party + `wyll_1`/`zevlor_1`/`remira_1`/`aradin_1`/`barth_1`),
+`enemies`=8 (goblinoids/worg only), portcullis skipped. Shipped in v0.8.46 (PAK v052).
