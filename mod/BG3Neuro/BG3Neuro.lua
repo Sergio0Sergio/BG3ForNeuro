@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.48 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.49 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.48"
+local MOD_VERSION = "0.8.49"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -3894,7 +3894,18 @@ local function executeCast(action)
     -- v0.8.25 (тикет 03): useOsiSpell явно ИЛИ force_legacy / устойчивый откат.
     local useOsiSpell = data.use_osi_spell == true or useLegacyNow()
     local queueName = data.queue
-    local forceFlags = data.force_flags == true
+    -- v0.8.49 (тикет 16): дружественный одноцелевой бафф через osiris-очередь без
+    -- force-набора не дорастает до наложения статуса (бенч: bless/guidance дают
+    -- StatusAttemptFailed или storyActionID 0; +force → StatusApplied на цели).
+    -- Авто-включаем force-флаги, когда цель не враждебна кастеру; явный
+    -- data.force_flags остаётся override (nil = авто). Osiris недоступен
+    -- (verdict==nil) → не форсим, чтобы не менять поведение вражеских кастов.
+    local forceFlags = data.force_flags
+    if forceFlags == nil and target ~= nil and target ~= "" then
+        local verdict = hostilityOf({ pureGuid(actor) }, pureGuid(target))
+        forceFlags = verdict ~= nil and verdict ~= "enemy"
+    end
+    forceFlags = forceFlags == true
     local oseiOk, oseiRes, oseiEntry
     if useOsiSpell then
         -- Реальный игровой каст (v0.8.19, доказано вживую) — прямой Osi.UseSpell.

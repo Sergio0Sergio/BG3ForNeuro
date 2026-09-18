@@ -57,6 +57,11 @@ is evidence of nothing — drop it from future diagnostics.
   expose an explicit helper. `data.force_flags` currently reaches `enqueueCastRequest`
   (`executeCast` L3894-3897). Regression check: enemy-targeted casts must keep their AP/story
   behaviour (compl. contrast b2o/b4m: they already worked).
+- **IMPL (2026-09-18, v0.8.49)**: `executeCast` now auto-enables `force_flags` when the resolved
+  target is not an enemy of the caster (`data.force_flags == nil` → verdict from `hostilityOf`
+  != "enemy"). `data.force_flags` stays an explicit override (incl. `false`). Osiris-unavailable
+  (verdict `nil`) → no forcing, preserving enemy-cast behaviour. Same-enemy casts keep prior
+  AP/story path.
 - Honest-economy caveat observed on g2: AP snapshot before/after unchanged (1.0 → 1.0) and the
   spell cell stayed ready — the forced cast did not spend the action. **Confirmed by user**: the
   same turn, Shadowheart cast Guidance a second time on Gale after the g2 forced cast — the
