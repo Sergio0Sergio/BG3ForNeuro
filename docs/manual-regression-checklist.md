@@ -236,3 +236,28 @@ WS server on `:8000` (so the C# `ActionRouter` runs), and (for the safety net) s
       `result_c10c.json` **`success:false, error_code:cast_failed`**, and the WS frame was
       `{"id":"c10c","success":false,"message":"Cast interrupted/failed"}`. The exact call that used to
       report success now reports failure.
+
+### Run 2026-09-18 (v0.8.41) — combatant conditions / status effects (VERIFIED)
+
+PAK v047 (`Mods/BG3Neuro/…`, MD5 `F18A5203E4E6BE0B98F87172FDC3DC4A`) installed; heartbeat
+`version 0.8.41`. Grove-gate combat driven straight through `neuro_to_bg3.json` (`drive_action.ps1`;
+no C#/WS/Neuro). Ticket 13.
+
+- [x] **conditions on enemies**: state `enemies` → `goblin_tracker_3` `conditions:[FLANKED]`,
+      `wyll_1` `conditions:[FEATHER_FALL, duration_left 29.9]`.
+- [x] **allies clean**: `tav` / `poc_player_cleric` / `origin_astarion` / `poc_player_wizard` have no
+      conditions, only the `availability` string (`acting now` / `can act`).
+- [x] **engine-internal statuses filtered**: raw dumps show every creature carrying
+      `HEALTHBOOST_HARDCORE`, `ENABLE_AOO`, `AI_NO_LOOK_AT_BATTLE`, `GOBLIN_HARDCORE`, `INSURFACE`;
+      none reach the state.
+- [x] **discriminator = stats `Icon`**: `stats_probe` on the 12 combatants → the four internal ids have
+      `Icon` empty, `FLANKED` has it set. `DisplayName` is set for **all** statuses (no signal),
+      `Visible` does not exist, `StatusPropertyFlags` is an opaque userdata.
+- [x] **no `turns_left`**: `Osi.*Status*` absent from the runtime Osi table; `TickType = 0` for every
+      status; `TurnTimer` is a seconds countdown (4.375 / 0.715), `CurrentLifeTime` is seconds
+      (`FEATHER_FALL` 29.9) or -1 (permanent). State emits only `duration_left`.
+- [ ] **`flourish` → Off Balance assert** — NOT reproduced in this save: Astarion has no `flourish`
+      (only `hamstring_shot` / `piercing_strike`), and `hamstring_shot` at a 9-HP goblin killed it
+      before capture. Covered by `FLANKED` / `FEATHER_FALL`; retry on a high-HP target for `HAMSTRUNG`.
+- [ ] **C# markdown `conditions:` line** — same limitation as the v0.8.35 run (autopilot off ⇒ no
+      context frame); covered by `StateSerializerTests` (155/155).

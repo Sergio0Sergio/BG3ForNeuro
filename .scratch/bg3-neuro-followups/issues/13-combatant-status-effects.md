@@ -1,7 +1,7 @@
 # 13 — Combat state exposes no real status effects (Off Balance is unverifiable)
 
 Type: task (state emitter)
-Status: claimed
+Status: resolved
 Blocked by: —
 
 ## Symptom
@@ -169,11 +169,53 @@ Fix (**v0.8.41**): the visibility gate is now `statusVisible(meta)` — drop onl
 definitively empty (`meta.has_icon == false`) or `Visible` is false; keep the status when the stats
 lookup fails (`nil`). The blacklist stays as the fallback for unreadable stats.
 
-**Still to do (needs the game):** confirm on v0.8.41 that the state still shows `FLANKED` and
-`FEATHER_FALL` (i.e. `Icon` is set for `FEATHER_FALL` too) and nothing else, then finalise
-`## Answer`.
+### Live verification (2026-09-18, v0.8.41) — PASSED
+
+State file after the icon gate: `goblin_tracker_3` → `conditions:[FLANKED]`, `wyll_1` →
+`conditions:[FEATHER_FALL, duration_left 29.9]`, and nothing else on either side; the four party allies
+carry no conditions, only `availability`. So `Icon` is set for `FEATHER_FALL` too (it now survives the
+gate that previously only the blacklist let through), and all engine-internal statuses are filtered.
+PAK **v047** installed (MD5 `F18A5203E4E6BE0B98F87172FDC3DC4A`, backup `BG3Neuro.pak.bak-v046`).
 
 Bench note: Astarion's spell list in this save has no `flourish`; the closest status-applying
 attacks are `hamstring_shot` (applies `HAMSTRUNG`) and `piercing_strike`. A `hamstring_shot` at
-`goblin_tracker_2` hit and killed it (9 HP) before the capture, so an enemy-side assertion needs a
-high-HP target (e.g. `bugbear_1`, 35 HP).
+`goblin_tracker_2` hit and killed it (9 HP) before the capture, so an enemy-side assertion of that
+specific spell needs a high-HP target (e.g. `bugbear_1`, 35 HP); the mechanism itself is proven by
+`FLANKED` / `FEATHER_FALL`.
+
+## Answer
+
+Combat state now carries real, player-facing conditions for **both** sides, and they are live-verified.
+
+- **API**: statuses live on `ServerCharacter.StatusManager.Statuses`. BG3SE exposes that array as a
+  **userdata** that supports `#` and `[i]` (not `pairs`); enumerate via `#c` + `c[i]`, with
+  `:GetCount`/`:Size`, `:GetAll`/`:ToArray`, `:Get(i)` as fallbacks.
+- **Shape**: `conditions = [{ id, name, duration_left? }]` — one shape for allies and enemies. `id` is
+  the engine UPPER_SNAKE id (`FLANKED`), `name` a curated Title Case English label (never a localized
+  engine string, same policy as ticket 09), `duration_left` the remaining seconds for finite statuses
+  (`CurrentLifeTime`; `FEATHER_FALL` → 29.9). It is omitted for permanent statuses (`-1`).
+- **Rename**: the ally `effects` string (which was really action availability) became `availability`
+  (`acting now` / `can act`); it never carried statuses.
+- **No `turns_left`**: the engine exposes no remaining-turns value — `Osi.HasStatus` /
+  `GetStatusRemainingTurns` / `ApplyStatus` / … are absent from the runtime Osi table, `TurnTimer` is a
+  per-tick seconds countdown, and `TickType = 0` for every observed status. The ticket's original
+  "positive `turns_left`" assertion was amended; `StatusCondition.TurnsLeft` stays in the C# model for
+  forward compatibility but is never emitted today.
+- **Visibility gate**: creatures mostly carry technical statuses (`HEALTHBOOST_HARDCORE`,
+  `ENABLE_AOO`, `AI_NO_LOOK_AT_BATTLE`, `GOBLIN_HARDCORE`, `INSURFACE`). `Ext.Stats.Get(id).Icon`
+  separates them from player-facing ones (`Icon` set for `FLANKED`/`FEATHER_FALL`, empty for the
+  internal ids); `DisplayName` is set for everything (no signal), `Visible` does not exist, and
+  `StatusPropertyFlags` is an opaque userdata. The emitter drops a status only when `Icon` is
+  definitively empty (or `Visible == false`), and falls back to a blacklist
+  (`AI_*`/`ENABLE_*`/`DISABLE_*`/`HEALTHBOOST*`/`*_HARDCORE`/`SCRIPT_*`/`TECHNICAL*`/`DEBUG*`/`INSURFACE`)
+  when stats are unreadable.
+- **Verified live** (DEN gate fight, v0.8.41): `goblin_tracker_3` → `FLANKED`, `wyll_1` →
+  `FEATHER_FALL (dl=29.9)`, internal statuses gone, allies clean. `dotnet test` 155/155, `luaparse`
+  OK, PAK v047.
+- **Not reproduced**: the original `flourish` → Off Balance bench (this save's Astarion lacks
+  `flourish`); the mechanism is proven by the two debuff conditions above — retry with
+  `hamstring_shot` on a high-HP target to see `HAMSTRUNG`.
+- **Follow-up filed**: ticket 14 (friendly NPCs `Wyll`/`Zevlor`/`Remira`/`Aradin`/`Barth` are still
+  classified as enemies by the side classifier).
+
+Bench: `docs/manual-regression-checklist.md` — Run 2026-09-18 (v0.8.41).
