@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.37 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.38 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.37"
+local MOD_VERSION = "0.8.38"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1015,7 +1015,7 @@ local function healthOf(ent)
 end
 
 -- ============================================================
--- Состояния бойца (v0.8.37, тикет 13): реальные conditions из
+-- Состояния бойца (v0.8.38, тикет 13): реальные conditions из
 -- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
 -- а не "доступность действий". StatusId - движковый англоязычный id
 -- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
@@ -1025,6 +1025,7 @@ end
 local STATUS_FIELDS = {
     "StatusId", "TickType", "TurnTimer", "CurrentLifeTime", "LifeTime",
     "StartTimer", "StackId", "StackPriority", "IsUnique", "Loaded", "Started",
+    "Type", "StatusType", "Duration", "RemainingTurns", "TurnsRemaining",
 }
 
 local function statusDisplayName(id)
@@ -1056,10 +1057,111 @@ local function statusListOf(ent)
         return nil
     end
     local statuses = fieldOf(machine, "Statuses")
-    if type(statuses) ~= "table" then
+    if statuses == nil then
         return nil
     end
-    return statuses
+    local t = type(statuses)
+    if t == "table" or t == "userdata" then
+        return statuses
+    end
+    return nil
+end
+
+local function seContainerCount(container)
+    -- #container для SE-контейнера статусов; nil, если длина недоступна.
+    if container == nil then
+        return nil
+    end
+    local ok, n = pcall(function() return #container end)
+    if ok and type(n) == "number" then
+        return n
+    end
+    return nil
+end
+
+local function seArrayAt(container, i)
+    if container == nil then
+        return nil
+    end
+    local ok, v = pcall(function() return container[i] end)
+    if ok then
+        return v
+    end
+    return nil
+end
+
+local function containerViaMethod(container, names)
+    -- SE-контейнеры иногда прячут размер/элементы за методами.
+    for _, m in ipairs(names) do
+        local fn = fieldOf(container, m)
+        if type(fn) == "function" then
+            local ok, v = pcall(function() return fn(container) end)
+            if ok and v ~= nil then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+local function statusItemsOf(statuses)
+    -- Сырые объекты статусов из SE-контейнера (table/userdata): по длине,
+    -- иначе через парные методы, иначе pairs.
+    local items = {}
+    if statuses == nil then
+        return items
+    end
+    local len = seContainerCount(statuses)
+    if len == nil then
+        local cnt = containerViaMethod(statuses, { "GetCount", "Size", "GetSize", "Length" })
+        if type(cnt) == "number" then
+            len = cnt
+        end
+    end
+    if len == nil then
+        local cnt = fieldOf(statuses, "Count")
+        if type(cnt) == "number" then
+            len = cnt
+        end
+    end
+    if len ~= nil and len > 0 then
+        for i = 1, len do
+            local v = seArrayAt(statuses, i)
+            if v == nil then
+                break
+            end
+            items[#items + 1] = v
+        end
+        if #items > 0 then
+            return items
+        end
+    end
+    local bulk = containerViaMethod(statuses, { "GetAll", "ToArray", "GetStatuses", "GetElements" })
+    if type(bulk) == "table" and #bulk > 0 then
+        for _, v in ipairs(bulk) do
+            items[#items + 1] = v
+        end
+        return items
+    end
+    local getFn = fieldOf(statuses, "Get")
+    if type(getFn) == "function" then
+        for i = 1, 64 do
+            local ok, v = pcall(function() return getFn(statuses, i) end)
+            if not ok or v == nil then
+                break
+            end
+            items[#items + 1] = v
+        end
+        if #items > 0 then
+            return items
+        end
+    end
+    pcall(function()
+        for _, v in pairs(statuses) do
+            items[#items + 1] = v
+        end
+    end)
+    return items
 end
 
 local function conditionsOf(ent, limit)
@@ -1070,7 +1172,7 @@ local function conditionsOf(ent, limit)
         return out
     end
     limit = limit or 24
-    for _, st in ipairs(statuses) do
+    for _, st in ipairs(statusItemsOf(statuses)) do
         if #out >= limit then
             break
         end
@@ -1109,16 +1211,44 @@ local function entityStatusDump(guid)
     end
     local machine = fieldOf(comp, "StatusManager")
     out.has_status_manager = machine ~= nil
+    out.get_status_ent = type(fieldOf(ent, "GetStatus")) == "function"
+    out.get_status_comp = type(fieldOf(comp, "GetStatus")) == "function"
     out.conditions = conditionsOf(ent)
+    local osiFns = {}
+    if type(Osi) == "table" then
+        pcall(function()
+            for _, n in ipairs({ "HasStatus", "GetStatusCount", "GetStatusRemainingTurns",
+                "ApplyStatus", "RemoveStatus", "GetStatuses", "GetStatus" }) do
+                if Osi[n] ~= nil then
+                    osiFns[#osiFns + 1] = n
+                end
+            end
+        end)
+    end
+    out.osi_status_fns = osiFns
     if machine ~= nil then
         local statuses = fieldOf(machine, "Statuses")
         out.statuses_type = type(statuses)
-        out.status_count = (type(statuses) == "table") and #statuses or 0
+        out.status_len = seContainerCount(statuses)
+        out.status_count = #statusItemsOf(statuses)
+        out.status_index1 = type(seArrayAt(statuses, 1))
+        local mt = getmetatable(statuses)
+        if mt ~= nil then
+            out.metatable_type = type(mt)
+            local keys = {}
+            pcall(function()
+                for k in pairs(mt) do
+                    keys[#keys + 1] = tostring(k)
+                end
+            end)
+            out.metatable_keys = keys
+        end
         local raw = {}
-        if type(statuses) == "table" then
-            for _, st in ipairs(statuses) do
-                raw[#raw + 1] = readComponentFields(st, STATUS_FIELDS)
+        for _, st in ipairs(statusItemsOf(statuses)) do
+            if #raw >= 12 then
+                break
             end
+            raw[#raw + 1] = readComponentFields(st, STATUS_FIELDS)
         end
         out.raw = raw
     end

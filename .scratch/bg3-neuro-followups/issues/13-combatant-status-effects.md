@@ -86,5 +86,20 @@ assertions. `dotnet test` **155/155**. `luaparse` OK on both Lua files.
 PAK **v043** built + installed (MD5 `643A42E69153F69CB9C49B4281493938`, entries `Mods/BG3Neuro/…`,
 `modsettings.lsx` L19/L39 updated; the previous PAK is backed up as `BG3Neuro.pak.bak-v042`).
 
-**Not yet done (needs the game):** the live probe and the flourish/Off Balance bench from
-`## Verification`.
+### Live probe (2026-09-18, v0.8.37) — right handle, wrong container type
+
+`stats_probe` in the DEN gate fight (12 combatants, v0.8.37) returned per participant:
+`has_status_manager = true` (so `ServerCharacter.StatusManager` **is** the right handle) but
+`statuses_type = "userdata"` and `status_count = 0` for **all 12**. Root cause: `statusListOf`
+required `type(statuses) == "table"`, but BG3SE exposes the status array as **userdata**, so the
+list was dropped before iteration. Whether anyone actually had a status is unknown from that dump,
+because the count came from the same gated path.
+
+Fix (**v0.8.38**): `statusListOf` accepts `table` or `userdata`; new `statusItemsOf` enumerates an SE
+container via `#`/`[i]`, then `:GetCount`/`:Size`, `:GetAll`/`:ToArray`, `:Get(i)`, then `pairs`.
+`entityStatusDump` now reports `status_len`, `status_index1`, `status_count`, `metatable_type` /
+`metatable_keys`, `get_status_ent` / `get_status_comp` (`GetStatus` bound?) and `osi_status_fns`
+(which `Osi.*Status*` helpers exist at runtime) — one run decides the final accessor.
+
+**Still to do (needs the game):** re-probe on v0.8.38 to pick the working accessor, then the
+flourish/Off Balance bench from `## Verification`.
