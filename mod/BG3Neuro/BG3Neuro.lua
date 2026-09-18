@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.45 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.46 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.45"
+local MOD_VERSION = "0.8.46"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1015,7 +1015,7 @@ local function healthOf(ent)
 end
 
 -- ============================================================
--- Состояния бойца (v0.8.45, тикет 13): реальные conditions из
+-- Состояния бойца (v0.8.46, тикет 13): реальные conditions из
 -- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
 -- а не "доступность действий". StatusId - движковый англоязычный id
 -- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
@@ -1069,7 +1069,7 @@ local function statusIsInternal(id)
 end
 
 local function statusVisible(meta)
-    -- Живой прогон (v0.8.45): DisplayName заполнен у ВСЕХ статусов (внутренние
+    -- Живой прогон (v0.8.46): DisplayName заполнен у ВСЕХ статусов (внутренние
     -- тоже), поэтому не различает; Visible-поля в статах нет. Icon же заполнен
     -- только у игровых (FLANKED=True; AI_*/ENABLE_*/HEALTHBOOST*/GOBLIN_HC=False).
     -- Отбрасываем статус только когда Icon достоверно пуст; если статистика
@@ -1269,7 +1269,7 @@ local function conditionsOf(ent, limit)
             -- Visible==false отбрасываем, при отсутствии флага решает blacklist.
             if statusVisible(meta) then
                 local entry = { id = id, name = statusDisplayName(id) }
-                -- Живой прогон (v0.8.45): TurnTimer - секундный таймер тика
+                -- Живой прогон (v0.8.46): TurnTimer - секундный таймер тика
                 -- (не раунды), LifeTime=-1 у постоянных статусов. Поэтому
                 -- turns_left не выводим (движок не отдаёт остаток ходов;
                 -- Osi.*Status* в рантайме отсутствуют), а duration_left -
@@ -1501,8 +1501,8 @@ local function probeCombatStats()
     out.guids = guids
     local actingRaw = resolveActingCharacter("")
     local actingCleanProbe = actingCleanOf(actingRaw)
-    -- Если у Osi-прокси обращение к неизвестному имени бросает ошибку, «сырая»
-    -- индексация валит весь probe. Изолируем каждое выражение в pcall.
+    -- Каждое выражение изолировано в pcall: обращение к имени через __index-резолвер
+    -- BG3SE может бросить ошибку на первом резолве, тогда как сам вызов проходит.
     local function try(desc, fn)
         local ok, res = pcall(fn)
         return desc .. "=" .. (ok and "ok" or "err") .. ":" .. tostring(res)
@@ -1510,15 +1510,12 @@ local function probeCombatStats()
     local hostChar = nil
     out.osi_api = {
         global_type = try("type(Osi)", function() return type(Osi) end),
-        enemy_member = try("Osi.IsEnemy~=nil", function() return Osi.IsEnemy ~= nil end),
-        ally_member = try("Osi.IsAlly~=nil", function() return Osi.IsAlly ~= nil end),
-        character_member = try("Osi.IsCharacter~=nil", function() return Osi.IsCharacter ~= nil end),
         ext_osi_type = try("type(Ext.Osi)", function() return type(Ext.Osi) end),
-        ext_enemy_member = try("Ext.Osi.IsEnemy~=nil", function() return Ext.Osi.IsEnemy ~= nil end),
         get_host_character = try("Osi.GetHostCharacter()", function()
             hostChar = Osi.GetHostCharacter()
             return hostChar
         end),
+        isEnemy_self = try("IsEnemy(clean,clean)", function() return Osi.IsEnemy(actingCleanProbe, actingCleanProbe) end),
         acting_raw = actingRaw,
         acting_clean = actingCleanProbe,
     }
@@ -2036,7 +2033,7 @@ local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
     state.spells = list
 end
 
--- v0.8.45 (тикет 14): настоящая враждебность вместо сравнения CombatTeam.
+-- v0.8.46 (тикет 14): настоящая враждебность вместо сравнения CombatTeam.
 -- CombatTeam — ключ группировки хода (союзные фракции сидят на разных командах),
 -- поэтому союзник/враг определяется движковым Osiris-предикатом относительно
 -- партийного персонажа. Участники-предметы (двери) отсекаются по ServerCharacter.
@@ -2064,24 +2061,26 @@ end
 
 -- Доступные Osiris-API враждебности: глобальный Osi и/или Ext.Osi (SE-версии
 -- расходятся, поэтому пробуем оба и берём тот, что реально отвечает).
-local function apiHasMethod(api, name)
-    if api == nil then
-        return false
-    end
-    local ok, v = pcall(function() return api[name] ~= nil end)
-    return ok and v or false
-end
-
 local function hostilityApis()
-    -- Osi.*-члены — callable userdata-прокси, а не Lua-функции, поэтому
-    -- type()=="function" здесь всегда ложь (это давало fallback «все враги»).
-    -- Индексацию тоже прячем в pcall: неизвестное имя у прокси может бросить.
+    -- Osi — таблица с __index = C-резолвером BG3SE (LuaIndexResolverTable). ПЕРВОЕ
+    -- обращение к имени запускает резолвер, и он может бросить ошибку — именно
+    -- поэтому "Osi.IsEnemy ~= nil" падает, хотя сам вызов Osi.IsEnemy(a,b) затем
+    -- проходит (резолвер успевает закэшировать прокси). Никаких presence-проверок:
+    -- отдаём API и полагаемся на pcall в hostilityWithRef (nil = недоступен).
     local apis = {}
-    if apiHasMethod(Osi, "IsEnemy") then
+    if Osi ~= nil then
+        -- Резолвер имён ленивый: самое первое обращение к каждому имени бросает
+        -- ошибку и лишь кэширует прокси. Прогреваем вхолостую, чтобы рабочие
+        -- вызовы не теряли вердикт из-за этой одноразовой ошибки.
+        pcall(function() return Osi.IsEnemy end)
+        pcall(function() return Osi.IsAlly end)
         apis[#apis + 1] = Osi
     end
-    if Ext ~= nil and Ext.Osi ~= Osi and apiHasMethod(Ext.Osi, "IsEnemy") then
-        apis[#apis + 1] = Ext.Osi
+    local okExt, extOsi = pcall(function() return Ext.Osi end)
+    if okExt and extOsi ~= nil and extOsi ~= Osi then
+        pcall(function() return extOsi.IsEnemy end)
+        pcall(function() return extOsi.IsAlly end)
+        apis[#apis + 1] = extOsi
     end
     return apis
 end
@@ -2208,7 +2207,7 @@ function captureCombatState(event, force)
         end
     end
 
-    -- v0.8.45 (тикет 14): референс-персонаж партии для Osiris-проверки враждебности.
+    -- v0.8.46 (тикет 14): референс-персонаж партии для Osiris-проверки враждебности.
     -- Нужен реальный GUID и именно партиец: ходящий, если он партийный, иначе
     -- первый участник-партиец. CombatTeam больше не используется. Даём оба
     -- представления id (чистый uuid и префиксный, как их отдаёт Osiris) — сборки
@@ -4845,7 +4844,7 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
     if name == "state_capture" then
         -- StateExtractor (v0.8.26): принудительный state прямо сейчас; режим выбирает
         -- captureCurrentState (диалог > комбат > exploration), результат — в bg3_to_neuro.json.
-        local okC, p = pcall(captureCurrentState, "state_capture", true)
+        local okC, p, d = pcall(captureCurrentState, "state_capture", true)
         if okC then
             _P("[BG3Neuro] state_capture: mode=" .. tostring(p.mode)
                 .. " allies=" .. #(p.allies or {}) .. " enemies=" .. #(p.enemies or {})
@@ -4863,6 +4862,16 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
                 spells = #(p.spells or {}),
                 dialogue = (p.dialogue ~= nil and #(p.dialogue.options or {})) or -1,
                 can_rest = p.can_rest == true,
+                diag = d ~= nil and {
+                    osi_hostility = d.osi_hostility,
+                    hostility = d.hostility,
+                    party_refs = d.party_refs,
+                    acting_raw = d.acting_raw,
+                    acting_clean = d.acting_clean,
+                    skipped_non_character = d.skipped_non_character,
+                    participants = d.participants,
+                    combat_path = d.combat_path,
+                } or nil,
             }
         end
         return false, nil, "action_failed", tostring(p)
