@@ -67,6 +67,28 @@ public class ActionRegistryTests
         Assert.NotNull(ActionRegistry.Find("select_dialogue_option"));
         Assert.Null(ActionRegistry.Find("no_such_action"));
     }
+
+    [Fact]
+    public void Get_ActionDescriptions_AreEnglish_NoCyrillic()
+    {
+        foreach (var action in ActionRegistry.Get())
+        {
+            Assert.False(string.IsNullOrWhiteSpace(action.Description), $"{action.Name} has no description");
+            Assert.DoesNotMatch(@"[\u0400-\u04FF]", action.Description);
+        }
+    }
+
+    [Fact]
+    public void EmbeddedSchema_HasNoCyrillic_EvenForInternalEntries()
+    {
+        using var stream = typeof(ActionRegistry).Assembly
+            .GetManifestResourceStream("BG3Neuro.Core.Actions.action_schemas.json");
+        Assert.NotNull(stream);
+        using var reader = new StreamReader(stream!);
+        var json = reader.ReadToEnd();
+
+        Assert.DoesNotMatch(@"[\u0400-\u04FF]", json);
+    }
 }
 
 public class NeuroWebSocketClientTests

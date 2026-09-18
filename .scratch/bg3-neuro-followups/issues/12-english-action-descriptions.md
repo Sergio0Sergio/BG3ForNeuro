@@ -1,7 +1,7 @@
 # 12 — Action descriptions sent to Neuro are in Russian
 
 Type: bug (Neuro contract / language policy)
-Status: ready-for-agent
+Status: resolved
 Blocked by: —
 
 ## Finding (live bench 2026-09-17)
@@ -50,6 +50,36 @@ surface. The no-Cyrillic test should sweep the whole file, not just the register
   `Assert.DoesNotMatch(@"[\u0400-\u04FF]", d.Description)` across `ActionRegistry.Get()`; plus a
   file-wide check that also covers the `internal` entries.
 - Bench: the `actions/register` frame no longer contains `\u04xx` escapes.
+
+## Answer (2026-09-18)
+
+All 24 `description` values translated to English in `action_schemas.json`; `name` keys, `internal`
+flags and JSON schemas unchanged. Two tests added to `NeuroWebSocketClientTests`:
+
+- `Get_ActionDescriptions_AreEnglish_NoCyrillic` — every `ActionRegistry.Get()` description is
+  non-empty and contains no `[\u0400-\u04FF]`.
+- `EmbeddedSchema_HasNoCyrillic_EvenForInternalEntries` — reads the embedded
+  `BG3Neuro.Core.Actions.action_schemas.json` manifest resource and asserts the whole file (internal
+  entries included) has no Cyrillic.
+
+`dotnet test` → **155/155** (was 153).
+
+Live bench (`run_app.cmd` with `bench_config.json`, autopilot off; the App was rebuilt first — the
+schema is an embedded resource, so the App's copied `BG3Neuro.Core.dll` had to be refreshed): the
+`actions/register` frame now contains **no `\u04xx` escapes**, **17** actions, **0** Cyrillic
+descriptions — e.g. `move_to_target='Move to the specified target.'`,
+`use_item='Use an inventory item (healing, armour, food) on yourself or the specified target.'`.
+
+Sweep of the rest of the Neuro-facing surface — **no unintended Cyrillic**:
+
+- `src/**/*.cs` and non-`.cs` assets under `src/` — zero Cyrillic occurrences. (Checked with a
+  UTF-8-aware read: `Select-String` on PowerShell 5.1 decodes UTF-8 as CP1251 and reports em-dashes
+  `—` as Cyrillic mojibake — a false positive.)
+- `mod/BG3Neuro/*.lua` — Cyrillic appears only in `--` comments and in the intentional Russian→Latin
+  `translitMap` (`BG3Neuro.lua:830-837`). No user/model-facing string literal is Russian.
+
+Scope: only 17 descriptions reach the model after ticket 10, but all 24 were translated and the
+file-wide test guards the `internal` entries too, per `AGENTS.md`.
 
 ## Evidence
 

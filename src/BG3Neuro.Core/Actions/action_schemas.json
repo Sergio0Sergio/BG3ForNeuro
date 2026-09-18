@@ -1,7 +1,7 @@
 [
   {
     "name": "move_to_target",
-    "description": "Переместиться к указанной цели.",
+    "description": "Move to the specified target.",
     "schema": {
       "type": "object",
       "required": ["target_id"],
@@ -13,7 +13,7 @@
   },
   {
     "name": "attack_entity",
-    "description": "Атаковать указанного врага основным оружием.",
+    "description": "Attack the specified enemy with a main-hand weapon.",
     "schema": {
       "type": "object",
       "required": ["target_id"],
@@ -25,7 +25,7 @@
   },
   {
     "name": "cast_spell",
-    "description": "Использовать заклинание; для AoE — указать target_id, coverage или position центра.",
+    "description": "Cast a spell; for AoE, provide target_id, coverage, or the centre position.",
     "schema": {
       "type": "object",
       "required": ["spell_name"],
@@ -48,7 +48,7 @@
   },
   {
     "name": "use_item",
-    "description": "Использовать предмет из инвентаря (лечиться, броня, еда) на себя или указанную цель.",
+    "description": "Use an inventory item (healing, armour, food) on yourself or the specified target.",
     "schema": {
       "type": "object",
       "required": ["item_id"],
@@ -61,7 +61,7 @@
   },
   {
     "name": "throw",
-    "description": "Бросить предмет в указанную цель.",
+    "description": "Throw an item at the specified target.",
     "schema": {
       "type": "object",
       "required": ["item_id", "target_id"],
@@ -74,7 +74,7 @@
   },
   {
     "name": "bonus_action",
-    "description": "Выполнить бонусное действие (offhand_attack, drink_potion, help, shove, disengage, dash, dodge).",
+    "description": "Perform a bonus action (offhand_attack, drink_potion, help, shove, disengage, dash, dodge).",
     "schema": {
       "type": "object",
       "required": ["action_type"],
@@ -90,7 +90,7 @@
   },
   {
     "name": "set_reaction",
-    "description": "Выбрать реакцию на этот ход (opportunity_attack, shield, counterspell, none).",
+    "description": "Set the reaction for this turn (opportunity_attack, shield, counterspell, none).",
     "schema": {
       "type": "object",
       "required": ["reaction_type"],
@@ -106,7 +106,7 @@
   {
     "name": "state_capture",
     "internal": true,
-    "description": "Диагностика: принудительно снять текущее состояние игры (бой/локация) и обновить state-файл.",
+    "description": "Diagnostic: force-capture the current game state (combat/location) and refresh the state file.",
     "schema": {
       "type": "object",
       "required": [],
@@ -117,7 +117,7 @@
   },
   {
     "name": "end_turn",
-    "description": "Завершить ход текущего персонажа.",
+    "description": "End the current character's turn.",
     "schema": {
       "type": "object",
       "required": [],
@@ -129,7 +129,7 @@
   {
     "name": "end_turn_ecs",
     "internal": true,
-    "description": "Диагностика: закончить ход через ECS/engine-каналы с подробным отчётом (mode: system/ecs/probe).",
+    "description": "Diagnostic: end the turn through ECS/engine channels with a detailed report (mode: system/ecs/probe).",
     "schema": {
       "type": "object",
       "required": [],
@@ -142,7 +142,7 @@
   {
     "name": "probe",
     "internal": true,
-    "description": "Диагностика: кто ходит, кто в бою, состояние партии/боя (debug-отчёт, не меняет игру).",
+    "description": "Diagnostic: who is acting, who is in combat, party/combat state (debug report; does not change the game).",
     "schema": {
       "type": "object",
       "required": [],
@@ -154,7 +154,7 @@
   {
     "name": "diag_skip",
     "internal": true,
-    "description": "Диагностика: проверить DB_CharacterSkipTurn (добавить/удалить строку флага скипа хода).",
+    "description": "Diagnostic: inspect DB_CharacterSkipTurn (add/remove the skip-turn flag row).",
     "schema": {
       "type": "object",
       "required": [],
@@ -165,7 +165,7 @@
   },
   {
     "name": "select_dialogue_option",
-    "description": "Выбрать один из предложенных вариантов ответа в диалоге.",
+    "description": "Choose one of the offered dialogue responses.",
     "schema": {
       "type": "object",
       "required": ["option_index"],
@@ -177,7 +177,7 @@
   },
   {
     "name": "move_to_entity",
-    "description": "Переместиться к указанной осведомлённой цели.",
+    "description": "Move to the specified known target.",
     "schema": {
       "type": "object",
       "required": ["target_id"],
@@ -189,7 +189,7 @@
   },
   {
     "name": "interact_with",
-    "description": "Взаимодействовать с объектом одним из доступных способов (см. state).",
+    "description": "Interact with the object using one of the available interactions (see state).",
     "schema": {
       "type": "object",
       "required": ["target_id"],
@@ -202,7 +202,7 @@
   },
   {
     "name": "loot",
-    "description": "Собрать добычу с указанного трупа или контейнера.",
+    "description": "Loot the specified corpse or container.",
     "schema": {
       "type": "object",
       "required": ["target_id"],
@@ -214,7 +214,7 @@
   },
   {
     "name": "open_map",
-    "description": "Открыть карту (просмотр локаций).",
+    "description": "Open the map (location overview).",
     "schema": {
       "type": "object",
       "required": [],
@@ -225,7 +225,7 @@
   },
   {
     "name": "open_inventory",
-    "description": "Открыть инвентарь (просмотр предметов).",
+    "description": "Open the inventory (item overview).",
     "schema": {
       "type": "object",
       "required": [],
@@ -236,7 +236,7 @@
   },
   {
     "name": "toggle_mode",
-    "description": "Переключить режим персонажа (v1: normal).",
+    "description": "Toggle the character's mode (v1: normal).",
     "schema": {
       "type": "object",
       "required": ["mode"],
@@ -249,7 +249,7 @@
   },
   {
     "name": "rest",
-    "description": "Отдохнуть (полный или лёгкий отдых).",
+    "description": "Rest (full or partial rest).",
     "schema": {
       "type": "object",
       "required": ["rest_type"],
@@ -261,7 +261,7 @@
   },
   {
     "name": "travel_to",
-    "description": "Путешествовать в локацию по названию области.",
+    "description": "Travel to a location by region name.",
     "schema": {
       "type": "object",
       "required": ["destination"],
@@ -275,7 +275,7 @@
   {
     "name": "bench_snapshot",
     "internal": true,
-    "description": "Стенд (followup 01/02): снапшот ресурсов актёра и всех членов партии.",
+    "description": "Bench (followup 01/02): snapshot the resources of the actor and all party members.",
     "schema": {
       "type": "object",
       "required": [],
@@ -287,7 +287,7 @@
   {
     "name": "bench_party_increase",
     "internal": true,
-    "description": "Стенд (followup 01/02): PartyIncreaseActionResourceValue с снапшотами до/после.",
+    "description": "Bench (followup 01/02): PartyIncreaseActionResourceValue with before/after snapshots.",
     "schema": {
       "type": "object",
       "required": [],
@@ -301,7 +301,7 @@
   {
     "name": "bench_use_spell",
     "internal": true,
-    "description": "Стенд (followup 01): проверяет, списывает ли Osi.UseSpell бонусное действие нативно.",
+    "description": "Bench (followup 01): checks whether Osi.UseSpell spends a bonus action natively.",
     "schema": {
       "type": "object",
       "required": ["target_id"],
