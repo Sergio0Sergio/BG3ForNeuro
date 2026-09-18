@@ -105,6 +105,7 @@
   },
   {
     "name": "state_capture",
+    "internal": true,
     "description": "Диагностика: принудительно снять текущее состояние игры (бой/локация) и обновить state-файл.",
     "schema": {
       "type": "object",
@@ -127,6 +128,7 @@
   },
   {
     "name": "end_turn_ecs",
+    "internal": true,
     "description": "Диагностика: закончить ход через ECS/engine-каналы с подробным отчётом (mode: system/ecs/probe).",
     "schema": {
       "type": "object",
@@ -139,6 +141,7 @@
   },
   {
     "name": "probe",
+    "internal": true,
     "description": "Диагностика: кто ходит, кто в бою, состояние партии/боя (debug-отчёт, не меняет игру).",
     "schema": {
       "type": "object",
@@ -150,6 +153,7 @@
   },
   {
     "name": "diag_skip",
+    "internal": true,
     "description": "Диагностика: проверить DB_CharacterSkipTurn (добавить/удалить строку флага скипа хода).",
     "schema": {
       "type": "object",
@@ -270,6 +274,7 @@
   },
   {
     "name": "bench_snapshot",
+    "internal": true,
     "description": "Стенд (followup 01/02): снапшот ресурсов актёра и всех членов партии.",
     "schema": {
       "type": "object",
@@ -281,6 +286,7 @@
   },
   {
     "name": "bench_party_increase",
+    "internal": true,
     "description": "Стенд (followup 01/02): PartyIncreaseActionResourceValue с снапшотами до/после.",
     "schema": {
       "type": "object",
@@ -294,6 +300,7 @@
   },
   {
     "name": "bench_use_spell",
+    "internal": true,
     "description": "Стенд (followup 01): проверяет, списывает ли Osi.UseSpell бонусное действие нативно.",
     "schema": {
       "type": "object",

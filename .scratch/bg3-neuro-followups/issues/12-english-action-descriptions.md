@@ -37,10 +37,18 @@ Follow-up worth checking: are there other model-facing / user-facing strings sti
 by the app (e.g. `ErrorMapper.ToMessage`, force queries in `DecisionLoop`, exploration prompts)? Those
 were English in the review, but this ticket should sweep the whole Neuro-facing surface.
 
+## Scope update (after ticket 10)
+
+Ticket 10 hid 7 dev/bench entries (`"internal": true`), so only **17** descriptions now reach the
+model in `actions/register`. Translate **all 24** in `action_schemas.json` anyway — `AGENTS.md`
+requires English for everything mod-facing, and the internal entries are still the mod's documented
+surface. The no-Cyrillic test should sweep the whole file, not just the registered subset.
+
 ## Verification
 
-- Static: a test asserting every `ActionDefinition.Description` is ASCII / contains no Cyrillic,
-  e.g. `Assert.DoesNotMatch(@"[А-Яа-яЁё]", d.Description)` across `ActionRegistry.Get()`.
+- Static: a test asserting no `ActionDefinition.Description` contains Cyrillic, e.g.
+  `Assert.DoesNotMatch(@"[\u0400-\u04FF]", d.Description)` across `ActionRegistry.Get()`; plus a
+  file-wide check that also covers the `internal` entries.
 - Bench: the `actions/register` frame no longer contains `\u04xx` escapes.
 
 ## Evidence

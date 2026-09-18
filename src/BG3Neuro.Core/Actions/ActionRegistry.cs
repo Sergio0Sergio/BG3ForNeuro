@@ -28,6 +28,11 @@ public static class ActionRegistry
         var result = new List<ActionDefinition>(nodes.Count);
         foreach (var node in nodes)
         {
+            if (node["internal"]?.GetValue<bool>() == true)
+            {
+                continue;
+            }
+
             result.Add(new ActionDefinition
             {
                 Name = node["name"]?.GetValue<string>() ?? throw new InvalidOperationException("Action without name"),

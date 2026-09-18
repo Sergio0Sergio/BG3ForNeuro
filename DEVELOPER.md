@@ -25,7 +25,7 @@ The C# process is the "brain." The Lua mod is the "hands."
 | `DecisionLoop` | `src/BG3Neuro.Core/State/` | Orchestration: event → context/force → validate → execute → result |
 | `StateSerializer` | `src/BG3Neuro.Core/State/` | BG3 state JSON → Markdown context for Neuro |
 | `CoverageAuto` | `src/BG3Neuro.Core/State/` | Range/AoE coverage calculations (shared with StateSerializer) |
-| `ActionRegistry` | `src/BG3Neuro.Core/Actions/` | 17+ action schemas from `action_schemas.json` |
+| `ActionRegistry` | `src/BG3Neuro.Core/Actions/` | action schemas from `action_schemas.json` (17 gameplay entries; `"internal": true` entries are hidden from Neuro) |
 | `ErrorMapper` | `src/BG3Neuro.Core/State/` | error_code → actionable message mapping |
 
 ### Lua Mod
@@ -126,7 +126,7 @@ Add a new entry to `src/BG3Neuro.Core/Actions/action_schemas.json`:
 {
   "name": "my_new_action",
   "description": "Does something useful",
-  "parameters": {
+  "schema": {
     "type": "object",
     "properties": {
       "actor": { "type": "string", "description": "Entity alias" },
@@ -136,6 +136,11 @@ Add a new entry to `src/BG3Neuro.Core/Actions/action_schemas.json`:
   }
 }
 ```
+
+Set `"internal": true` on an entry to keep it out of the Neuro-facing surface: `ActionRegistry`
+skips internal entries, so they are neither registered (`Get()`) nor routable (`Find()`). Use this
+for dev/bench-only actions (e.g. `bench_*`, `probe`, `diag_skip`); the mod still executes them when
+they are injected directly into `neuro_to_bg3.json`.
 
 ### 2. Add Validation (if needed)
 

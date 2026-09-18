@@ -9,12 +9,14 @@ public class ActionRegistryTests
 {
     private static readonly string[] Exploration = { "move_to_entity", "interact_with", "loot", "open_map", "open_inventory", "toggle_mode", "rest", "travel_to" };
 
+    private static readonly string[] InternalOnly = { "state_capture", "end_turn_ecs", "probe", "diag_skip", "bench_snapshot", "bench_party_increase", "bench_use_spell" };
+
     [Fact]
-    public void Get_Returns21Actions_CombatDialogueExploration()
+    public void Get_Returns17GameplayActions_CombatDialogueExploration()
     {
         var actions = ActionRegistry.Get();
 
-        Assert.Equal(21, actions.Count);
+        Assert.Equal(17, actions.Count);
         Assert.Equal("move_to_target", actions[0].Name);
         Assert.Equal("attack_entity", actions[1].Name);
         Assert.Equal("cast_spell", actions[2].Name);
@@ -22,13 +24,21 @@ public class ActionRegistryTests
         Assert.Equal("throw", actions[4].Name);
         Assert.Equal("bonus_action", actions[5].Name);
         Assert.Equal("set_reaction", actions[6].Name);
-        Assert.Equal("state_capture", actions[7].Name);
-        Assert.Equal("end_turn", actions[8].Name);
-        Assert.Equal("end_turn_ecs", actions[9].Name);
-        Assert.Equal("probe", actions[10].Name);
-        Assert.Equal("diag_skip", actions[11].Name);
-        Assert.Equal("select_dialogue_option", actions[12].Name);
-        Assert.Equal(Exploration, actions.Skip(13).Select(a => a.Name).ToArray());
+        Assert.Equal("end_turn", actions[7].Name);
+        Assert.Equal("select_dialogue_option", actions[8].Name);
+        Assert.Equal(Exploration, actions.Skip(9).Select(a => a.Name).ToArray());
+    }
+
+    [Fact]
+    public void Get_NeverExposesInternalDebugOrBenchActions()
+    {
+        var names = ActionRegistry.Get().Select(a => a.Name).ToArray();
+
+        foreach (var hidden in InternalOnly)
+        {
+            Assert.DoesNotContain(hidden, names);
+            Assert.Null(ActionRegistry.Find(hidden));
+        }
     }
 
     [Fact]
@@ -81,7 +91,7 @@ public class NeuroWebSocketClientTests
     }
 
     [Fact]
-    public async Task Connect_SendsStartupThenRegister_WithAll21Actions()
+    public async Task Connect_SendsStartupThenRegister_WithAll17Actions()
     {
         await using var server = new FakeNeuroServer();
         server.Start();
@@ -100,7 +110,7 @@ public class NeuroWebSocketClientTests
         var register = messages[1];
         Assert.Equal("actions/register", register["command"]!.GetValue<string>());
         Assert.Equal(Game, register["game"]!.GetValue<string>());
-        Assert.Equal(21, register["data"]!["actions"]!.AsArray().Count);
+        Assert.Equal(17, register["data"]!["actions"]!.AsArray().Count);
     }
 
     [Fact]
@@ -142,10 +152,10 @@ public class NeuroWebSocketClientTests
         var registers = messages.Where(m => m["command"]!.GetValue<string>() == "actions/register").ToList();
         var secondNames = ExtractActionNames(registers[1]);
 
-        Assert.Equal(21, firstNames.Length);
-        Assert.Equal(21, secondNames.Length);
+        Assert.Equal(17, firstNames.Length);
+        Assert.Equal(17, secondNames.Length);
         Assert.Equal(firstNames, secondNames);
-        Assert.Equal(21, secondNames.Distinct().Count());
+        Assert.Equal(17, secondNames.Distinct().Count());
     }
 
     [Fact]
@@ -167,7 +177,7 @@ public class NeuroWebSocketClientTests
         var afterReconnect = ExtractActionNames(registers[1]);
 
         Assert.Equal(beforeReconnect, afterReconnect);
-        Assert.Equal(21, afterReconnect.Distinct().Count());
+        Assert.Equal(17, afterReconnect.Distinct().Count());
     }
 
     [Fact]
