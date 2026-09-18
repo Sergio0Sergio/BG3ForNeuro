@@ -12,6 +12,8 @@
 
 - **The game runs in ENGLISH ONLY.** This app and mod are used with the English-language version of Baldur's Gate 3; everything must function and read correctly in English. Keep the mod's user-facing strings (action `error_detail`, status/log messages surfaced to the app user) in English — do not rely on game-locale quirks, and never parse/match game text in Russian. Engine errors come localized; prefer the mod's own English diagnostics over passing through engine strings verbatim.
 
+- **`Osi` is a lazy-resolver table: NEVER probe `Osi.X ~= nil` / `type(Osi.X)`, call it directly.** `Osi` is a plain Lua table whose metatable `__index` is BG3SE's C name resolver (`LuaIndexResolverTable` in `BG3Extender/Lua/Osiris/LuaNameResolver.inl`). The *first* access to any `Osi.<name>` raises `attempt to call a nil value` and caches the callable proxy; every later access/call works. Consequences proven on the bench (v0.8.43–46, ticket 14): (a) presence checks like `Osi.IsEnemy ~= nil` are always false *and* throw; (b) `type(Osi.X) == "function"` is always false because members are callable userdata proxies — guards like the one in `displayName` (`BG3Neuro.lua:721`, `:941`) are dead code worth a ticket, not a pattern to reuse. Correct idiom: `pcall(function() return Osi.IsEnemy(ref, g) end)` and treat `ok=false` as "unavailable"; warm the resolver once (e.g. `pcall(function() return Osi.IsEnemy end)`) so the one-shot throw cannot eat the first verdict.
+
 ## Agent skills
 
 ### Issue tracker
