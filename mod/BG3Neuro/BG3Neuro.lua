@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.38 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.39 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.38"
+local MOD_VERSION = "0.8.39"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1015,7 +1015,7 @@ local function healthOf(ent)
 end
 
 -- ============================================================
--- Состояния бойца (v0.8.38, тикет 13): реальные conditions из
+-- Состояния бойца (v0.8.39, тикет 13): реальные conditions из
 -- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
 -- а не "доступность действий". StatusId - движковый англоязычный id
 -- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
@@ -1027,6 +1027,13 @@ local STATUS_FIELDS = {
     "StartTimer", "StackId", "StackPriority", "IsUnique", "Loaded", "Started",
     "Type", "StatusType", "Duration", "RemainingTurns", "TurnsRemaining",
 }
+
+-- Движковые статусы, которые не показываются игроку как "состояния":
+-- AI-управление, флаги видимости/AoO, HC-бонусы сложности. Страховка на
+-- случай, если Stats-флаг видимости (statusMeta.visible) недоступен.
+local STATUS_INTERNAL_PREFIXES = { "AI_", "ENABLE_", "DISABLE_", "HEALTHBOOST", "SCRIPT_", "TECHNICAL", "DEBUG" }
+local STATUS_INTERNAL_SUFFIXES = { "_HARDCORE" }
+local STATUS_INTERNAL_EXACT = { INSURFACE = true }
 
 local function statusDisplayName(id)
     local s = tostring(id or "")
@@ -1041,6 +1048,54 @@ local function statusDisplayName(id)
         return s
     end
     return table.concat(words, " ")
+end
+
+local function statusIsInternal(id)
+    local s = tostring(id or "")
+    if s == "" then
+        return true
+    end
+    for _, p in ipairs(STATUS_INTERNAL_PREFIXES) do
+        if s:sub(1, #p) == p then
+            return true
+        end
+    end
+    for _, suf in ipairs(STATUS_INTERNAL_SUFFIXES) do
+        if #s >= #suf and s:sub(-#suf) == suf then
+            return true
+        end
+    end
+    return STATUS_INTERNAL_EXACT[s] == true
+end
+
+local function statusMeta(id)
+    -- Метаданные статуса из game-статов: Ext.Stats.Get(id).Visible и т.п.
+    local meta = { has_stats = false }
+    if Ext == nil or Ext.Stats == nil then
+        return meta
+    end
+    local ok, st = pcall(Ext.Stats.Get, id)
+    if not ok or st == nil then
+        return meta
+    end
+    meta.has_stats = true
+    local okV, v = pcall(function() return st.Visible end)
+    if okV then
+        if v == true or v == 1 then
+            meta.visible = true
+        elseif v == false or v == 0 then
+            meta.visible = false
+        end
+    end
+    local okT, tv = pcall(function() return st.StatusType end)
+    if okT and tv ~= nil then
+        meta.status_type = tostring(tv)
+    end
+    local okD, dv = pcall(function() return st.DisplayName end)
+    if okD and dv ~= nil then
+        meta.has_display_name = tostring(dv) ~= ""
+    end
+    return meta
 end
 
 local function statusListOf(ent)
@@ -1165,7 +1220,7 @@ local function statusItemsOf(statuses)
 end
 
 local function conditionsOf(ent, limit)
-    -- [{id, name, turns_left?, duration_left?}] - единая форма для союзников и врагов.
+    -- [{id, name, duration_left?}] - единая форма для союзников и врагов.
     local out = {}
     local statuses = statusListOf(ent)
     if statuses == nil then
@@ -1177,20 +1232,23 @@ local function conditionsOf(ent, limit)
             break
         end
         local id = tostring(fieldOf(st, "StatusId") or "")
-        if id ~= "" then
-            local entry = { id = id, name = statusDisplayName(id) }
-            local turnTimer = fieldOf(st, "TurnTimer")
-            local lifetime = fieldOf(st, "CurrentLifeTime")
-            -- Политика (research/13 §4.1): turns_left - только при ненулевом
-            -- TurnTimer (turn-based); иначе секунды в duration_left. Точная
-            -- семантика TickType/TurnTimer подтверждается живым прогоном.
-            if type(turnTimer) == "number" and turnTimer > 0 then
-                entry.turns_left = math.floor(turnTimer + 0.5)
+        if id ~= "" and not statusIsInternal(id) then
+            local meta = statusMeta(id)
+            -- Оставляем только статусы, которые игра показывает игроку:
+            -- Visible==false отбрасываем, при отсутствии флага решает blacklist.
+            if meta.visible ~= false then
+                local entry = { id = id, name = statusDisplayName(id) }
+                -- Живой прогон (v0.8.39): TurnTimer - секундный таймер тика
+                -- (не раунды), LifeTime=-1 у постоянных статусов. Поэтому
+                -- turns_left не выводим (движок не отдаёт остаток ходов;
+                -- Osi.*Status* в рантайме отсутствуют), а duration_left -
+                -- только для конечных статусов.
+                local lifetime = fieldOf(st, "CurrentLifeTime")
+                if type(lifetime) == "number" and lifetime > 0 then
+                    entry.duration_left = round1(lifetime)
+                end
+                out[#out + 1] = entry
             end
-            if type(lifetime) == "number" and lifetime > 0 then
-                entry.duration_left = round1(lifetime)
-            end
-            out[#out + 1] = entry
         end
     end
     return out
@@ -1248,7 +1306,15 @@ local function entityStatusDump(guid)
             if #raw >= 12 then
                 break
             end
-            raw[#raw + 1] = readComponentFields(st, STATUS_FIELDS)
+            local r = readComponentFields(st, STATUS_FIELDS)
+            local sid = tostring(r.StatusId or "")
+            if sid ~= "" then
+                local meta = statusMeta(sid)
+                r.__internal = statusIsInternal(sid)
+                r.__visible = meta.visible
+                r.__status_type = meta.status_type
+            end
+            raw[#raw + 1] = r
         end
         out.raw = raw
     end

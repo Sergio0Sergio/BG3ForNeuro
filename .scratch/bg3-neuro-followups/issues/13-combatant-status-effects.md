@@ -101,5 +101,41 @@ container via `#`/`[i]`, then `:GetCount`/`:Size`, `:GetAll`/`:ToArray`, `:Get(i
 `metatable_keys`, `get_status_ent` / `get_status_comp` (`GetStatus` bound?) and `osi_status_fns`
 (which `Osi.*Status*` helpers exist at runtime) — one run decides the final accessor.
 
-**Still to do (needs the game):** re-probe on v0.8.38 to pick the working accessor, then the
-flourish/Off Balance bench from `## Verification`.
+### Live probe (2026-09-18, v0.8.38) — enumerator works; the payload is engine-internal
+
+`stats_probe` (DEN gate fight) now returns each participant's status list via `#statuses` +
+`statuses[i]` (the SE container is `userdata` but supports `#`/indexing; `metatable_type` returns a
+string, so `metatable_keys`/`pairs` are useless). Enemies carry 3-4 statuses each, allies 0-1. Raw
+field semantics, confirmed live:
+- `TickType = 0` for every observed status; `LifeTime = -1` (permanent) for all of them.
+- `TurnTimer` is a **per-tick countdown in seconds** (`≈4.375s`, `0.715s`, `0.0`), not remaining
+  combat turns — so v0.8.37's `turns_left = floor(TurnTimer)` was bogus (`HEALTHBOOST_HARDCORE`, an
+  infinite-duration status, showed "4 turns").
+- `CurrentLifeTime` is the remaining **seconds** for finite statuses (`FEATHER_FALL` → `29.9`) and
+  `-1` for permanent ones.
+- `Osi.*Status*` helpers (`HasStatus`, `GetStatusCount`, `GetStatusRemainingTurns`, `ApplyStatus`, …)
+  do **not** exist in the runtime Osi table (`osi_status_fns` empty), so remaining turns cannot be
+  read from Osi either.
+- Almost everything the engine keeps on creatures is internal: `HEALTHBOOST_HARDCORE`, `ENABLE_AOO`,
+  `AI_NO_LOOK_AT_BATTLE`, `GOBLIN_HARDCORE`, `INSURFACE`. Player-facing ones seen: `FLANKED`,
+  `FEATHER_FALL`. Emitting these raw would flood the LLM with noise.
+
+Also seen (left to ticket 14): friendly NPCs (`Wyll`, `Zevlor`, `Remira`, `Aradin`, `Barth`) are
+classified as enemies by the current side classifier.
+
+Fix (**v0.8.39**): `conditionsOf` now drops engine-internal statuses — `statusMeta(id)` reads
+`Ext.Stats.Get(id).Visible` and drops `visible == false`; `statusIsInternal(id)` is a fallback
+blacklist (`AI_*`, `ENABLE_*`, `DISABLE_*`, `HEALTHBOOST*`, `*_HARDCORE`, `SCRIPT_*`, `TECHNICAL*`,
+`DEBUG*`, exact `INSURFACE`) for when the stats flag is unavailable. `turns_left` is removed from the
+emitted condition (only `duration_left`, seconds, for finite statuses remains). `stats_probe` now
+tags each raw status with `__internal` / `__visible` / `__status_type` so one run shows which gate
+does the work.
+
+**Still to do (needs the game):** re-probe on v0.8.39 to confirm `Ext.Stats.Get(id).Visible` exists
+and that the state now shows only player-facing conditions (`FLANKED`, `FEATHER_FALL`, …), then
+finalise `## Answer`.
+
+Bench note: Astarion's spell list in this save has no `flourish`; the closest status-applying
+attacks are `hamstring_shot` (applies `HAMSTRUNG`) and `piercing_strike`. A `hamstring_shot` at
+`goblin_tracker_2` hit and killed it (9 HP) before the capture, so an enemy-side assertion needs a
+high-HP target (e.g. `bugbear_1`, 35 HP).
