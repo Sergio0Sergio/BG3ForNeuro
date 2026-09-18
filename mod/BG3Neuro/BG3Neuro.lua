@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.43 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.44 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.43"
+local MOD_VERSION = "0.8.44"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1015,7 +1015,7 @@ local function healthOf(ent)
 end
 
 -- ============================================================
--- Состояния бойца (v0.8.43, тикет 13): реальные conditions из
+-- Состояния бойца (v0.8.44, тикет 13): реальные conditions из
 -- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
 -- а не "доступность действий". StatusId - движковый англоязычный id
 -- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
@@ -1069,7 +1069,7 @@ local function statusIsInternal(id)
 end
 
 local function statusVisible(meta)
-    -- Живой прогон (v0.8.43): DisplayName заполнен у ВСЕХ статусов (внутренние
+    -- Живой прогон (v0.8.44): DisplayName заполнен у ВСЕХ статусов (внутренние
     -- тоже), поэтому не различает; Visible-поля в статах нет. Icon же заполнен
     -- только у игровых (FLANKED=True; AI_*/ENABLE_*/HEALTHBOOST*/GOBLIN_HC=False).
     -- Отбрасываем статус только когда Icon достоверно пуст; если статистика
@@ -1269,7 +1269,7 @@ local function conditionsOf(ent, limit)
             -- Visible==false отбрасываем, при отсутствии флага решает blacklist.
             if statusVisible(meta) then
                 local entry = { id = id, name = statusDisplayName(id) }
-                -- Живой прогон (v0.8.43): TurnTimer - секундный таймер тика
+                -- Живой прогон (v0.8.44): TurnTimer - секундный таймер тика
                 -- (не раунды), LifeTime=-1 у постоянных статусов. Поэтому
                 -- turns_left не выводим (движок не отдаёт остаток ходов;
                 -- Osi.*Status* в рантайме отсутствуют), а duration_left -
@@ -1503,15 +1503,17 @@ local function probeCombatStats()
     local actingCleanProbe = actingCleanOf(actingRaw)
     local okHost, hostChar = pcall(Osi.GetHostCharacter)
     out.osi_api = {
-        global = Osi ~= nil and type(Osi.IsEnemy) or nil,
-        ext = Ext ~= nil and Ext.Osi ~= nil and type(Ext.Osi.IsEnemy) or nil,
+        global_type = Osi ~= nil and type(Osi) or nil,
+        global_has_IsEnemy = Osi ~= nil and (Osi.IsEnemy ~= nil) or false,
+        global_IsEnemy_type = Osi ~= nil and type(Osi.IsEnemy) or nil,
+        ext_has_IsEnemy = Ext ~= nil and Ext.Osi ~= nil and (Ext.Osi.IsEnemy ~= nil) or false,
         get_host_character = tostring(okHost) .. "/" .. tostring(hostChar),
         acting_raw = actingRaw,
         acting_clean = actingCleanProbe,
     }
     local function fmtCall(fn, ...)
-        if type(fn) ~= "function" then
-            return "<not a function>"
+        if fn == nil then
+            return "<missing>"
         end
         local ok, res = pcall(fn, ...)
         return (ok and "ok" or "err") .. "/" .. tostring(res)
@@ -2030,7 +2032,7 @@ local function buildCombatSpellsBlock(state, casterId, casterPosX, casterPosY)
     state.spells = list
 end
 
--- v0.8.43 (тикет 14): настоящая враждебность вместо сравнения CombatTeam.
+-- v0.8.44 (тикет 14): настоящая враждебность вместо сравнения CombatTeam.
 -- CombatTeam — ключ группировки хода (союзные фракции сидят на разных командах),
 -- поэтому союзник/враг определяется движковым Osiris-предикатом относительно
 -- партийного персонажа. Участники-предметы (двери) отсекаются по ServerCharacter.
@@ -2059,11 +2061,15 @@ end
 -- Доступные Osiris-API враждебности: глобальный Osi и/или Ext.Osi (SE-версии
 -- расходятся, поэтому пробуем оба и берём тот, что реально отвечает).
 local function hostilityApis()
+    -- Osi.*-члены — это userdata-прокси (callable через __call), НЕ Lua-функции:
+    -- проверка type()=="function" всегда ложна, из-за чего предикаты считались
+    -- отсутствующими и включался fallback «все не-партийцы = враги» (13 «enemies»
+    -- в v0.8.42/43). Достаточно проверить, что член вообще есть (~= nil).
     local apis = {}
-    if Osi ~= nil and type(Osi.IsEnemy) == "function" then
+    if Osi ~= nil and Osi.IsEnemy ~= nil then
         apis[#apis + 1] = Osi
     end
-    if Ext ~= nil and Ext.Osi ~= nil and Ext.Osi ~= Osi and type(Ext.Osi.IsEnemy) == "function" then
+    if Ext ~= nil and Ext.Osi ~= nil and Ext.Osi ~= Osi and Ext.Osi.IsEnemy ~= nil then
         apis[#apis + 1] = Ext.Osi
     end
     return apis
@@ -2191,7 +2197,7 @@ function captureCombatState(event, force)
         end
     end
 
-    -- v0.8.43 (тикет 14): референс-персонаж партии для Osiris-проверки враждебности.
+    -- v0.8.44 (тикет 14): референс-персонаж партии для Osiris-проверки враждебности.
     -- Нужен реальный GUID и именно партиец: ходящий, если он партийный, иначе
     -- первый участник-партиец. CombatTeam больше не используется. Даём оба
     -- представления id (чистый uuid и префиксный, как их отдаёт Osiris) — сборки

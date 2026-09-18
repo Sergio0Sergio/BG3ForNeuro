@@ -108,3 +108,17 @@ also returns `out.osi_api` plus per-participant `entry.osi`
 (`isEnemy_actingRaw` / `isEnemy_actingClean` / `isEnemy_host` / `isEnemy_ext` / `isAlly_host` /
 `isCharacter`, each `ok|err/<value>`), so one run pins the working call and the `ServerCharacter`
 case.
+
+### Root cause found (2026-09-18, v0.8.43 probe) — `Osi.*` members are callable userdata
+
+`stats_probe`'s `osi_api` now reports: `type(Osi)` = **userdata**, `type(Osi.IsEnemy)` = **userdata**,
+and every per-participant call came back `<not a function>`. `Osi.*` members are **callable userdata
+proxies** (`__call`), not Lua functions — so the guard `type(x) == "function"` is always false,
+`hostilityApis()` returned nothing, and every v0.8.42/43 run fell into the `nil` → "non-party ⇒ enemy"
+fallback (hence the 13 "enemies"). The mod already calls these proxies successfully elsewhere via raw
+`pcall` (e.g. `pcall(Osi.EndTurn, …)`, `pcall(Osi.GetActionResourceValuePersonal, …)`).
+
+Fix (**v0.8.44**): presence-only guard (`x ~= nil`) in `hostilityApis()` and in the probe's
+`fmtCall`; the calls stay raw `pcall`, which handles the `__call` proxy. Side note for a future
+ticket: `displayName` uses the same `type(Osi.GetDisplayName) == "function"` guard
+(`BG3Neuro.lua:721`, `:941`), so it likely never takes the Osiris path either.
