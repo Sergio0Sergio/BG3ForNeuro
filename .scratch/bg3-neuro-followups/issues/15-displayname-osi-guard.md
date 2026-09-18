@@ -1,7 +1,7 @@
 # 15 — displayName: dead `type(Osi.GetDisplayName) == "function"` guard + uncaught first-resolve throw
 
 Type: task (state emitter)
-Status: ready-for-agent
+Status: resolved
 Blocked by: 14 (resolved) — same root cause, same fix shape.
 
 ## Finding (2026-09-18, during ticket 14)
@@ -52,3 +52,37 @@ Mirror the ticket-14 fix (v0.8.46, `941a3c1`):
   lazy resolver).
 - `mod/BG3Neuro/BG3Neuro.lua:721`, `:941` (dead guards); `:944` (the unreached fallback call).
 - PAK history: v0.8.46 = PAK v052; next fix bumps the mod version (0.8.47) + new PAK v053.
+
+## Fix (v0.8.47, `0e443e9`, PAK v053)
+
+- Added shared helper `osiDisplayNameOf(guid)` (before `probeGameState`, `BG3Neuro.lua:697-710`):
+  one-time resolver warm-up (`pcall(function() return Osi.GetDisplayName end)`), then
+  `pcall(function() return Osi.GetDisplayName(guid) end)`; `ok=false`/nil → `nil`.
+- Replaced both `type(Osi.GetDisplayName) == "function"` guard call-sites:
+  - `probeGameState` current_characters loop (L740-745) — `display_name = osiDisplayNameOf(cc.character)`;
+  - `displayName` fallback (L957-961) — `local n = osiDisplayNameOf(guid); if n ~= nil then return n end`.
+- Both Lua files bumped to 0.8.47; `luaparse` OK.
+
+## Live verification (2026-09-18, v0.8.47 / PAK v053)
+
+- `state_capture` (id sc9): `success: true`, `allies`=9, `enemies`=8 — same as v0.8.46, no regression;
+  all `allies`/`enemies` `name` fields non-empty and human-readable (Tav, Wyll, Zevlor, Remira,
+  Aradin, Barth, Goblin Booyahg, Bugbear, Goblin Brawler, Worg, Goblin Tracker, ...).
+- SE log (`Osiris Runtime 2026-09-18 06-05-49.log`): mod's `Osi.GetDisplayName` now **executes**:
+  `exec [DIV query] GetDisplayName( ... )` → `Query returns: GetDisplayName( ..., "ResStr_XXXX" )`
+  (e.g. acting char's prefixed guid at L113869, plus 4 clean-guids at L145846-145868) — the dead
+  fallback is now reachable and non-throwing under the lazy resolver.
+- No Lua errors during captures.
+
+Known limitation (accepted): `Osi.GetDisplayName` returns the **DisplayName resource key**
+(`ResStr_...`), not localized text. The primary component path (`Ext.Entity.Get` +
+`GetComponent("DisplayName").Name:Get()`) always wins for real characters, so emitted `name`
+fields keep human text; the Osi result would only surface for entity forms the component path
+cannot resolve (edge case), and even then it is a harmless non-nil string (never a throw).
+
+## Answer
+
+Removed the always-false `type(Osi.GetDisplayName) == "function"` guards; the Osiris fallback is
+now a direct, pcall-wrapped `Osi.GetDisplayName` call (warm-up once), mirroring the ticket-14
+pattern. Live capture confirms the fallback is reachable and error-free, emitted names are
+unchanged, and no Lua errors appear.

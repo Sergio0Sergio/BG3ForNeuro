@@ -282,3 +282,19 @@ PAK v052 (`Mods/BG3Neuro/…`, MD5 `F5930A1130DCBA2036E49C244B6927E0`) installed
       caches the proxy, so `Osi.IsEnemy ~= nil` always fails while `Osi.IsEnemy(a,b)` works. `stats_probe`
       v0.8.45 confirmed: party `IsEnemy=0/IsAlly=1`, goblinoids/worg `IsEnemy=1/IsAlly=0`. The fix calls
       the proxies directly and warms the resolver.
+
+### Run 2026-09-18 (v0.8.47) — displayName Osiris fallback un-dead (VERIFIED)
+
+PAK v053 (`Mods/BG3Neuro/…`, MD5 `038E71B4009E640E465D2E252C61F7BF`) installed; heartbeat `version 0.8.47`.
+Same grove-gate combat. Ticket 15.
+
+- [x] **dead guard removed**: no `type(Osi.GetDisplayName) == "function"` left in `BG3Neuro.lua`
+      (grep clean); shared helper `osiDisplayNameOf(guid)` calls `Osi.GetDisplayName` directly under
+      `pcall` with a one-time resolver warm-up (`luaparse` OK on both Lua files).
+- [x] **fallback is live**: SE log (`Osiris Runtime 2026-09-18 06-05-49.log`) shows the mod's
+      `exec [DIV query] GetDisplayName( … )` → `Query returns: GetDisplayName( …, "ResStr_…" )`
+      (acting char + 4 clean guids) — the Osiris fallback now runs and never throws.
+- [x] **state regression-free**: `state_capture` (sc9) `success:true`, `allies`=9 / `enemies`=8
+      (same as v0.8.46), every `name` field human-readable (Tav, Wyll, Zevlor, Remira, Aradin, Barth,
+      Goblin Booyahg, Bugbear, Goblin Brawler, Worg, Goblin Tracker) — component path still wins.
+- [x] **no Lua errors** during captures.
