@@ -1,7 +1,7 @@
 # 13 — Combat state exposes no real status effects (Off Balance is unverifiable)
 
 Type: task (state emitter)
-Status: ready-for-agent
+Status: claimed
 Blocked by: —
 
 ## Symptom
@@ -58,3 +58,33 @@ So Off Balance, Prone, Burning, Haste, etc. are invisible to the app and to the 
 - `docs/manual-regression-checklist.md` — Run 2026-09-17 (v0.8.35), "Not verified: enemy effects
   (Off Balance unverifiable)".
 - `mod/BG3Neuro/BG3Neuro.lua:1844-1857` (allies' pseudo-`effects`, enemies' `status`).
+
+## Implementation (2026-09-18, pending live verification)
+
+Research confirming the SE API: `research/13-status-effects-api.md` — server-side statuses live in
+`esv::StatusMachine.Statuses`, reachable from Lua via `ServerCharacter.StatusManager`
+(`BG3SE PropertyMaps/ServerObjects.inl:18-43`).
+
+Mod (`BG3Neuro.lua`, v0.8.37):
+- New helpers `statusDisplayName` / `statusListOf` / `conditionsOf` / `entityStatusDump`; status field
+  whitelist `STATUS_FIELDS`.
+- Combat emitter: every combatant (ally **and** enemy) gets `conditions = [{ id, name, turns_left?,
+  duration_left? }]`; the ally `effects` availability string is renamed to `availability` (no longer
+  implies statuses). Enemy `status` (`defeated` / `cannot act`) is unchanged.
+- `stats_probe` now dumps a raw status machine per participant (`entry.status_dump`), so the first live
+  run can confirm the `StatusId` format, `TickType` semantics and `TurnTimer` (remaining vs total).
+- `turns_left` policy: `TurnTimer` when > 0, else omitted; `duration_left` = `CurrentLifeTime` seconds
+  (research/13 §4.1 — to be confirmed live).
+
+App (`CombatState.cs` / `StateSerializer.cs`): `Combatant.Effects` → `Availability`; new
+`StatusCondition { Id, Name, TurnsLeft, DurationLeft }` + `Conditions` list; markdown renders
+`conditions: Off Balance (1)` for both sides.
+
+Tests: `StateSerializerTests` extended — conditions round-trip on an ally and an enemy plus markdown
+assertions. `dotnet test` **155/155**. `luaparse` OK on both Lua files.
+
+PAK **v043** built + installed (MD5 `643A42E69153F69CB9C49B4281493938`, entries `Mods/BG3Neuro/…`,
+`modsettings.lsx` L19/L39 updated; the previous PAK is backed up as `BG3Neuro.pak.bak-v042`).
+
+**Not yet done (needs the game):** the live probe and the flourish/Off Balance bench from
+`## Verification`.

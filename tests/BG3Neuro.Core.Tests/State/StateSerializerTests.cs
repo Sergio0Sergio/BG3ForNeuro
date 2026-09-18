@@ -13,10 +13,10 @@ public class StateSerializerTests
       "turn_initiative_index": 3,
       "turn_initiative_total": 5,
       "allies": [
-        { "alias": "karlach", "name": "Karlach", "hp": 45, "max_hp": 60, "distance": 6, "effects": "Rage (3 раунда)", "position_x": 0, "position_y": 0 }
+        { "alias": "karlach", "name": "Karlach", "hp": 45, "max_hp": 60, "distance": 6, "availability": "acting now, can act", "conditions": [ { "id": "OFF_BALANCE", "name": "Off Balance", "turns_left": 1 } ], "position_x": 0, "position_y": 0 }
       ],
       "enemies": [
-        { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 6, "status": null, "position_x": 3, "position_y": 4 }
+        { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 6, "status": null, "conditions": [ { "id": "PRONE", "name": "Prone", "turns_left": 2, "duration_left": 6.0 } ], "position_x": 3, "position_y": 4 }
       ],
       "spells": [
         { "spell_name": "Fireball", "slot": "3", "range": 18, "aoe": 4, "targets_in_range": ["goblin_1"] }
@@ -37,8 +37,15 @@ public class StateSerializerTests
         Assert.Single(state.Allies);
         Assert.Equal("Karlach", state.Allies[0].Name);
         Assert.Equal(45, state.Allies[0].Hp);
+        Assert.Equal("acting now, can act", state.Allies[0].Availability);
+        Assert.Equal("OFF_BALANCE", state.Allies[0].Conditions[0].Id);
+        Assert.Equal("Off Balance", state.Allies[0].Conditions[0].Name);
+        Assert.Equal(1, state.Allies[0].Conditions[0].TurnsLeft);
         Assert.Single(state.Enemies);
         Assert.Equal("goblin_1", state.Enemies[0].Alias);
+        Assert.Equal("PRONE", state.Enemies[0].Conditions[0].Id);
+        Assert.Equal(2, state.Enemies[0].Conditions[0].TurnsLeft);
+        Assert.Equal(6.0, state.Enemies[0].Conditions[0].DurationLeft);
         Assert.Single(state.Spells);
         Assert.Equal("Fireball", state.Spells[0].SpellName);
     }
@@ -64,9 +71,9 @@ public class StateSerializerTests
 
         Assert.Contains("## Turn: Karlach (initiative 3/5)", md);
         Assert.Contains("## Allied characters", md);
-        Assert.Contains("Karlach: HP 45/60, distance 6m, effects: Rage (3 раунда)", md);
+        Assert.Contains("Karlach: HP 45/60, distance 6m, availability: acting now, can act, conditions: Off Balance (1)", md);
         Assert.Contains("## Enemies", md);
-        Assert.Contains("goblin_1 (Goblin Raider): HP 12/18, distance 6m, status: —", md);
+        Assert.Contains("goblin_1 (Goblin Raider): HP 12/18, distance 6m, status: —, conditions: Prone (2)", md);
         Assert.Contains("## Spells (Karlach)", md);
         Assert.Contains("Fireball: slot 3, range 18m, AoE 4m → in range: covers: [goblin_1] (1 targets)", md);
         Assert.Contains("## Available actions (Karlach)", md);
@@ -255,11 +262,11 @@ public class StateSerializerTests
       "turn_initiative_index": 1,
       "turn_initiative_total": 4,
       "allies": [
-        { "alias": "tav", "name": "Tav", "hp": 43, "max_hp": 60, "distance": 0, "position_x": 2.3, "position_y": 1.8, "effects": "acting now, can act" },
-        { "alias": "shadowheart", "name": "Shadowheart", "hp": 51, "max_hp": 51, "distance": 4.5, "position_x": 6.1, "position_y": -1.2, "effects": "can act" }
+        { "alias": "tav", "name": "Tav", "hp": 43, "max_hp": 60, "distance": 0, "position_x": 2.3, "position_y": 1.8, "availability": "acting now, can act", "conditions": [ { "id": "HASTE", "name": "Haste", "turns_left": 2 } ] },
+        { "alias": "shadowheart", "name": "Shadowheart", "hp": 51, "max_hp": 51, "distance": 4.5, "position_x": 6.1, "position_y": -1.2, "availability": "can act" }
       ],
       "enemies": [
-        { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 7.2, "position_x": 8.4, "position_y": 6.5, "status": null },
+        { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 7.2, "position_x": 8.4, "position_y": 6.5, "status": null, "conditions": [ { "id": "OFF_BALANCE", "name": "Off Balance", "turns_left": 1 } ] },
         { "alias": "goblin_2", "name": "Goblin Warrior", "hp": 0, "max_hp": 15, "distance": 9.1, "position_x": 10.2, "position_y": 3.3, "status": "defeated" }
       ],
       "available_actions": ["end_turn", "attack_entity: [goblin_1, goblin_2]", "move_to_target: [tav, shadowheart, goblin_1, goblin_2]"]
@@ -277,11 +284,15 @@ public class StateSerializerTests
         Assert.Equal(1, state.TurnInitiativeIndex);
         Assert.Equal(4, state.TurnInitiativeTotal);
         Assert.Equal(2, state.Allies.Count);
-        Assert.Equal("acting now, can act", state.Allies[0].Effects);
+        Assert.Equal("acting now, can act", state.Allies[0].Availability);
+        Assert.Equal("HASTE", state.Allies[0].Conditions[0].Id);
+        Assert.Equal(2, state.Allies[0].Conditions[0].TurnsLeft);
         Assert.Equal(2.3, state.Allies[0].PositionX);
         Assert.Equal(-1.2, state.Allies[1].PositionY);
         Assert.Equal(2, state.Enemies.Count);
         Assert.Null(state.Enemies[0].Status);
+        Assert.Equal("OFF_BALANCE", state.Enemies[0].Conditions[0].Id);
+        Assert.Equal(1, state.Enemies[0].Conditions[0].TurnsLeft);
         Assert.Equal("defeated", state.Enemies[1].Status);
         Assert.Equal(3, state.AvailableActions.Count);
         Assert.Contains("attack_entity: [goblin_1, goblin_2]", state.AvailableActions);
@@ -294,9 +305,9 @@ public class StateSerializerTests
         var md = StateSerializer.ToMarkdown(state);
 
         Assert.Contains("## Turn: Tav (initiative 1/4)", md);
-        Assert.Contains("- Tav: HP 43/60, distance 0m, effects: acting now, can act", md);
-        Assert.Contains("- Shadowheart: HP 51/51, distance 4.5m, effects: can act", md);
-        Assert.Contains("- goblin_1 (Goblin Raider): HP 12/18, distance 7.2m, status: —", md);
+        Assert.Contains("- Tav: HP 43/60, distance 0m, availability: acting now, can act, conditions: Haste (2)", md);
+        Assert.Contains("- Shadowheart: HP 51/51, distance 4.5m, availability: can act", md);
+        Assert.Contains("- goblin_1 (Goblin Raider): HP 12/18, distance 7.2m, status: —, conditions: Off Balance (1)", md);
         Assert.Contains("- goblin_2 (Goblin Warrior): HP 0/15, distance 9.1m, status: defeated", md);
         Assert.Contains("- attack_entity: [goblin_1, goblin_2]", md);
         Assert.Contains("- move_to_target: [tav, shadowheart, goblin_1, goblin_2]", md);

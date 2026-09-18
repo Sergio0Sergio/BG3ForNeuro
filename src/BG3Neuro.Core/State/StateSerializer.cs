@@ -78,10 +78,12 @@ public static class StateSerializer
             sb.Append("- ").Append(ally.Name)
               .Append(": HP ").Append(ally.Hp).Append('/').Append(ally.MaxHp)
               .Append(", distance ").Append(FormatDistance(ally.Distance)).Append('m');
-            if (!string.IsNullOrWhiteSpace(ally.Effects))
+            if (!string.IsNullOrWhiteSpace(ally.Availability))
             {
-                sb.Append(", effects: ").Append(ally.Effects);
+                sb.Append(", availability: ").Append(ally.Availability);
             }
+
+            AppendConditions(sb, ally.Conditions);
 
             sb.AppendLine();
         }
@@ -93,6 +95,7 @@ public static class StateSerializer
               .Append(": HP ").Append(enemy.Hp).Append('/').Append(enemy.MaxHp)
               .Append(", distance ").Append(FormatDistance(enemy.Distance)).Append('m')
               .Append(", status: ").Append(string.IsNullOrWhiteSpace(enemy.Status) ? "—" : enemy.Status);
+            AppendConditions(sb, enemy.Conditions);
             sb.AppendLine();
         }
 
@@ -414,5 +417,20 @@ public static class StateSerializer
     private static string FormatDistance(double meters)
     {
         return meters.ToString("0.##").Replace(',', '.');
+    }
+
+    private static void AppendConditions(StringBuilder sb, List<StatusCondition> conditions)
+    {
+        if (conditions.Count == 0)
+        {
+            return;
+        }
+
+        var parts = conditions.Select(condition =>
+        {
+            var label = string.IsNullOrWhiteSpace(condition.Name) ? condition.Id : condition.Name;
+            return condition.TurnsLeft is int turns ? $"{label} ({turns})" : label;
+        });
+        sb.Append(", conditions: ").Append(string.Join(", ", parts));
     }
 }

@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.36 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.37 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.36"
+local MOD_VERSION = "0.8.37"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -817,7 +817,7 @@ end
 -- На каждый TurnStarted (или по действию state_capture) строит combat-state
 -- по схеме C# CombatState (snake_case) и пишет его в bg3_to_neuro.json:
 --   turn_actor + инициатива, allies/enemies (alias, name, hp, max_hp, distance,
---   position_x/y, effects/status), available_actions.
+--   position_x/y, conditions/availability/status), available_actions.
 -- Дополнительно регистрирует alias→guid в ENTITY_BY_ALIAS, чтобы
 -- move_to_target/attack_entity/cast_spell резолвили цели по коротким именам;
 -- псевдонимы стабильны в рамках одного боя (один и тот же враг — один и тот же alias).
@@ -1014,6 +1014,117 @@ local function healthOf(ent)
     return 0, 0
 end
 
+-- ============================================================
+-- Состояния бойца (v0.8.37, тикет 13): реальные conditions из
+-- серверного StatusMachine (ServerObjects.inl:18-43: Statuses/StatusManager),
+-- а не "доступность действий". StatusId - движковый англоязычный id
+-- (UPPER_SNAKE); display строим сами (политика тикета 09 - не доверять
+-- локализованному движковому тексту).
+-- ============================================================
+
+local STATUS_FIELDS = {
+    "StatusId", "TickType", "TurnTimer", "CurrentLifeTime", "LifeTime",
+    "StartTimer", "StackId", "StackPriority", "IsUnique", "Loaded", "Started",
+}
+
+local function statusDisplayName(id)
+    local s = tostring(id or "")
+    if s == "" then
+        return nil
+    end
+    local words = {}
+    for w in string.gmatch(s, "[A-Za-z0-9]+") do
+        words[#words + 1] = w:sub(1, 1):upper() .. w:sub(2):lower()
+    end
+    if #words == 0 then
+        return s
+    end
+    return table.concat(words, " ")
+end
+
+local function statusListOf(ent)
+    -- Список esv-статусов существа (StatusMachine.Statuses) или nil.
+    if ent == nil then
+        return nil
+    end
+    local okC, comp = pcall(function() return ent:GetComponent("ServerCharacter") end)
+    if not okC or comp == nil then
+        return nil
+    end
+    local machine = fieldOf(comp, "StatusManager")
+    if machine == nil then
+        return nil
+    end
+    local statuses = fieldOf(machine, "Statuses")
+    if type(statuses) ~= "table" then
+        return nil
+    end
+    return statuses
+end
+
+local function conditionsOf(ent, limit)
+    -- [{id, name, turns_left?, duration_left?}] - единая форма для союзников и врагов.
+    local out = {}
+    local statuses = statusListOf(ent)
+    if statuses == nil then
+        return out
+    end
+    limit = limit or 24
+    for _, st in ipairs(statuses) do
+        if #out >= limit then
+            break
+        end
+        local id = tostring(fieldOf(st, "StatusId") or "")
+        if id ~= "" then
+            local entry = { id = id, name = statusDisplayName(id) }
+            local turnTimer = fieldOf(st, "TurnTimer")
+            local lifetime = fieldOf(st, "CurrentLifeTime")
+            -- Политика (research/13 §4.1): turns_left - только при ненулевом
+            -- TurnTimer (turn-based); иначе секунды в duration_left. Точная
+            -- семантика TickType/TurnTimer подтверждается живым прогоном.
+            if type(turnTimer) == "number" and turnTimer > 0 then
+                entry.turns_left = math.floor(turnTimer + 0.5)
+            end
+            if type(lifetime) == "number" and lifetime > 0 then
+                entry.duration_left = round1(lifetime)
+            end
+            out[#out + 1] = entry
+        end
+    end
+    return out
+end
+
+local function entityStatusDump(guid)
+    -- Диагностика (stats_probe): сырой StatusMachine существа + normalised.
+    local out = { guid = guid }
+    local okE, ent = pcall(Ext.Entity.Get, guid)
+    if not okE or ent == nil then
+        out.error = "entity not found"
+        return out
+    end
+    local okC, comp = pcall(function() return ent:GetComponent("ServerCharacter") end)
+    if not okC or comp == nil then
+        out.error = "no ServerCharacter"
+        return out
+    end
+    local machine = fieldOf(comp, "StatusManager")
+    out.has_status_manager = machine ~= nil
+    out.conditions = conditionsOf(ent)
+    if machine ~= nil then
+        local statuses = fieldOf(machine, "Statuses")
+        out.statuses_type = type(statuses)
+        out.status_count = (type(statuses) == "table") and #statuses or 0
+        local raw = {}
+        if type(statuses) == "table" then
+            for _, st in ipairs(statuses) do
+                raw[#raw + 1] = readComponentFields(st, STATUS_FIELDS)
+            end
+        end
+        out.raw = raw
+    end
+    return out
+end
+
 local function hasNonAscii(s)
     s = tostring(s or "")
     for i = 1, #s do
@@ -1201,6 +1312,8 @@ local function probeCombatStats()
         else
             entry.entity = "missing"
         end
+        local okSt, st = pcall(entityStatusDump, g)
+        entry.status_dump = okSt and st or { error = tostring(st) }
         out.entries[#out.entries + 1] = entry
         if statSlugSource[g] ~= nil then
             out.source_map[g] = statSlugSource[g]
@@ -1841,13 +1954,17 @@ function captureCombatState(event, force)
             position_x = round1(px or 0),
             position_y = round1(py or 0),
         }
+        local conditions = conditionsOf(ent)
+        if #conditions > 0 then
+            combatant.conditions = conditions
+        end
         if isAlly then
             local fx = {}
             if g == actingClean then
                 fx[#fx + 1] = "acting now"
             end
             fx[#fx + 1] = canAct and "can act" or "cannot act"
-            combatant.effects = table.concat(fx, ", ")
+            combatant.availability = table.concat(fx, ", ")
         else
             if hp ~= nil and hp <= 0 then
                 combatant.status = "defeated"

@@ -71,8 +71,17 @@ public sealed class Combatant
     public double Distance { get; set; }
     public double? PositionX { get; set; }
     public double? PositionY { get; set; }
-    public string? Effects { get; set; }
+    public string? Availability { get; set; }
     public string? Status { get; set; }
+    public List<StatusCondition> Conditions { get; set; } = new();
+}
+
+public sealed class StatusCondition
+{
+    public required string Id { get; set; }
+    public string? Name { get; set; }
+    public int? TurnsLeft { get; set; }
+    public double? DurationLeft { get; set; }
 }
 
 public sealed class SpellInfo
