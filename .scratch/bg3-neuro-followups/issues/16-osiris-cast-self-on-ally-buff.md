@@ -93,3 +93,16 @@ Precondition: party turn, caster with an unused action + friendly single-target 
 - SE log `Osiris Runtime 2026-09-18 07-14-18.log`: `UsingSpellOnTarget(.. Astarion ..)`,
   `StatusAttemptFailed`, `StatusApplied(.. "GUIDANCE" ..)` at storyActionID 810.
 - Bench ids: `n16a`/`n16b`/`n16c`/`n16g1`/`n16g2` (results + resource snapshots in the SE dir).
+
+## Live verification of the v0.8.49 auto-force (2026-09-19, PAK v056, gate scene)
+
+- **(v56t16a) Guidance, Shadowheart → Astarion, NO `force_flags` in payload** →
+  `cast_debug.json`: `forceFlags:true` + force `CastOptions`, queue osiris,
+  `Target_Guidance` on Astarion guid; SE log:
+  `UsingSpellOnTarget(Sh, Ast, "Target_Guidance", …)` →
+  `StatusApplied(Ast, "GUIDANCE", Sh, storyActionID 760)`. **Auto-force path works
+  end-to-end.** AP snapshot 1.0→1.0 (nothing spent — ticket 18 live).
+- **(v56t16b) FireBolt, Astarion → goblin_brawler_2, NO `force_flags`** →
+  `forceFlags:false` + player `CastOptions` (no `Forced`); AP 1.0→0.0 honestly spent;
+  projectile rules fired (storyActionID 761). **Enemy casts keep the normal path —
+  no regression.**
