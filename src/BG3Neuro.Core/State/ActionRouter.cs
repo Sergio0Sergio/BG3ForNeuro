@@ -431,10 +431,14 @@ public sealed class ActionRouter
         var targetId = data["target_id"]?.GetValue<string>();
         if (!string.IsNullOrWhiteSpace(targetId))
         {
-            var target = combatState.Enemies.FirstOrDefault(e => e.Alias == targetId);
+            // v0.8.56 (тикеты 16/18): friendly buffs target allies — search both
+            // sides. Honesty lives in the mod (AP/slot gates + post-success
+            // deduction); the router must not reject what the engine accepts.
+            var target = combatState.Enemies.FirstOrDefault(e => e.Alias == targetId)
+                ?? combatState.Allies.FirstOrDefault(a => a.Alias == targetId);
             if (target is null)
             {
-                return ValidationResult.Fail(ErrorCode.TargetMissing, $"Target '{targetId}' not found among enemies");
+                return ValidationResult.Fail(ErrorCode.TargetMissing, $"Target '{targetId}' not found among combatants");
             }
 
             if (caster is not null && !CoverageAuto.IsInRange(caster, target, spell.Range))

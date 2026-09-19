@@ -298,3 +298,45 @@ Same grove-gate combat. Ticket 15.
       (same as v0.8.46), every `name` field human-readable (Tav, Wyll, Zevlor, Remira, Aradin, Barth,
       Goblin Booyahg, Bugbear, Goblin Brawler, Worg, Goblin Tracker) — component path still wins.
 - [x] **no Lua errors** during captures.
+
+## Run 2026-09-19 (v0.8.55 / PAK v062, full stack §9.5 — game + App + Randy)
+
+Bridge: PAK v062 (MD5 `3E4A030174141010336BE21B36E1BAA7`), SE heartbeat `0.8.55`,
+App (`bench_config.json`, `autopilot.enabled=false`, 17 actions registered) on WS
+`ws://localhost:8000`, Randy (WS `:8000` + HTTP `:1337`) as deterministic injector.
+Grove-gate combat, injects strictly serial via `POST /` + `data` as JSON string.
+
+### Combat via stack — passed
+- [x] **turn-loop**: `end_turn` (Astarion → Tav group; Tav → …; cleric) → `success:true`,
+      `ended:true`, next `turn_actor` in state (ids e95-1/2/3).
+- [x] **attack + damage**: `attack_entity` Tav → `goblin_tracker_2` → `success:true`,
+      AP 1.0→0.0, HP 9→2 in the next state (id a95-1).
+- [x] **friendly cast E2E (tickets 16/18)**: `cast_spell` Guidance cleric → Astarion
+      (friendly NAME through the C# router) → `StatusApplied(GUIDANCE)` in SE log,
+      AP 1.0→0.0 deducted, `success:true` over WS (id c95-2). **Required a C# fix:**
+      `ActionRouter.ValidateCast` looked targets up in `Enemies` only
+      (`"not found among enemies"`) — now searches `Allies` too (commit with test
+      `CastSpell_AllyTarget_Succeeds_ForFriendlyBuffs`, 53/53 router tests).
+- [x] **healing via stack**: `cast_spell` Healing Word cleric → self → `success:true`,
+      BA 1.0→0.0, AP untouched, L1 1.0→0.0 (id h95-1).
+- [x] **refusals with actionable messages**: unknown `wish` → `success:false`,
+      `"Spell 'wish' unavailable. Known: bane, bless, …"` over WS (id r95-1).
+
+### Resilience via stack — passed
+- [x] **WS reconnect**: Randy killed → `[neuro] disconnected` (3s retries, app alive,
+      mod Alive) → Randy restarted → `connected`, re-registration, `end_turn`
+      succeeds again (id e95-3). No intervention.
+- [x] **corrupt write**: `bg3_to_neuro.json` overwritten with garbage → single
+      `state: failed to parse combat state`, process alive; file restored, no errors.
+
+### Findings / notes
+- [x] **Randy retry storm**: any FAILED injected action makes Randy re-send it with
+      faker-garbage data in a 500 ms loop (`action/result → !success → sendAction`,
+      `Randy/index.ts:95-96`) — each failure reseeds the storm. Bench hygiene: restart
+      Randy after every EXPECTED failure (done twice this run: 95b, 95c). Consider an
+      upstream env flag to disable faker retries during deterministic benches.
+- [ ] **AoE `CoverageAuto` via stack** — not run (needs a fresh Gale turn + Thunderwave;
+      router-side `BestAoECenter` covered by unit tests only).
+- [ ] **Dialog / Exploration via stack** — not run (save loads straight into combat;
+      dialog→combat transition was verified 2026-09-17 via file bridge).
+- [ ] **Mod/game restart resilience** — not run (requires PAK swap + restart mid-bench).

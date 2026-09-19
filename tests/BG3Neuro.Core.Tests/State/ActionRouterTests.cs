@@ -286,6 +286,20 @@ public class ActionRouterTests : IDisposable
     }
 
     [Fact]
+    public void CastSpell_AllyTarget_Succeeds_ForFriendlyBuffs()
+    {
+        // v0.8.56 (тикеты 16/18): friendly buffs target allies — the router must
+        // accept combatant targets on both sides (honesty lives in the mod).
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach", "shadowheart");
+        state.Spells.Add(new SpellInfo { SpellName = "Target_Guidance", Name = "guidance", Cost = "action", Range = 18 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"guidance","target_id":"shadowheart"}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
     public void CastSpell_UnknownFriendlyName_ListsKnownFriendlyNames()
     {
         var router = CreateRouter();
