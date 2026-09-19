@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.54 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.55 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.54"
+local MOD_VERSION = "0.8.55"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -4088,6 +4088,25 @@ local function executeCast(action)
         -- Пробуем кандидатов, приоритет у имён из книги кастера.
         local spellCandidates = { spellName, "Projectile_" .. spellName, "Target_" .. spellName }
         local knownNames = knownSpellCandidates(actor, spellCandidates)
+        -- v0.8.55 (бенч v61b1): голое имя даёт story-запись без игрового каста
+        -- (CastedSpell не приходит, pending висит в running:true вечно). Без
+        -- книжного совпадения — честный отказ, а не выстрел в пустоту.
+        do
+            local bookHit = false
+            for _, sid in ipairs(spellCandidates) do
+                if Osi and Osi.HasSpell then
+                    local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
+                    if hOK and tostring(hRes) == "1" then
+                        bookHit = true
+                        break
+                    end
+                end
+            end
+            if not bookHit then
+                return false, nil, "action_failed", "no_spell: " .. tostring(spellName)
+                    .. " is not in the caster's book"
+            end
+        end
         if target then
             for _, sid in ipairs(knownNames) do
                 if not oseiOk then

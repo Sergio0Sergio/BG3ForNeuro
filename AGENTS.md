@@ -17,6 +17,8 @@
 
 - **Bench injects: do NOT pass JSON via child `powershell -File ... -Data '...'` — the child drops every `"`.** Bench-proven (ticket 17): `-Data '{"spell_name":"bless",...}'` arrives inside the script as `{spell_name:bless,...}`, the written file carries `"data":"{spell_name:bless,target_id:tav}"`, the mod's lenient `Ext.Json.Parse` produces a table without `spell_name`, and the cast fails with the misleading `spell_name is required` (3/3 via the subprocess vs 3/3 OK for identical payloads written inline). The data member must be a real JSON string. Pass data through an env var (`$env:BG3NEURO_DATA = '{"spell_name":"bless","target_id":"tav"}'; powershell -File drive_action.ps1 -Id x -Name cast_spell`) or write the file inline; `drive_action.ps1` self-validates the JSON and fails fast on malformed input.
 
+- **File bridge is single-slot: NEVER run drive_action injects in parallel.** Bench-proven (2026-09-19): four concurrent `powershell -File drive_action.ps1` calls share one `neuro_to_bg3.json` — three were clobbered (client TIMEOUT, no result files server-side), one survived. Inject strictly serially: wait for the final `result_<id>.json` (`running` absent/false) before firing the next action.
+
 ## Agent skills
 
 ### Issue tracker

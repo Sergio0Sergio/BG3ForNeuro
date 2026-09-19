@@ -107,3 +107,21 @@ The status lands (`StatusApplied`, ticket 16 g2) but no AP is spent.
 - **(v61u2) FireBolt via `use_osi_spell:true`, Astarion → goblin_tracker_4 (6.6m)**:
   `economy.ap.ok`, **AP 1.0→0.0**, damage 9→2 HP. Direct path honest.
   (v61u1 at 24.3m correctly failed on range with no deduction — failed casts don't spend.)
+
+## Honesty endgame (2026-09-19, v0.8.54–0.8.55)
+
+- **(v61g1) v061 refactor regression**: Bless, Shadowheart → Astarion —
+  `StatusApplied`,779 + AP 1.0→0.0 + L1 1.0→0.0. `econDeduct` rename + extended
+  gates are clean.
+- **BA writer proven end-to-end without a spell**: component write on the
+  BonusActionPoint pool (`420c8df5-…`, index 1, Level 0) 1.0→0.0 is visible to
+  Osiris reads; restored 0.0→1.0 right after (bench ep10/ep11 + snapshots).
+  Full live-fire via Healing Word still pending (no L1 slots anywhere in this
+  combat). Note: static-save reloads reset slots to save state (observed twice).
+- **(v61b1) useOsiSpell robustness hole**: bare `"hex"` (not in Wyll's book) fired a
+  story-only no-op — `CastedSpell` never comes, pending hangs in `running:true`.
+  Fixed v0.8.55 (commit `76b1e92` line): book-guard refuses `no_spell` when no
+  candidate matches `Osi.HasSpell`. PAK v062 (`3E4A0301…`) built, install pending.
+- **Bridge discipline**: parallel `drive_action.ps1` injects clobber each other
+  (one shared `neuro_to_bg3.json`; 3/4 lost 2026-09-19) — inject strictly serially
+  (AGENTS.md rule added).
