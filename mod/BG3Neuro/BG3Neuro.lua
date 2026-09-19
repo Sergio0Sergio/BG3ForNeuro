@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.53 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.54 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.53"
+local MOD_VERSION = "0.8.54"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -3832,7 +3832,7 @@ local function finalizeCast(caster, spellName, cancelled)
             -- v0.8.50 (тикет 18, вариант A): списание forced-каста — ТОЛЬКО успех,
             -- ДО after-снапшота (чтобы списание было видно в before/after).
             local econ = nil
-            if not cancelled and pc.forcedQueue then
+            if not cancelled and pc.econDeduct then
                 econ = deductForcedCastCost(pc.caster, pc.costKind, pc.slotLevel)
                 _P("[BG3Neuro] economy deduct " .. tostring(pc.id) .. ": "
                     .. tostring(Ext.Json.Stringify(econ)))
@@ -4050,13 +4050,13 @@ local function executeCast(action)
     local castUseCosts = stats and fieldOf(stats, "UseCosts") or nil
     local costKind = abilityCostOf(castUseCosts)
     local slotLevel = spellSlotFromUseCosts(castUseCosts)
-    -- Прегейты честной экономики (тикет 18, вариант A): forced-очередь движок не
-    -- проверяет, поэтому каст без AP/слота был бы бесплатным (доказано живьём:
-    -- v57t18a AP 1.0->0.0 только благодаря ручному списанию; v57t18b при AP 0
-    -- клампится в 0 и проходит бесплатно). Читаемый 0 -> отказ; чтения nil для
-    -- AP -> fail-open, для слотов -> отказ (leveled без доказанного слота не дарим).
+    -- Прегейты честной экономики (тикет 18, вариант A): forced-очередь и прямой
+    -- Osi.UseSpell движок не проверяет (доказано живьём: v57t18a, v60u1), поэтому
+    -- каст без AP/слота был бы бесплатным. Честная очередь без флагов тратится
+    -- нативно — её не гейтим. Читаемый 0 -> отказ; чтения AP nil -> fail-open,
+    -- для слотов -> отказ (leveled без доказанного слота не дарим).
     do
-        if not useOsiSpell and forceFlags then
+        if forceFlags or useOsiSpell then
             local apRes = costKind == "bonus_action" and "BonusActionPoint"
                 or costKind == "reaction" and "ReactionActionPoint"
                 or costKind == "action" and "ActionPoint" or nil
@@ -4157,9 +4157,11 @@ local function executeCast(action)
     end
 
     pendingCasts[#pendingCasts + 1] = { id = action.id, spell = spellName, caster = actor,
-        -- v0.8.50 (тикет 18, вариант A): списание только для forced-ОЧЕРЕДИ
-        -- (useOsiSpell идёт прямым Osi.UseSpell — отдельная неизвестная, не трогаем).
-        forcedQueue = (not useOsiSpell) and forceFlags == true,
+        -- v0.8.50+ (тикет 18, вариант A): списание везде, где движок трату
+        -- пропускает — forced-очередь И прямой Osi.UseSpell (v60u1: прямой
+        -- FireBolt реален (урон 9->5), но AP 1.0->1.0). Честная очередь без
+        -- флагов тратится нативно — не трогаем.
+        econDeduct = (forceFlags or useOsiSpell) == true,
         costKind = costKind, slotLevel = slotLevel }
     return true, true, nil, nil -- success, running (финал — событие CastedSpell/CastSpellFailed)
 end
