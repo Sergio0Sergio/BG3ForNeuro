@@ -19,6 +19,8 @@
 
 - **File bridge is single-slot: NEVER run drive_action injects in parallel.** Bench-proven (2026-09-19): four concurrent `powershell -File drive_action.ps1` calls share one `neuro_to_bg3.json` — three were clobbered (client TIMEOUT, no result files server-side), one survived. Inject strictly serially: wait for the final `result_<id>.json` (`running` absent/false) before firing the next action.
 
+- **Never `dotnet build` while BG3Neuro.App is running.** The running App locks `src/BG3Neuro.App/bin/Debug/net9.0/BG3Neuro.Core.dll`, so MSBuild silently skips the copy and the App keeps serving STALE code (bench-proven 2026-09-19: an hour of debugging a "broken" group rule that was simply absent from the binary; unit tests pass — they use the test-bin copy). Ritual: stop App (and Randy) → build → verify the method strings in the App-bin dll (`[Text.Encoding]::UTF8.GetString(...)` contains the new member) → restart the stack. (Stopping/starting YOUR OWN bench processes is fine; the no-force-kill rule covers only `bg3`/`bg3_dx11`.)
+
 ## Agent skills
 
 ### Issue tracker
