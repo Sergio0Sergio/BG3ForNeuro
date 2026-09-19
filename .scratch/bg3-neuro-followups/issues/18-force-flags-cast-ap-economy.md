@@ -95,3 +95,15 @@ The status lands (`StatusApplied`, ticket 16 g2) but no AP is spent.
   `economy.ap.ok` + `economy.slot.ok` (SpellSlot L1, before 1.0); snapshots
   **AP 1.0→0.0 AND L1 1.0→0.0**. Forced friendly casts are now fully honest.
 - Earlier legs: v57t18a Guidance AP 1.0→0.0; v57t18b 0-AP clamp → AP-gate added.
+
+## Addendum: use_osi_spell path leaks too (found + fixed 2026-09-19, v0.8.54 / PAK v061)
+
+- **(v60u1) FireBolt via `use_osi_spell:true`, Astarion → goblin**: real cast
+  (damage 9→5, story 769) but AP 1.0→1.0 — the direct `Osi.UseSpell` path bypasses
+  native spend exactly like the forced queue.
+- Fix (v0.8.54, commit `2cceb25`): pre-gates and `econDeduct` now cover both
+  pipeline-bypassing paths (`forceFlags or useOsiSpell`); the plain honest queue
+  still spends natively and is untouched.
+- **(v61u2) FireBolt via `use_osi_spell:true`, Astarion → goblin_tracker_4 (6.6m)**:
+  `economy.ap.ok`, **AP 1.0→0.0**, damage 9→2 HP. Direct path honest.
+  (v61u1 at 24.3m correctly failed on range with no deduction — failed casts don't spend.)
