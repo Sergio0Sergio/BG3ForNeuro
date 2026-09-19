@@ -1,7 +1,7 @@
 # 18 — force_flags osiris casts do not consume the action point (honest AP economy)
 
 Type: task (live bench)
-Status: decided — option A (manual deduction). Owner chose A 2026-09-19.
+Status: RESOLVED 2026-09-19 (option A implemented v0.8.50–0.8.53, verified live).
 Blocked by: none (evidence collected; needs a fixing bench for leveled spells)
 
 ## Finding (2026-09-18, v0.8.48 / PAK v054, gate scene)
@@ -77,3 +77,21 @@ The status lands (`StatusApplied`, ticket 16 g2) but no AP is spent.
    final success (`storyActionID > 0` / `StatusApplied`), never on failure.
 3. **Snapshot extension**: add `SpellSlot` 1..9 (+warlock) reads to `readResourceSnapshot`
    so deduction is verifiable before/after in every cast.
+
+## Resolution (verified live 2026-09-19, v0.8.53 / PAK v060, gate scene)
+
+- Writer hunt: Osiris has NO personal slot writer (full surface in `bg3se/Osi.lua`:
+  read + `AddActionPoints` + party-`PartyIncrease`, which is no-op on personals).
+  True writer found via entity components: `ActionResources.Resources[poolUuid][i].Amount`
+  is directly writable from Lua (bench ep4: `1.`→`0.`; sp2: Osiris re-read L1=0.0).
+  Pool UUIDs from `ActionResourceDefinitions.lsx` (Shared.pak): SpellSlot
+  `d136c5d9-…`, WarlockSpellSlot `e9127b70-…`. Generic `entity_probe` diag action
+  added for future component exploration.
+- Final implementation (`deductForcedCastCost` + `writeResourceAmount`):
+  AP via `Osi.AddActionPoints` (proven), BA/slots via component write;
+  pre-gates for AP/BA/slots (`no_action_point`/`no_spell_slot`); deduction only on
+  `CastedSpell` success, before the after-snapshot; outcome in `result.extra.economy`.
+- **(v60t18a) Bless, Shadowheart → Astarion, no flags**: `StatusApplied(BLESS, 768)`,
+  `economy.ap.ok` + `economy.slot.ok` (SpellSlot L1, before 1.0); snapshots
+  **AP 1.0→0.0 AND L1 1.0→0.0**. Forced friendly casts are now fully honest.
+- Earlier legs: v57t18a Guidance AP 1.0→0.0; v57t18b 0-AP clamp → AP-gate added.
