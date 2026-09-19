@@ -366,6 +366,12 @@ public sealed class ActionRouter
             {
                 return castResult;
             }
+
+            var aoeResult = FillAoEPosition(data, combatState);
+            if (aoeResult is not null)
+            {
+                return aoeResult;
+            }
         }
 
         if (actionName == "throw")
@@ -465,6 +471,62 @@ public sealed class ActionRouter
             }
         }
 
+        return null;
+    }
+
+    // v0.8.56 (тикет 19): автономный центр AoE. Когда у AoE-заклинания нет ни цели,
+    // ни coverage, ни позиции — считаем BestAoECenter по врагам и инжектим
+    // position {x, y} (Z у C# нет — мод подставит Z кастера). Некого накрыть —
+    // честный отказ вместо тихого пролёта.
+    private ValidationResult? FillAoEPosition(JsonObject data, CombatState? combatState)
+    {
+        if (combatState?.Spells is null)
+        {
+            return null;
+        }
+
+        var spellName = data["spell_name"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(spellName))
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(data["target_id"]?.GetValue<string>())
+            || data["coverage"] is not null
+            || data["position"] is not null)
+        {
+            return null;
+        }
+
+        var spell = combatState.Spells.FirstOrDefault(s =>
+                string.Equals(s.SpellName, spellName, StringComparison.OrdinalIgnoreCase))
+            ?? combatState.Spells.FirstOrDefault(s =>
+                !string.IsNullOrWhiteSpace(s.Name) &&
+                string.Equals(s.Name, spellName, StringComparison.OrdinalIgnoreCase));
+        if (spell is null || spell.Aoe <= 0)
+        {
+            return null;
+        }
+
+        var actor = data["actor"]?.GetValue<string>() ?? combatState.TurnActor;
+        var caster = combatState.Allies.FirstOrDefault(a => a.Alias == actor);
+        if (caster is null)
+        {
+            return null;
+        }
+
+        var coverage = CoverageAuto.BestAoECenter(caster, combatState.Enemies, spell.Range, spell.Aoe);
+        if (coverage.Covered.Count == 0)
+        {
+            return ValidationResult.Fail(ErrorCode.TargetNotInRange,
+                $"No enemies in range for AoE '{spellName}'");
+        }
+
+        data["position"] = new JsonObject
+        {
+            ["x"] = coverage.CenterX,
+            ["y"] = coverage.CenterY,
+        };
         return null;
     }
 

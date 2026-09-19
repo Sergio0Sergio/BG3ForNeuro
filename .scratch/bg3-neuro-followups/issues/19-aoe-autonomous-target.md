@@ -1,8 +1,17 @@
 # 19 — AoE cast_spell with empty coverage has no autonomous targeting
 
 Type: task (design + implement + live bench)
-Status: ready-for-agent
+Status: claimed
 Blocked by: none
+
+## Decision (2026-09-19): Z = caster Z via mod fallback
+
+- Router C# has no Z (`Combatant` carries only X/Y) → router injects
+  `position {x, y}`; mod fills missing `pos.z` from the caster
+  (`positionOf(actor)`, `executeCast`, v0.8.56).
+- Implemented: `ActionRouter.FillAoEPosition` (after cast validation; explicit
+  target/coverage/position win; empty coverage → honest `TargetNotInRange`) +
+  4 unit tests (57/57 router, 160/160 full). PAK v063 (`AA1FF5EA…`) built.
 
 ## Question
 

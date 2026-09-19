@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.55 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.56 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.55"
+local MOD_VERSION = "0.8.56"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -4020,6 +4020,14 @@ local function executeCast(action)
     local spellType = stats and stats.SpellType or "Target"
     local target = resolveEntity(data.target_id or "")
     local pos = data.position
+    -- v0.8.56 (тикет 19): роутер инжектит AoE-position без z (у C# нет Z в стейте) —
+    -- подставляем Z кастера, иначе очередь/UseSpellAtPosition получат nil.
+    if pos ~= nil and pos.z == nil then
+        local _, _, cz = positionOf(actor)
+        if cz ~= nil then
+            pos = { x = pos.x, y = pos.y, z = cz }
+        end
+    end
 
     -- v0.8.17: pcall-обёртка enqueueCastRequest — ловим точную ошибку API вместо всплытия.
     local ok, err

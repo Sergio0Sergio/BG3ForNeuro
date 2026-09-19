@@ -314,6 +314,73 @@ public class ActionRouterTests : IDisposable
     }
 
     [Fact]
+    public void CastSpell_AoeWithoutTarget_InjectsBestCenterPosition()
+    {
+        // v0.8.56 (тикет 19): AoE без цели/coverage/позиции — роутер инжектит
+        // position из BestAoECenter (гоблин в (3,4) накрывается).
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Zone_Thunderwave", Name = "thunderwave", Cost = "action", Range = 18, Aoe = 4 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"thunderwave"}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+        var file = File.ReadAllText(Path.Combine(_tmpDir, "action_act-1.json"));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(file)!;
+        var dataNode = System.Text.Json.Nodes.JsonNode.Parse(node["data"]!.GetValue<string>())!;
+        Assert.Equal(3.0, dataNode["position"]!["x"]!.GetValue<double>());
+        Assert.Equal(4.0, dataNode["position"]!["y"]!.GetValue<double>());
+    }
+
+    [Fact]
+    public void CastSpell_AoeNobodyInRange_HonestRefusal()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Zone_Thunderwave", Name = "thunderwave", Cost = "action", Range = 18, Aoe = 4 });
+        state.Enemies[0].PositionX = 100;
+        state.Enemies[0].PositionY = 100;
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"thunderwave"}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.TargetNotInRange, result.ErrorCode);
+    }
+
+    [Fact]
+    public void CastSpell_NonAoeWithoutTarget_NoPositionInjected()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Projectile_FireBolt", Name = "fire_bolt", Cost = "action", Range = 18, Aoe = 0 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"fire_bolt"}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+        var file = File.ReadAllText(Path.Combine(_tmpDir, "action_act-1.json"));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(file)!;
+        var dataNode = System.Text.Json.Nodes.JsonNode.Parse(node["data"]!.GetValue<string>())!;
+        Assert.Null(dataNode["position"]);
+    }
+
+    [Fact]
+    public void CastSpell_ExplicitPosition_Preserved()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Zone_Thunderwave", Name = "thunderwave", Cost = "action", Range = 18, Aoe = 4 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell", """{"spell_name":"thunderwave","position":{"x":1,"y":2}}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+        var file = File.ReadAllText(Path.Combine(_tmpDir, "action_act-1.json"));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(file)!;
+        var dataNode = System.Text.Json.Nodes.JsonNode.Parse(node["data"]!.GetValue<string>())!;
+        Assert.Equal(1.0, dataNode["position"]!["x"]!.GetValue<double>());
+        Assert.Equal(2.0, dataNode["position"]!["y"]!.GetValue<double>());
+    }
+
+    [Fact]
     public void CastSpell_OnCooldown_NoSpell()
     {
         var router = CreateRouter();
