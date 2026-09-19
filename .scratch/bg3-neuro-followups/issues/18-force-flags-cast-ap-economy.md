@@ -1,7 +1,7 @@
 # 18 — force_flags osiris casts do not consume the action point (honest AP economy)
 
 Type: task (live bench)
-Status: open
+Status: decided — option A (manual deduction). Owner chose A 2026-09-19.
 Blocked by: none (evidence collected; needs a fixing bench for leveled spells)
 
 ## Finding (2026-09-18, v0.8.48 / PAK v054, gate scene)
@@ -52,3 +52,28 @@ The status lands (`StatusApplied`, ticket 16 g2) but no AP is spent.
 - `resource_snapshot_n16g2_{before,after}.json` (both `ActionPoint 1.0`).
 - Second same-turn cast accepted (user-observed: Guidance on Gale after g2).
 - `mod/BG3Neuro/BG3Neuro.lua`: `enqueueCastRequest` force `CastOptions` L3496-3506;
+
+## Leveled bench (2026-09-19, v0.8.49 / PAK v056, gate scene, auto-force, NO payload flags)
+
+- **(v56t18a) Bless, Shadowheart → Astarion**: `forceFlags:true`, success; SE log
+  `StatusAttempt×3` + `StatusApplied(Ast,"BLESS",Sh,762)×3` + `StatusAttemptFailed×2`
+  (multi-target application noise — Bless tries all target slots); state confirms
+  Astarion has `BLESS`. **Leveled buffs land through auto-force.**
+- AP snapshot `v56t18a`: 1.0→1.0, BA 1.0→1.0, Movement unchanged — **nothing spent**.
+- Slot mechanics (already researched, honest-economy 02/06): read
+  `Osi.GetActionResourceValuePersonal(actor, "SpellSlot", level)` (level 1..9,
+  `WarlockSpellSlot` for warlocks); slot level from `UseCosts`
+  (`spellSlotFromUseCosts`, proven: Bless→"1"); cost kind from `abilityCostOf`.
+  Write: `Osi.PartyIncreaseActionResourceValue(actor, resource, delta)` (proven for
+  AP/Movement; slot-level write semantics to verify live via snapshots).
+
+## Option A design (decided)
+
+1. **Pre-cast slot gate** (leveled only): read `SpellSlot`/`WarlockSpellSlot` at the
+   cast's slot level; if < 1 → refuse honestly (`no_spell_slot`) instead of a free cast.
+2. **Post-success deduction** (forced casts only): AP/BA per `abilityCostOf` via the
+   proven `PartyIncreaseActionResourceValue`; slot level from `UseCosts` via the same
+   writer (level semantics verified live against extended snapshots). Deduct only on
+   final success (`storyActionID > 0` / `StatusApplied`), never on failure.
+3. **Snapshot extension**: add `SpellSlot` 1..9 (+warlock) reads to `readResourceSnapshot`
+   so deduction is verifiable before/after in every cast.

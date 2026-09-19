@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.49 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.50 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.49"
+local MOD_VERSION = "0.8.50"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -188,6 +188,81 @@ local function readResourceSnapshot(actor)
     return out
 end
 
+-- v0.8.50 (тикет 18, вариант A): остатки слотов заклинаний по уровням.
+-- Пулы из ActionResourceDefinitions: "SpellSlot" (1..9) и "WarlockSpellSlot"
+-- (чернокнижники). Чтение — тот же GetActionResourceValuePersonal, уровень 1..9.
+local function readSlotLevels(actor)
+    local out = {}
+    for _, pool in ipairs({ "SpellSlot", "WarlockSpellSlot" }) do
+        local levels = {}
+        for lvl = 1, 9 do
+            local ok, v = pcall(Osi.GetActionResourceValuePersonal, actor, pool, lvl)
+            if ok and type(v) == "number" then
+                levels[tostring(lvl)] = v
+            end
+        end
+        if next(levels) ~= nil then
+            out[pool] = levels
+        end
+    end
+    return out
+end
+
+local function slotAvailable(actor, level)
+    -- Максимум по обоим пулам; nil-чтения игнорируем (не доказывают отсутствие).
+    local have = 0
+    for _, pool in ipairs({ "SpellSlot", "WarlockSpellSlot" }) do
+        local ok, v = pcall(Osi.GetActionResourceValuePersonal, actor, pool, level)
+        if ok and type(v) == "number" and v > have then
+            have = v
+        end
+    end
+    return have
+end
+
+local function deductForcedCastCost(caster, costKind, slotLevel)
+    -- Вариант A тикета 18: движок forced-каста ресурсы не списывает — списываем сами.
+    -- Вызывать ТОЛЬКО после финального успеха (CastedSpell, не CastSpellFailed).
+    -- Всё в pcall; итог возвращается для лога и result.extra.
+    local log = {}
+    -- AP: живой прецедент Osi.AddActionPoints(actor, -1) (v0.8.22, движение-legacy).
+    -- PartyIncreaseActionResourceValue на персональных ресурсах — no-op (бенч 16.09).
+    if costKind == "action" then
+        local ok, err = pcall(Osi.AddActionPoints, caster, -1)
+        log.ap = { resource = "ActionPoint", ok = ok and true or false,
+            err = ok and nil or tostring(err) }
+    elseif costKind == "bonus_action" then
+        -- Best-effort: существование AddBonusActionPoints не доказано; pcall
+        -- безопасен (первый доступ к Osi.X бросает один раз, ловим). Снапшоты
+        -- до/после покажут, сработало или нет.
+        local ok, err = pcall(Osi.AddBonusActionPoints, caster, -1)
+        log.ap = { resource = "BonusActionPoint", ok = ok and true or false,
+            err = ok and nil or tostring(err) }
+    end
+    local lvl = tonumber(slotLevel or "")
+    if lvl ~= nil and lvl >= 1 then
+        -- Слот: семантика записи PartyIncrease на слотовых пулах вживую не
+        -- проверена — читаем пул с остатком, пишем в него, снапшоты до/после
+        -- покажут, куда попало. Прегейт гарантирует: списывать есть что.
+        local deducted = false
+        for _, pool in ipairs({ "SpellSlot", "WarlockSpellSlot" }) do
+            local rOk, rVal = pcall(Osi.GetActionResourceValuePersonal, caster, pool, lvl)
+            if rOk and type(rVal) == "number" and rVal >= 1 then
+                local wOk, wErr = pcall(Osi.PartyIncreaseActionResourceValue, caster, pool, -1)
+                log.slot = { pool = pool, level = lvl, before = rVal,
+                    ok = wOk and true or false, err = wOk and nil or tostring(wErr) }
+                deducted = true
+                break
+            end
+        end
+        if not deducted then
+            log.slot = { pool = nil, level = lvl, ok = false,
+                err = "no slot available to deduct (pre-cast gate should have refused)" }
+        end
+    end
+    return log
+end
+
 local function writeResourceSnapshot(actionId, actor, phase)
     local payload = {
         action_id = actionId,
@@ -199,6 +274,10 @@ local function writeResourceSnapshot(actionId, actor, phase)
     for k, v in pairs(res) do
         payload[k] = v
     end
+    -- v0.8.50 (тикет 18, вариант A): слоты в каждый снапшот — списание проверяемо
+    -- до/после каждого каста. Партийные снапшоты (snapshotPartyResources) слоты не
+    -- тянут (18 лишних запросов на члена партии).
+    payload.slots = readSlotLevels(actor)
     local path = RESULT_DIR .. "/resource_snapshot_" .. (actionId or "unknown") .. "_" .. phase .. ".json"
     local jsonOk, json = pcall(Ext.Json.Stringify, payload)
     if not jsonOk then
@@ -3699,10 +3778,19 @@ local function finalizeCast(caster, spellName, cancelled)
             or (type(pc.caster) == "string" and pc.caster:sub(-36) == caster)
         if casterMatch and spellMatch then
             table.remove(pendingCasts, i)
+            -- v0.8.50 (тикет 18, вариант A): списание forced-каста — ТОЛЬКО успех,
+            -- ДО after-снапшота (чтобы списание было видно в before/after).
+            local econ = nil
+            if not cancelled and pc.forcedQueue then
+                econ = deductForcedCastCost(pc.caster, pc.costKind, pc.slotLevel)
+                _P("[BG3Neuro] economy deduct " .. tostring(pc.id) .. ": "
+                    .. tostring(Ext.Json.Stringify(econ)))
+            end
             -- v0.8.24: снапшот ресурсов после действия (тикет 02) — каст/атака завершились.
             pcall(writeResourceSnapshot, pc.id, caster, "after")
             writeResult(pc.id, not cancelled, false, cancelled and "cast_failed" or nil,
-                cancelled and "Cast interrupted/failed" or nil)
+                cancelled and "Cast interrupted/failed" or nil,
+                econ ~= nil and { economy = econ } or nil)
             return
         end
     end
@@ -3906,6 +3994,24 @@ local function executeCast(action)
         forceFlags = verdict ~= nil and verdict ~= "enemy"
     end
     forceFlags = forceFlags == true
+    -- v0.8.50 (тикет 18, вариант A): стоимость каста из UseCosts прототипа.
+    -- Cantrips/atis без SpellSlotsGroup -> slotLevel nil (только AP/BA).
+    local castUseCosts = stats and fieldOf(stats, "UseCosts") or nil
+    local costKind = abilityCostOf(castUseCosts)
+    local slotLevel = spellSlotFromUseCosts(castUseCosts)
+    -- Прегейт слотов: leveled-каст через forced-очередь без свободного слота
+    -- честно отклоняем, а не дарим бесплатно. Чтения nil -> fail-open (недоказанное
+    -- отсутствие не блокирует); читаемый 0 -> отказ.
+    do
+        local lvl = tonumber(slotLevel or "")
+        if not useOsiSpell and forceFlags and lvl ~= nil and lvl >= 1 then
+            if slotAvailable(actor, lvl) < 1 then
+                return false, nil, "action_failed", "no_spell_slot: "
+                    .. tostring(spellName) .. " needs a level " .. tostring(lvl)
+                    .. " slot (none available)"
+            end
+        end
+    end
     local oseiOk, oseiRes, oseiEntry
     if useOsiSpell then
         -- Реальный игровой каст (v0.8.19, доказано вживую) — прямой Osi.UseSpell.
@@ -3986,7 +4092,11 @@ local function executeCast(action)
         return false, nil, "action_failed", tostring(err), diag
     end
 
-    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = spellName, caster = actor }
+    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = spellName, caster = actor,
+        -- v0.8.50 (тикет 18, вариант A): списание только для forced-ОЧЕРЕДИ
+        -- (useOsiSpell идёт прямым Osi.UseSpell — отдельная неизвестная, не трогаем).
+        forcedQueue = (not useOsiSpell) and forceFlags == true,
+        costKind = costKind, slotLevel = slotLevel }
     return true, true, nil, nil -- success, running (финал — событие CastedSpell/CastSpellFailed)
 end
 
