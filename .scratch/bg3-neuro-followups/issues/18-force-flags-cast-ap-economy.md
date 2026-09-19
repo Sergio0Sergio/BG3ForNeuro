@@ -116,6 +116,9 @@ The status lands (`StatusApplied`, ticket 16 g2) but no AP is spent.
 - **BA writer proven end-to-end without a spell**: component write on the
   BonusActionPoint pool (`420c8df5-…`, index 1, Level 0) 1.0→0.0 is visible to
   Osiris reads; restored 0.0→1.0 right after (bench ep10/ep11 + snapshots).
+- **BA writer proven end-to-end without a spell**: component write on the
+  BonusActionPoint pool (`420c8df5-…`, index 1, Level 0) 1.0→0.0 is visible to
+  Osiris reads; restored 0.0→1.0 right after (bench ep10/ep11 + snapshots).
   Full live-fire via Healing Word still pending (no L1 slots anywhere in this
   combat). Note: static-save reloads reset slots to save state (observed twice).
 - **(v61b1) useOsiSpell robustness hole**: bare `"hex"` (not in Wyll's book) fired a
@@ -125,3 +128,18 @@ The status lands (`StatusApplied`, ticket 16 g2) but no AP is spent.
 - **Bridge discipline**: parallel `drive_action.ps1` injects clobber each other
   (one shared `neuro_to_bg3.json`; 3/4 lost 2026-09-19) — inject strictly serially
   (AGENTS.md rule added).
+
+## Full honesty matrix (all verified live 2026-09-19, gate scene)
+
+- **(v62b1) Healing Word (bonus_action L1), Shadowheart → self, no flags**:
+  heal 9→15 HP; snapshots BA 1.0→0.0, AP untouched 1.0→1.0, L1 1.0→0.0;
+  `economy.ap` (BonusActionPoint) + `economy.slot` both ok. **BA leg closed live.**
+- **(v62g1) Bless with 0 slots**: honest refusal
+  `no_spell_slot: Target_Bless needs a level 1 slot (none available)`.
+- **(v62g3) Guidance with 0 AP**: honest refusal
+  `no_action_point: Target_Guidance costs action (ActionPoint 0)`.
+- Failed casts spend nothing (v61u1 range fail); enemy casts keep the native path.
+- v0.8.55 PAK v062 (`3E4A0301…`) adds the `useOsiSpell` book-guard (`no_spell`;
+  bench v61b1 bare-`"hex"` story no-op) — installed and loaded (heartbeat 0.8.55);
+  the guard itself fires only on unknown spells (not live-fired yet, code path
+  trivially reviewed).
