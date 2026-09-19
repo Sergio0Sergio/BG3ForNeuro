@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.51 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.52 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.51"
+local MOD_VERSION = "0.8.52"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -5110,6 +5110,75 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         end
         _P("[BG3Neuro] slot_probe: slots=" .. tostring(Ext.Json.Stringify(p.slots)))
         return true, nil, nil, nil, { debug = p }
+    end
+
+    if name == "entity_probe" then
+        -- v0.8.52 (тикет 18): generic навигатор по сущности для стенда.
+        -- path — массив ключей: сначала property-доступ cur[key], затем
+        -- cur:GetComponent(key); числа — индексы массива. Финал — unwrapField(3).
+        -- Опционально data.write = {key=..., value=...}: явная запись ОДНОГО поля
+        -- в найденный контейнер (только стенд; всё в pcall, до/после — в отчёт).
+        --   {"actor":"poc_player_cleric",
+        --    "path":["ActionResources","Resources","d136c5d9-0ff0-43da-acce-a74a07f8d6bf"]}
+        local data = action.data or {}
+        local actor = resolveCombatActor(data.actor or "")
+        if actor == nil then
+            return false, nil, "action_failed", "Could not resolve the actor"
+        end
+        local entOk, ent = pcall(Ext.Entity.Get, actor)
+        if not entOk or ent == nil then
+            return false, nil, "action_failed", "entity not found: " .. tostring(ent)
+        end
+        local cur = ent
+        local trace = {}
+        local path = data.path
+        if type(path) ~= "table" then
+            path = {}
+        end
+        for _, key in ipairs(path) do
+            local step = { key = tostring(key) }
+            local got, val = pcall(function() return cur[key] end)
+            if (not got or val == nil) and cur ~= nil and cur.GetComponent ~= nil then
+                local gOk, gVal = pcall(function() return cur:GetComponent(key) end)
+                if gOk and gVal ~= nil then
+                    got, val = true, gVal
+                    step.via = "GetComponent"
+                end
+            end
+            step.ok = (got and val ~= nil) and true or false
+            step.type = type(val)
+            if step.ok then
+                local sOk, sVal = pcall(tostring, val)
+                step.preview = (sOk and sVal ~= nil)
+                    and tostring(sVal):sub(1, 120) or "?"
+            end
+            trace[#trace + 1] = step
+            if not step.ok then
+                cur = nil
+                break
+            end
+            cur = val
+        end
+        local out = { actor = actor, trace = trace }
+        if cur ~= nil then
+            local uOk, uVal = pcall(unwrapField, cur, 3)
+            out.value = (uOk and uVal ~= nil) and uVal or tostring(cur)
+        end
+        local w = data.write
+        if type(w) == "table" and cur ~= nil and w.key ~= nil then
+            local wrep = { key = tostring(w.key) }
+            local bOk, bVal = pcall(function() return cur[w.key] end)
+            wrep.before = (bOk and bVal ~= nil) and tostring(bVal) or nil
+            local sOk, sErr = pcall(function() cur[w.key] = w.value end)
+            wrep.write_ok = sOk and true or false
+            wrep.write_error = sOk and nil or tostring(sErr)
+            local aOk, aVal = pcall(function() return cur[w.key] end)
+            wrep.after = (aOk and aVal ~= nil) and tostring(aVal) or nil
+            out.write = wrep
+            _P("[BG3Neuro] entity_probe WRITE actor=" .. tostring(actor)
+                .. " key=" .. tostring(w.key) .. " ok=" .. tostring(wrep.write_ok))
+        end
+        return true, nil, nil, nil, { debug = out }
     end
 
     if name == "bench_use_spell" then
