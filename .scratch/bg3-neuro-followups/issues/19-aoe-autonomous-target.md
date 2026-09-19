@@ -13,6 +13,19 @@ Blocked by: none
   target/coverage/position win; empty coverage → honest `TargetNotInRange`) +
   4 unit tests (57/57 router, 160/160 full). PAK v063 (`AA1FF5EA…`) built.
 
+## Blocker found live: state emits aoe=0/range=0 for Zone spells (fixed v0.8.57)
+
+- Gale's `thunderwave` arrived as `aoe=0.0 range=0.0` → `FillAoEPosition` no-ops.
+- Root cause: `spellRangeAndAoe` reads only `TargetRadius`/`AreaRadius`; Zone
+  spells (Thunderwave: `Range "5"`, `Base "5"`, `Shape "Square"`, no radii) yield
+  0/0. Verified against `Public/Shared/Stats/Generated/Data/Spell_Zone.txt`;
+  other types checked (`Projectile_FireBolt` TargetRadius 18; melee symbolic
+  `MeleeMainWeaponRange`; `Shout_Dash` no radii at all).
+- Fix (v0.8.57): `Range`/`Base` fallback gated to non-Target/Projectile/Shout
+  types (checked-in behavior for known types unchanged). PAK v064
+  (`C877D8F1…`) built. Bench pending restart: Gale Thunderwave via stack → expect
+  injected position + damage + AP/slot deduction.
+
 ## Question
 
 `cast_spell` with an AoE spell and no `target_id`/`coverage`/`position` passes

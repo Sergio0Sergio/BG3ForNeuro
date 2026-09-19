@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.56 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.57 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.56"
+local MOD_VERSION = "0.8.57"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1922,6 +1922,7 @@ local function spellRangeAndAoe(statId)
     local range, aoe = 0, 0
     local okS, stats = pcall(Ext.Stats.Get, statId)
     if okS and stats ~= nil then
+        local spellType = tostring(fieldOf(stats, "SpellType") or "")
         local r = fieldOf(stats, "TargetRadius")
         if type(r) == "number" and r > 0 then
             range = r
@@ -1930,9 +1931,27 @@ local function spellRangeAndAoe(statId)
         if type(a) == "number" and a > 0 then
             aoe = a
         end
+        -- v0.8.57 (тикет 19): Zone-заклинания (Thunderwave: Range "5", Base "5",
+        -- Shape "Square") не имеют TargetRadius/AreaRadius — дальность и размер
+        -- лежат в Range/Base. Фолбэк — только вне Target/Projectile/Shout, чтобы
+        -- не менять проверенные значения (melee-символы вроде MeleeMainWeaponRange
+        -- по-прежнему игнорятся; 1.5 м по умолчанию — как было).
+        if spellType ~= "Target" and spellType ~= "Projectile" and spellType ~= "Shout" then
+            if range <= 0 then
+                local rb = tonumber(fieldOf(stats, "Range") or "")
+                if rb ~= nil and rb > 0 then
+                    range = rb
+                end
+            end
+            if aoe <= 0 then
+                local ab = tonumber(fieldOf(stats, "Base") or "")
+                if ab ~= nil and ab > 0 then
+                    aoe = ab
+                end
+            end
+        end
         if range <= 0 then
             -- Touch/Utility без TargetRadius: melee по умолчанию (1.5 м)
-            local spellType = tostring(fieldOf(stats, "SpellType") or "")
             if spellType == "Target" or spellType == "Shout" then
                 range = 1.5
             end
