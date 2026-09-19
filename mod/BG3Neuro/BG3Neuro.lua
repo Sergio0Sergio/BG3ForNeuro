@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.52 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.53 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.52"
+local MOD_VERSION = "0.8.53"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -220,36 +220,87 @@ local function slotAvailable(actor, level)
     return have
 end
 
+-- v0.8.53 (тикет 18): UUID пулов из ActionResourceDefinitions.lsx (Shared.pak).
+-- Нужны прямому writer'у: Osiris-писателей персональных ресурсов нет (весь surface
+-- в Osi.lua: чтение + AddActionPoints + party-PartyIncrease, который no-op, v57t18c).
+local RESOURCE_UUID = {
+    ActionPoint = "734cbcfb-8922-4b6d-8330-b2a7e4c14b6a",
+    BonusActionPoint = "420c8df5-45c2-4253-93c2-7ec44e127930",
+    SpellSlot = "d136c5d9-0ff0-43da-acce-a74a07f8d6bf",
+    WarlockSpellSlot = "e9127b70-22b7-42a1-b172-d02f828f260a",
+}
+
+local function writeResourceAmount(caster, poolUuid, level, delta)
+    -- Настоящий writer персональных ресурсов (доказан живьём ep4/sp2 2026-09-19:
+    -- запись Amount=0 в запись L1 -> Osiris-чтение L1=0.0): прямое поле Amount
+    -- записи ActionResources.Resources[poolUuid][i] с Entry.Level == level.
+    -- Возвращает ok, err, before.
+    local entOk, ent = pcall(Ext.Entity.Get, caster)
+    if not entOk or ent == nil then
+        return false, "entity not found: " .. tostring(ent), nil
+    end
+    local ok, arr = pcall(function()
+        return ent:GetComponent("ActionResources").Resources[poolUuid]
+    end)
+    if not ok or arr == nil then
+        return false, "resource array not found", nil
+    end
+    for i = 1, 12 do
+        local eOk, entry = pcall(function() return arr[i] end)
+        if not eOk or entry == nil then
+            break
+        end
+        local lOk, eLvl = pcall(function() return entry.Level end)
+        if lOk and tonumber(eLvl or "") == tonumber(level) then
+            local aOk, before = pcall(function() return entry.Amount end)
+            if aOk and type(before) == "number" then
+                local wOk, wErr = pcall(function() entry.Amount = before + delta end)
+                if wOk then
+                    return true, nil, before
+                end
+                return false, tostring(wErr), before
+            end
+            return false, "Amount unreadable", nil
+        end
+    end
+    return false, "level entry not found", nil
+end
+
 local function deductForcedCastCost(caster, costKind, slotLevel)
     -- Вариант A тикета 18: движок forced-каста ресурсы не списывает — списываем сами.
     -- Вызывать ТОЛЬКО после финального успеха (CastedSpell, не CastSpellFailed).
     -- Всё в pcall; итог возвращается для лога и result.extra.
     local log = {}
-    -- AP: живой прецедент Osi.AddActionPoints(actor, -1) (v0.8.22, движение-legacy).
-    -- PartyIncreaseActionResourceValue на персональных ресурсах — no-op (бенч 16.09).
+    -- AP: живой прецедент Osi.AddActionPoints(actor, -1) (v0.8.22; доказан v57t18a).
     if costKind == "action" then
         local ok, err = pcall(Osi.AddActionPoints, caster, -1)
         log.ap = { resource = "ActionPoint", ok = ok and true or false,
             err = ok and nil or tostring(err) }
     elseif costKind == "bonus_action" then
-        -- Best-effort: существование AddBonusActionPoints не доказано; pcall
-        -- безопасен (первый доступ к Osi.X бросает один раз, ловим). Снапшоты
-        -- до/после покажут, сработало или нет.
-        local ok, err = pcall(Osi.AddBonusActionPoints, caster, -1)
-        log.ap = { resource = "BonusActionPoint", ok = ok and true or false,
-            err = ok and nil or tostring(err) }
+        -- Osi.AddBonusActionPoints не существует (весь surface — в Osi.lua):
+        -- пишем напрямую в компонент тем же доказанным путём, что слоты.
+        local rOk, rVal = pcall(Osi.GetActionResourceValuePersonal,
+            caster, "BonusActionPoint", 0)
+        if rOk and type(rVal) == "number" and rVal >= 1 then
+            local wOk, wErr, before = writeResourceAmount(caster,
+                RESOURCE_UUID.BonusActionPoint, 0, -1)
+            log.ap = { resource = "BonusActionPoint", before = before,
+                ok = wOk and true or false, err = wOk and nil or tostring(wErr) }
+        else
+            log.ap = { resource = "BonusActionPoint", ok = false,
+                err = "no bonus action available to deduct" }
+        end
     end
     local lvl = tonumber(slotLevel or "")
     if lvl ~= nil and lvl >= 1 then
-        -- Слот: семантика записи PartyIncrease на слотовых пулах вживую не
-        -- проверена — читаем пул с остатком, пишем в него, снапшоты до/после
-        -- покажут, куда попало. Прегейт гарантирует: списывать есть что.
+        -- Слот: пул с остатком (прегейт гарантирует наличие), пишем прямым writer'ом.
         local deducted = false
         for _, pool in ipairs({ "SpellSlot", "WarlockSpellSlot" }) do
             local rOk, rVal = pcall(Osi.GetActionResourceValuePersonal, caster, pool, lvl)
             if rOk and type(rVal) == "number" and rVal >= 1 then
-                local wOk, wErr = pcall(Osi.PartyIncreaseActionResourceValue, caster, pool, -1)
-                log.slot = { pool = pool, level = lvl, before = rVal,
+                local wOk, wErr, before = writeResourceAmount(caster,
+                    RESOURCE_UUID[pool], lvl, -1)
+                log.slot = { pool = pool, level = lvl, before = before,
                     ok = wOk and true or false, err = wOk and nil or tostring(wErr) }
                 deducted = true
                 break
