@@ -4047,6 +4047,13 @@ local function executeCast(action)
             pos = { x = pos.x, y = pos.y, z = cz }
         end
     end
+    -- v0.8.56 (тикет 19): Zone без цели и без позиции исполнить нечем (очередь
+    -- повисла бы в running:true) — честный отказ. Позицию даёт роутер
+    -- (авто-центр BestAoECenter) или явный position от Neuro.
+    if spellType == "Zone" and (target == nil or target == "") and pos == nil then
+        return false, nil, "action_failed",
+            "no_aoe_target: Zone spell '" .. tostring(spellName) .. "' needs target_id or position"
+    end
 
     -- v0.8.17: pcall-обёртка enqueueCastRequest — ловим точную ошибку API вместо всплытия.
     local ok, err

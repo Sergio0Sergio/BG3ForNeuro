@@ -66,6 +66,45 @@ public class ActionRouterTests : IDisposable
     }
 
     [Fact]
+    public void EndTurn_GroupCoActorCanAct_Allowed()
+    {
+        // v0.8.56 (тикет 19): групповое окно — со-активный союзник играет.
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach", "shadowheart");
+        state.Allies.First(a => a.Alias == "shadowheart").Availability = "can act";
+
+        var result = router.ValidateAndDispatch("act-1", "end_turn", """{"actor":"shadowheart"}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public void EndTurn_GroupCoActorCannotAct_Refused()
+    {
+        // Ловушка подстроки: "cannot act" содержит "can act" — только exact-match.
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach", "shadowheart");
+        state.Allies.First(a => a.Alias == "shadowheart").Availability = "cannot act";
+
+        var result = router.ValidateAndDispatch("act-1", "end_turn", """{"actor":"shadowheart"}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.WrongPhase, result.ErrorCode);
+    }
+
+    [Fact]
+    public void EndTurn_NonTurnActorWithoutAvailability_Refused()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach", "shadowheart");
+
+        var result = router.ValidateAndDispatch("act-1", "end_turn", """{"actor":"shadowheart"}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.WrongPhase, result.ErrorCode);
+    }
+
+    [Fact]
     public void EndTurn_EnemyTurn_NotDispatched()
     {
         var router = CreateRouter();

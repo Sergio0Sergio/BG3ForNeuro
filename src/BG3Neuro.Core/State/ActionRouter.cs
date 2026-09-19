@@ -349,7 +349,17 @@ public sealed class ActionRouter
 
             if (actor != combatState.TurnActor)
             {
-                return ValidationResult.Fail(ErrorCode.WrongPhase, $"It is '{combatState.TurnActor}' turn now, not '{actor}'");
+                // v0.8.56 (тикет 19): групповые ходы — со-активный союзник
+                // ("can act") играет в том же окне; мод всё равно гейтит по canAct
+                // + честный not_caster_turn, так что роутер слабее движка не станет.
+                // Exact-match (не Contains): "cannot act" содержит "can act".
+                var coActor = combatState.Allies.FirstOrDefault(a => a.Alias == actor);
+                var canAct = string.Equals(coActor?.Availability, "can act", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(coActor?.Availability, "acting now, can act", StringComparison.OrdinalIgnoreCase);
+                if (!canAct)
+                {
+                    return ValidationResult.Fail(ErrorCode.WrongPhase, $"It is '{combatState.TurnActor}' turn now, not '{actor}'");
+                }
             }
         }
 
@@ -395,6 +405,15 @@ public sealed class ActionRouter
             return ValidationResult.Fail(ErrorCode.NoSpell, "Spell list is empty: no known spells");
         }
 
+        // v0.8.56 (тикет 19): в групповом окне книга в стейте — чужая (turn actor).
+        // Проверку книги/слотов/кулдаунов пропускаем, решает мод честными ошибками
+        // (no_spell и др.); цель/позицию проверяем без книжных данных.
+        var castActor = data["actor"]?.GetValue<string>() ?? combatState.TurnActor;
+        if (castActor != combatState.TurnActor)
+        {
+            return ValidateCastTarget(data, combatState, null);
+        }
+
         var spell = combatState.Spells.FirstOrDefault(s =>
             string.Equals(s.SpellName, spellName, StringComparison.OrdinalIgnoreCase));
         if (spell is null)
@@ -434,25 +453,36 @@ public sealed class ActionRouter
         var actor = data["actor"]?.GetValue<string>() ?? combatState.TurnActor;
         var caster = combatState.Allies.FirstOrDefault(a => a.Alias == actor);
 
+        return ValidateCastTarget(data, combatState, spell);
+    }
+
+    // Цель/позиция каста. spell == null (групповое окно, книга чужая) — только
+    // существование цели; range/coverage без книжных данных не проверяем.
+    private ValidationResult? ValidateCastTarget(JsonObject data, CombatState? combatState, SpellInfo? spell)
+    {
+        var spellName = data["spell_name"]?.GetValue<string>();
+        var actor = data["actor"]?.GetValue<string>() ?? combatState?.TurnActor;
+        var caster = combatState?.Allies.FirstOrDefault(a => a.Alias == actor);
+
         var targetId = data["target_id"]?.GetValue<string>();
         if (!string.IsNullOrWhiteSpace(targetId))
         {
             // v0.8.56 (тикеты 16/18): friendly buffs target allies — search both
             // sides. Honesty lives in the mod (AP/slot gates + post-success
             // deduction); the router must not reject what the engine accepts.
-            var target = combatState.Enemies.FirstOrDefault(e => e.Alias == targetId)
-                ?? combatState.Allies.FirstOrDefault(a => a.Alias == targetId);
+            var target = combatState?.Enemies.FirstOrDefault(e => e.Alias == targetId)
+                ?? combatState?.Allies.FirstOrDefault(a => a.Alias == targetId);
             if (target is null)
             {
                 return ValidationResult.Fail(ErrorCode.TargetMissing, $"Target '{targetId}' not found among combatants");
             }
 
-            if (caster is not null && !CoverageAuto.IsInRange(caster, target, spell.Range))
+            if (spell is not null && caster is not null && !CoverageAuto.IsInRange(caster, target, spell.Range))
             {
                 return ValidationResult.Fail(ErrorCode.TargetNotInRange, $"Target '{targetId}' is out of range of '{spellName}'");
             }
         }
-        else if (spell.Aoe > 0 && data["coverage"] is not null)
+        else if (spell is not null && spell.Aoe > 0 && data["coverage"] is not null)
         {
             var requested = data["coverage"]!.AsArray()
                 .Select(x => x?.GetValue<string>())
@@ -460,7 +490,7 @@ public sealed class ActionRouter
                 .ToList();
             if (caster is not null && requested.Count > 0)
             {
-                var coverage = CoverageAuto.BestAoECenter(caster, combatState.Enemies, spell.Range, spell.Aoe);
+                var coverage = CoverageAuto.BestAoECenter(caster, combatState!.Enemies, spell.Range, spell.Aoe);
                 var achievable = coverage.Covered.ToHashSet();
                 var missing = requested.Where(r => r is not null && !achievable.Contains(r)).OrderBy(r => r, StringComparer.Ordinal).ToList();
                 if (missing.Count > 0)
