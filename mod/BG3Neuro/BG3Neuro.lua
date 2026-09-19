@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.50 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.51 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.50"
+local MOD_VERSION = "0.8.51"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -3999,13 +3999,26 @@ local function executeCast(action)
     local castUseCosts = stats and fieldOf(stats, "UseCosts") or nil
     local costKind = abilityCostOf(castUseCosts)
     local slotLevel = spellSlotFromUseCosts(castUseCosts)
-    -- Прегейт слотов: leveled-каст через forced-очередь без свободного слота
-    -- честно отклоняем, а не дарим бесплатно. Чтения nil -> fail-open (недоказанное
-    -- отсутствие не блокирует); читаемый 0 -> отказ.
+    -- Прегейты честной экономики (тикет 18, вариант A): forced-очередь движок не
+    -- проверяет, поэтому каст без AP/слота был бы бесплатным (доказано живьём:
+    -- v57t18a AP 1.0->0.0 только благодаря ручному списанию; v57t18b при AP 0
+    -- клампится в 0 и проходит бесплатно). Читаемый 0 -> отказ; чтения nil для
+    -- AP -> fail-open, для слотов -> отказ (leveled без доказанного слота не дарим).
     do
-        local lvl = tonumber(slotLevel or "")
-        if not useOsiSpell and forceFlags and lvl ~= nil and lvl >= 1 then
-            if slotAvailable(actor, lvl) < 1 then
+        if not useOsiSpell and forceFlags then
+            local apRes = costKind == "bonus_action" and "BonusActionPoint"
+                or costKind == "reaction" and "ReactionActionPoint"
+                or costKind == "action" and "ActionPoint" or nil
+            if apRes ~= nil then
+                local aOk, aVal = pcall(Osi.GetActionResourceValuePersonal, actor, apRes, 0)
+                if aOk and type(aVal) == "number" and aVal < 1 then
+                    return false, nil, "action_failed", "no_action_point: "
+                        .. tostring(spellName) .. " costs " .. tostring(costKind)
+                        .. " (" .. tostring(apRes) .. " 0)"
+                end
+            end
+            local lvl = tonumber(slotLevel or "")
+            if lvl ~= nil and lvl >= 1 and slotAvailable(actor, lvl) < 1 then
                 return false, nil, "action_failed", "no_spell_slot: "
                     .. tostring(spellName) .. " needs a level " .. tostring(lvl)
                     .. " slot (none available)"
@@ -5067,6 +5080,35 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         p.after = pcallSnapshotPartyOrErr()
         _P("[BG3Neuro] bench_party_increase: " .. resource .. " delta=" .. tostring(delta)
             .. " ok=" .. tostring(p.write_ok))
+        return true, nil, nil, nil, { debug = p }
+    end
+
+    if name == "slot_probe" then
+        -- v0.8.51 (тикет 18): read-only разведка слотов — ищем настоящий writer
+        -- (PartyIncreaseActionResourceValue — no-op на персональных слотах, v57t18c).
+        -- Читаем пулы + дампим кандидатов компонентов сущности (всё в pcall).
+        --   { "id":"sp1", "name":"slot_probe", "data":"{\"actor\":\"poc_player_cleric\"}" }
+        local data = action.data or {}
+        local actor = resolveCombatActor(data.actor or "")
+        if actor == nil then
+            return false, nil, "action_failed", "Could not resolve the actor"
+        end
+        local p = { actor = actor, slots = readSlotLevels(actor) }
+        local entOk, ent = pcall(Ext.Entity.Get, actor)
+        if entOk and ent ~= nil then
+            local comps = {}
+            for _, cname in ipairs({ "ActionResources", "SpellBook", "SpellBookPrepares",
+                "ActionResource", "ServerCharacter" }) do
+                local cOk, cVal = pcall(function() return ent:GetComponent(cname) end)
+                if cOk and cVal ~= nil then
+                    comps[cname] = unwrapField(cVal, 4)
+                end
+            end
+            p.components = comps
+        else
+            p.entity_error = tostring(ent)
+        end
+        _P("[BG3Neuro] slot_probe: slots=" .. tostring(Ext.Json.Stringify(p.slots)))
         return true, nil, nil, nil, { debug = p }
     end
 
