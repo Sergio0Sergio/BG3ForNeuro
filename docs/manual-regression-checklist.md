@@ -76,6 +76,22 @@ does NOT surface this — the error is only visible in the Extender Runtime log.
 
 Result: all items checked + 139 automated tests green (`dotnet test` + `tests\smoke.ps1 -Full`) → release candidate. Project entry point — `README.md`.
 
+## Perception — fair perception (контракт 03/04/05, бинарная модель)
+
+Предусловия: реализованы B (эмиссия) и A (feasible), мод-гейт (04b); стенд на воротах,
+эксплорейшн + бой; инжекты `drive_action.ps1` серийно. Исходы по `issues/05-acceptance-and-bench.md`.
+
+- [ ] **P1 засада не видна**: эксплорейшн у ворот, камера вне двора → 18 вражеских сущностей не в `objects`/`enemies`.
+- [ ] **P2 вход в LOS**: сущность вошла в кадр → появилась в `state`, `perception="visible"`, позиция актуальная.
+- [ ] **P3 уход из вида**: ушла за укрытие/кадр → исчезла из `state` (`known`/`last_seen` отсутствуют).
+- [ ] **P4 бой — полный ростер**: все участники боя в `enemies`, в т.ч. заэкранные и невидимый-силуэт; позиции истинные.
+- [ ] **P5 отказ по невидимой цели**: действие с `target_id` вне `state` → роутер `TargetMissing` (Channel A); мод `no_perception` (04b).
+- [ ] **P6 невидимый вне боя в кадре**: скрывшийся NPC в зоне камеры не эмитится.
+- [ ] **P7 партия**: действия по союзникам (каст/движение/атака) проходят перцепт-гейт.
+- [ ] **P8 AoE-точка**: `cast_spell` с `position` — не гейтится восприятием в v1.
+- [ ] **Регрессия**: существующие боксы Combat/Exploration §9.5 остаются зелёными после включения фильтра.
+- [ ] **Стоимость**: средняя стоимость тика эмиссии ≤ 20 мс (5 прогонов, медиана) в бою и в эксплорейшне.
+
 ## Run 2026-09-14 (v0.8.25, live benchmark — goblin gate melee, RU locale)
 
 Bridge: PAK v029 (MD5 `96F09777974E194677891D153D7E45D0`), SE v32, `21 actions registered`,
