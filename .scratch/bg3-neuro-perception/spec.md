@@ -132,5 +132,6 @@ Neuro получает состояние игры и действует по н
 
 - Research сигналов: `research/01-perception-signal-api.md` (тикет 01).
 - Прототип/живой look: `issues/02-perception-emitter-prototype.md` + `artifacts/02-*` (тикет 02).
+- Зонд B-сенсора (план на игровой заход): `research/02-b-sensor-api-probe.md` (§8.1–3).
 - Контракт-тикет: `issues/03-perception-contract.md` (тут же зафиксировано решение о бинарной модели).
 - Гейты: `issues/04-action-gating.md` (+04b на мод-слой); приёмка: `issues/05-acceptance-and-bench.md`.
