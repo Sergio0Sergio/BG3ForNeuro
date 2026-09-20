@@ -53,7 +53,7 @@ public static class ErrorMapper
     public static string DefaultMessage(ErrorCode code) => code switch
     {
         ErrorCode.TargetMissing =>
-            "Target not found. Provide the target_id of one of the characters listed under Enemies/Allied Characters in the state.",
+            "Target not found in the perceived state. You can only act on entities the mod currently reports (party, objects, combatants) - they are exactly what you can see. The target may be out of view, behind terrain, or gone; re-check the state instead of guessing.",
         ErrorCode.NotInCombat =>
             "This action requires combat, but no combat is running. Wait for combat to start (combat state will appear with a controlled character's turn).",
         ErrorCode.NoSpell =>
