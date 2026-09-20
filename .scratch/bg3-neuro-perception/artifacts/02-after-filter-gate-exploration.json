@@ -1,0 +1,311 @@
+{
+    "allies": [
+        {
+            "alias": "poc_player_wizard",
+            "distance": 1.1,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 219.8,
+            "position_y": 31.2
+        },
+        {
+            "alias": "tav",
+            "distance": 0.0,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 219.1,
+            "position_y": 31.4
+        },
+        {
+            "alias": "poc_player_cleric",
+            "distance": 3.7,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 220.3,
+            "position_y": 30.6
+        },
+        {
+            "alias": "origin_astarion",
+            "distance": 3.8,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 222.3,
+            "position_y": 30.4
+        }
+    ],
+    "available_actions": [],
+    "can_rest": true,
+    "enemies": [],
+    "events": [],
+    "generated_at": "2026-09-20T05:51:53.1806275Z",
+    "inventory": [],
+    "mode": "exploration",
+    "objects": [
+        {
+            "alias": "goblin_tracker_1",
+            "distance": 25.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Tracker",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_brawler_1",
+            "distance": 25.1,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Brawler",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "arka_1",
+            "distance": 53.4,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Arka",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "elegis_1",
+            "distance": 49.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Elegis",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "zevlor_1",
+            "distance": 48.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Zevlor",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_warrior_1",
+            "distance": 26.2,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Warrior",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_warlock_1",
+            "distance": 20.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Warlock",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "bugbear_1",
+            "distance": 21.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Bugbear",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_booyahg_1",
+            "distance": 23.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Booyahg",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "aradin_1",
+            "distance": 29.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Aradin",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "ogre_brute_1",
+            "distance": 18.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Ogre Brute",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sword_spider_1",
+            "distance": 11.0,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sword Spider",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sword_spider_2",
+            "distance": 28.5,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sword Spider",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "memnos_1",
+            "distance": 54.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Memnos",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sapper_gald_1",
+            "distance": 21.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sapper Gald",
+            "perception": "known",
+            "perception_reason": "los_status",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "remira_1",
+            "distance": 26.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Remira",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "kanon_1",
+            "distance": 35.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Kanon",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "barth_1",
+            "distance": 28.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Barth",
+            "perception": "visible",
+            "perception_reason": "los",
+            "seen_by": "player",
+            "type": "character"
+        }
+    ],
+    "perception": {
+        "known": 10,
+        "unknown": 34,
+        "visible": 8
+    },
+    "regions": [],
+    "screen": "exploration",
+    "trigger": "free_roam",
+    "turn_actor": "",
+    "version": 2
+}

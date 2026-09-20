@@ -1,0 +1,474 @@
+{
+    "allies": [
+        {
+            "alias": "poc_player_wizard",
+            "distance": 1.1,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 219.8,
+            "position_y": 31.2
+        },
+        {
+            "alias": "tav",
+            "distance": 0.0,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 219.1,
+            "position_y": 31.4
+        },
+        {
+            "alias": "origin_astarion",
+            "distance": 2.3,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 221.3,
+            "position_y": 30.9
+        },
+        {
+            "alias": "poc_player_cleric",
+            "distance": 3.7,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 220.3,
+            "position_y": 30.6
+        }
+    ],
+    "available_actions": [],
+    "can_rest": true,
+    "enemies": [],
+    "events": [],
+    "generated_at": "2026-09-20T04:54:53.2713729Z",
+    "inventory": [],
+    "mode": "exploration",
+    "objects": [
+        {
+            "alias": "wyll_1",
+            "distance": 47.1,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Wyll",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "ogre_brute_1",
+            "distance": 18.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Ogre Brute",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sapper_gald_1",
+            "distance": 21.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sapper Gald",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sapper_dextor_1",
+            "distance": 19.5,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sapper Dextor",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sapper_moke_1",
+            "distance": 13.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sapper Moke",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sword_spider_1",
+            "distance": 11.0,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sword Spider",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sword_spider_2",
+            "distance": 28.5,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sword Spider",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "nymessa_1",
+            "distance": 49.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Nymessa",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "damays_1",
+            "distance": 52.5,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Damays",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "poc_player_fighter_1",
+            "distance": 44.4,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Лаэзель",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_brawler_1",
+            "distance": 25.1,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Brawler",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_tracker_1",
+            "distance": 25.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Tracker",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "rikka_1",
+            "distance": 55.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Rikka",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "kaldani_1",
+            "distance": 57.5,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Kaldani",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "arka_1",
+            "distance": 53.4,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Arka",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "nadira_1",
+            "distance": 46.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Nadira",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "elegis_1",
+            "distance": 49.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Elegis",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "zevlor_1",
+            "distance": 48.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Zevlor",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "warrior_trunk_1",
+            "distance": 15.0,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Warrior Trunk",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "bugbear_2",
+            "distance": 13.5,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Bugbear",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "sharp_eye_sneem_1",
+            "distance": 13.2,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sharp-Eye Sneem",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_warrior_1",
+            "distance": 26.2,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Warrior",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_sharp_eye_1",
+            "distance": 14.2,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Sharp-Eye",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_sharp_eye_2",
+            "distance": 15.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Sharp-Eye",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_warlock_1",
+            "distance": 20.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Warlock",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "bugbear_1",
+            "distance": 21.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Bugbear",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "goblin_booyahg_1",
+            "distance": 23.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Booyahg",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "remira_1",
+            "distance": 26.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Remira",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "bugbear_assassin_1",
+            "distance": 54.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Bugbear Assassin",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "warrior_jawn_1",
+            "distance": 11.4,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Warrior Jawn",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "booyahg_benta_1",
+            "distance": 13.0,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Booyahg Benta",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "memnos_1",
+            "distance": 54.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Memnos",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "barth_1",
+            "distance": 28.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Barth",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "kanon_1",
+            "distance": 35.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Kanon",
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "aradin_1",
+            "distance": 29.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Aradin",
+            "seen_by": "player",
+            "type": "character"
+        }
+    ],
+    "regions": [],
+    "screen": "exploration",
+    "trigger": "free_roam",
+    "turn_actor": "",
+    "version": 2
+}
