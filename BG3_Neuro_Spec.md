@@ -198,7 +198,7 @@ He says: "..."
 - toggle_mode: [normal]
 ```
 
-> Perception contract rev 2 (`.scratch/bg3-neuro-perception/spec.md`): emission is **binary** — an entity is either on screen (emitted with `perception="visible"`, true current position) or absent from the state entirely. Per-character `seen by` grouping and the `seen_by` field are **removed** (single `## Objects (N)` header).
+> Perception contract rev 2 (`.scratch/bg3-neuro-perception/spec.md`): emission is **binary** — an entity is either on screen (emitted at its true current position; there is **no `perception` field** — visibility is expressed by the entity's mere presence in `objects`) or absent from the state entirely. Per-character `seen by` grouping and the `seen_by` field are **removed** (single `## Objects (N)` header).
 
 > Note: `toggle_mode` in v1 shows only `[normal]` (see §5.3 X3).
 
