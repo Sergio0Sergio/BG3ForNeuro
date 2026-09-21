@@ -4,6 +4,10 @@ Tracked: 7 tickets produced from the two-axis code-review of `HEAD` -> working t
 
 Tracker: local markdown (`.scratch/<effort>/`), conventions of `issue-tracker-local.md`.
 
+## Open (backlog)
+- [ ] 25-short-rest-ui-click — `rest {"rest_type":"short"}` is a hollow ack (`executeRest` TODO(client) — no public Osiris fn, needs client-UI click like dialogue-click). See issues/25-short-rest-ui-click.md
+- [ ] 26-travel-cross-region — `travel_to` cross-region is a hollow ack (`executeTravel` TODO(game) — candidates `Osi.TeleportTo`/`GetNearestWaypoint` unprobed). See issues/26-travel-cross-region.md
+
 ## Status
 - [x] 01-bonus-legacy-ba-spend — done (live bench: `Osi.UseSpell` spends NO BA/AP natively; `PartyIncreaseActionResourceValue` is a no-op for personal resources; public write set = `AddActionPoints`(AP) + `PartyIncrease…`(no-op) — no single-actor BA writer exists. Decision: enforce BA budget in-router on the legacy path, engine writer impossible). **Implementation verified live** (v0.8.30, PAK v036L legacy): legacy `bonus_action` #1 accepted + marked + logged, #2/#3 REFUSED `action_failed "Bonus action already used this turn (BA budget enforced in-router)"`; **reset-on-`TurnStarted` VERIFIED live (2026-09-21, v0.8.60, Astarion honest path, real cycling combat): turn1 #1 accepted (`bzA1`), turn1 #2 REFUSED (`bzA2`), turn2 #3 accepted through the budget gate (`bzA3`, failed only on melee range; no new `bonus REFUSED` in SE log). Ticket fully resolved.**
 - [x] 02-movement-manual-cost — done (v0.8.29 live bench: honest path = budget CLAMP only, `m0` gate "No movement left" when pool 0; game drains Movement natively on scripted combat movement (9→0 verified), so no manual writer needed — PartyIncrease personal no-op stands disqualified; legacy fallback dash-equivalent `AddActionPoints(actor,-1)` gated by `forceLegacy`/`legacyStable`. Evidence: move 14m→clamped 9.4m, 2nd move rejected at Movement=0; PAK v035)
