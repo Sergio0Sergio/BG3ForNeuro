@@ -1,0 +1,104 @@
+{
+    "allies": [
+        {
+            "alias": "tav",
+            "distance": 0.0,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 224.3,
+            "position_y": 29.0,
+            "position_z": 404.8
+        },
+        {
+            "alias": "origin_astarion",
+            "distance": 4.9,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 221.6,
+            "position_y": 30.7,
+            "position_z": 408.5
+        },
+        {
+            "alias": "poc_player_wizard",
+            "distance": 3.1,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 221.8,
+            "position_y": 30.2,
+            "position_z": 406.2
+        },
+        {
+            "alias": "poc_player_cleric",
+            "distance": 2.8,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 223.5,
+            "position_y": 30.0,
+            "position_z": 407.3
+        }
+    ],
+    "available_actions": [],
+    "can_rest": true,
+    "distance_reference": "tav",
+    "enemies": [],
+    "events": [],
+    "generated_at": "2026-09-21T13:54:56.5478585Z",
+    "inventory": [],
+    "mode": "exploration",
+    "objects": [
+        {
+            "alias": "elegis_1",
+            "distance": 57.1,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Elegis",
+            "position_x": 192.6,
+            "position_y": 36.8,
+            "position_z": 451.6,
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "zevlor_1",
+            "distance": 56.0,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Zevlor",
+            "position_x": 190.4,
+            "position_y": 36.3,
+            "position_z": 448.7,
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "kanon_1",
+            "distance": 42.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Kanon",
+            "position_x": 203.6,
+            "position_y": 36.6,
+            "position_z": 441.3,
+            "seen_by": "player",
+            "type": "character"
+        }
+    ],
+    "regions": [],
+    "screen": "exploration",
+    "trigger": "free_roam",
+    "turn_actor": "",
+    "version": 2
+}

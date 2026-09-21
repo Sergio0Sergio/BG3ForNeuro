@@ -1,0 +1,418 @@
+{
+    "allies": [
+        {
+            "alias": "tav",
+            "availability": "can act",
+            "distance": 24.7,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 215.9,
+            "position_y": 31.6,
+            "position_z": 411.1
+        },
+        {
+            "alias": "poc_player_cleric",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 30.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 27.1,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 221.4,
+            "position_y": 31.0,
+            "position_z": 410.0
+        },
+        {
+            "alias": "origin_astarion",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 26.1,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 219.4,
+            "position_y": 31.4,
+            "position_z": 410.5
+        },
+        {
+            "alias": "poc_player_wizard",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 30.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 27.8,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 219.9,
+            "position_y": 31.2,
+            "position_z": 408.7
+        },
+        {
+            "alias": "remira_1",
+            "availability": "acting now, can act",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                },
+                {
+                    "duration_left": 12.0,
+                    "id": "BANE",
+                    "name": "Bane"
+                }
+            ],
+            "distance": 0.0,
+            "hp": 17,
+            "max_hp": 23,
+            "name": "Remira",
+            "position_x": 211.3,
+            "position_y": 24.8,
+            "position_z": 434.4
+        },
+        {
+            "alias": "aradin_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                },
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 8.7,
+            "hp": 36,
+            "max_hp": 36,
+            "name": "Aradin",
+            "position_x": 206.3,
+            "position_y": 24.9,
+            "position_z": 427.3
+        },
+        {
+            "alias": "barth_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 5.6,
+            "hp": 15,
+            "max_hp": 23,
+            "name": "Barth",
+            "position_x": 206.6,
+            "position_y": 24.9,
+            "position_z": 431.3
+        },
+        {
+            "alias": "wyll_1",
+            "availability": "cannot act",
+            "conditions": [
+                {
+                    "duration_left": 23.8,
+                    "id": "FEATHER_FALL",
+                    "name": "Feather Fall"
+                },
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                },
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 15.0,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Wyll",
+            "position_x": 201.3,
+            "position_y": 25.1,
+            "position_z": 423.3
+        },
+        {
+            "alias": "zevlor_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 30.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 14.8,
+            "hp": 54,
+            "max_hp": 54,
+            "name": "Zevlor",
+            "position_x": 204.3,
+            "position_y": 36.4,
+            "position_z": 440.3
+        }
+    ],
+    "available_actions": [
+        "end_turn",
+        "attack_entity: [goblin_brawler_1, za_krug_1, bugbear_1, worg_1, goblin_tracker_1, goblin_tracker_2, goblin_tracker_3, goblin_booyahg_1]",
+        "move_to_target: [tav, poc_player_cleric, origin_astarion, poc_player_wizard, remira_1, aradin_1, barth_1, wyll_1, zevlor_1, goblin_brawler_1, za_krug_1, bugbear_1, worg_1, goblin_tracker_1, goblin_tracker_2, goblin_tracker_3, goblin_booyahg_1]",
+        "cast_spell: [jump, shove, dash, throw, piercing_strike, hamstring_shot, brace_ranged, main_hand_attack, ranged_attack]"
+    ],
+    "distance_reference": "remira_1",
+    "enemies": [
+        {
+            "alias": "goblin_brawler_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 9.2,
+            "hp": 11,
+            "max_hp": 11,
+            "name": "Goblin Brawler",
+            "position_x": 207.6,
+            "position_y": 24.8,
+            "position_z": 425.9
+        },
+        {
+            "alias": "za_krug_1",
+            "conditions": [
+                {
+                    "duration_left": 6.0,
+                    "id": "GOB_RECKLESS_ATTACK",
+                    "name": "Gob Reckless Attack"
+                }
+            ],
+            "distance": 1.9,
+            "hp": 27,
+            "max_hp": 27,
+            "name": "Za'krug",
+            "position_x": 210.6,
+            "position_y": 24.8,
+            "position_z": 432.6
+        },
+        {
+            "alias": "bugbear_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 4.7,
+            "hp": 35,
+            "max_hp": 35,
+            "name": "Bugbear",
+            "position_x": 208.3,
+            "position_y": 24.7,
+            "position_z": 430.8
+        },
+        {
+            "alias": "worg_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 10.7,
+            "hp": 29,
+            "max_hp": 33,
+            "name": "Worg",
+            "position_x": 204.6,
+            "position_y": 25.2,
+            "position_z": 426.0
+        },
+        {
+            "alias": "goblin_tracker_1",
+            "distance": 22.9,
+            "hp": 9,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 211.1,
+            "position_y": 29.4,
+            "position_z": 411.9
+        },
+        {
+            "alias": "goblin_tracker_2",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 23.6,
+            "hp": 6,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 215.8,
+            "position_y": 31.7,
+            "position_z": 412.3
+        },
+        {
+            "alias": "goblin_tracker_3",
+            "conditions": [
+                {
+                    "duration_left": 6.0,
+                    "id": "ARMS_OF_HADAR",
+                    "name": "Arms Of Hadar"
+                }
+            ],
+            "distance": 18.5,
+            "hp": 1,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 195.6,
+            "position_y": 27.8,
+            "position_z": 425.1
+        },
+        {
+            "alias": "goblin_booyahg_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 14.8,
+            "hp": 11,
+            "max_hp": 16,
+            "name": "Goblin Booyahg",
+            "position_x": 202.7,
+            "position_y": 25.1,
+            "position_z": 422.4
+        }
+    ],
+    "events": [],
+    "generated_at": "2026-09-21T14:09:41.1517448Z",
+    "mode": "combat",
+    "spells": [
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "jump",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_Jump",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "shove",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Shove",
+            "targets_in_range": [
+                "za_krug_1"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "dash",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_Dash_NPC",
+            "targets_in_range": [
+                "za_krug_1"
+            ]
+        },
+        {
+            "aoe": 1.0,
+            "cost": "action",
+            "name": "throw",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Throw_Throw",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "piercing_strike",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_PiercingThrust",
+            "targets_in_range": [
+                "za_krug_1"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "hamstring_shot",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_HamstringShot",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "free",
+            "name": "brace_ranged",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_SteadyRanged",
+            "targets_in_range": [
+                "za_krug_1"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "main_hand_attack",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_MainHandAttack",
+            "targets_in_range": [
+                "za_krug_1"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "ranged_attack",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_MainHandAttack",
+            "targets_in_range": []
+        }
+    ],
+    "trigger": "TurnStarted",
+    "turn_actor": "remira_1",
+    "turn_initiative_index": 13,
+    "turn_initiative_total": 18,
+    "version": 2
+}

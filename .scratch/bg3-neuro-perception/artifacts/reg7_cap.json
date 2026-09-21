@@ -1,0 +1,894 @@
+{
+    "allies": [
+        {
+            "alias": "tav",
+            "availability": "can act",
+            "distance": 5.6,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 215.9,
+            "position_y": 31.6,
+            "position_z": 411.1
+        },
+        {
+            "alias": "poc_player_cleric",
+            "availability": "acting now, can act",
+            "conditions": [
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 0.0,
+            "hp": 13,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 221.4,
+            "position_y": 31.0,
+            "position_z": 410.0
+        },
+        {
+            "alias": "origin_astarion",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 2.1,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 219.4,
+            "position_y": 31.4,
+            "position_z": 410.5
+        },
+        {
+            "alias": "poc_player_wizard",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 2.0,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 219.9,
+            "position_y": 31.2,
+            "position_z": 408.7
+        },
+        {
+            "alias": "remira_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 12.0,
+                    "id": "BANE",
+                    "name": "Bane"
+                }
+            ],
+            "distance": 32.6,
+            "hp": 18,
+            "max_hp": 23,
+            "name": "Remira",
+            "position_x": 206.3,
+            "position_y": 24.8,
+            "position_z": 438.3
+        },
+        {
+            "alias": "aradin_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                },
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 23.7,
+            "hp": 36,
+            "max_hp": 36,
+            "name": "Aradin",
+            "position_x": 206.3,
+            "position_y": 24.9,
+            "position_z": 427.3
+        },
+        {
+            "alias": "barth_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 26.7,
+            "hp": 15,
+            "max_hp": 23,
+            "name": "Barth",
+            "position_x": 206.6,
+            "position_y": 24.9,
+            "position_z": 431.3
+        },
+        {
+            "alias": "wyll_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 23.8,
+                    "id": "FEATHER_FALL",
+                    "name": "Feather Fall"
+                },
+                {
+                    "duration_left": 24.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                },
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 24.8,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Wyll",
+            "position_x": 201.3,
+            "position_y": 25.1,
+            "position_z": 423.3
+        },
+        {
+            "alias": "zevlor_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 30.0,
+                    "id": "RALLY",
+                    "name": "Rally"
+                }
+            ],
+            "distance": 35.2,
+            "hp": 54,
+            "max_hp": 54,
+            "name": "Zevlor",
+            "position_x": 204.3,
+            "position_y": 36.4,
+            "position_z": 440.3
+        }
+    ],
+    "available_actions": [
+        "end_turn",
+        "attack_entity: [goblin_brawler_1, za_krug_1, bugbear_1, worg_1, goblin_tracker_1, goblin_tracker_2, goblin_tracker_3, goblin_booyahg_1]",
+        "move_to_target: [tav, poc_player_cleric, origin_astarion, poc_player_wizard, remira_1, aradin_1, barth_1, wyll_1, zevlor_1, goblin_brawler_1, za_krug_1, bugbear_1, worg_1, goblin_tracker_1, goblin_tracker_2, goblin_tracker_3, goblin_booyahg_1]",
+        "cast_spell: [jump, dip, hide, shove, throw, improvised_melee_weapon, dash, help, disengage, main_hand_attack, concussive_smash, command, healing_word, disguise_self, bless, disguise_self_masc_tiefling, disguise_self_femme_tiefling, disguise_self_masc_drow, disguise_self_femme_drow, disguise_self_masc_human, disguise_self_femme_human, disguise_self_masc_githyanki, disguise_self_femme_githyanki, disguise_self_masc_dwarf, disguise_self_femme_dwarf, disguise_self_masc_elf, disguise_self_femme_elf, disguise_self_masc_half_elf, disguise_self_femme_half_elf, disguise_self_masc_halfling, disguise_self_femme_halfling, disguise_self_masc_dragonborn, disguise_self_femme_dragonborn, disguise_self_masc_half_orc, disguise_self_femme_half_orc, disguise_self_masc_gnome, disguise_self_femme_gnome, disguise_self_masc_strong_human, disguise_self_femme_strong_human, disguise_self_masc_strong_drow, disguise_self_femme_strong_drow, disguise_self_masc_strong_elf, disguise_self_femme_strong_elf, disguise_self_masc_strong_half_elf, disguise_self_femme_strong_half_elf, disguise_self_masc_strong_tiefling, disguise_self_femme_strong_tiefling, resistance, guidance, sacred_flame, fire_bolt, blessing_of_the_trickster, charm_person, cure_wounds, bane, turn_undead, invoke_duplicity]"
+    ],
+    "distance_reference": "poc_player_cleric",
+    "enemies": [
+        {
+            "alias": "goblin_brawler_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 22.0,
+            "hp": 11,
+            "max_hp": 11,
+            "name": "Goblin Brawler",
+            "position_x": 207.6,
+            "position_y": 24.8,
+            "position_z": 425.9
+        },
+        {
+            "alias": "za_krug_1",
+            "conditions": [
+                {
+                    "duration_left": 6.0,
+                    "id": "GOB_RECKLESS_ATTACK",
+                    "name": "Gob Reckless Attack"
+                },
+                {
+                    "duration_left": 6.0,
+                    "id": "EXTRA_ATTACK",
+                    "name": "Extra Attack"
+                },
+                {
+                    "duration_left": 6.0,
+                    "id": "GOB_RECKLESS_ATTACK",
+                    "name": "Gob Reckless Attack"
+                }
+            ],
+            "distance": 25.8,
+            "hp": 27,
+            "max_hp": 27,
+            "name": "Za'krug",
+            "position_x": 210.6,
+            "position_y": 24.8,
+            "position_z": 432.6
+        },
+        {
+            "alias": "bugbear_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 25.4,
+            "hp": 35,
+            "max_hp": 35,
+            "name": "Bugbear",
+            "position_x": 208.3,
+            "position_y": 24.7,
+            "position_z": 430.8
+        },
+        {
+            "alias": "worg_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 23.9,
+            "hp": 29,
+            "max_hp": 33,
+            "name": "Worg",
+            "position_x": 204.6,
+            "position_y": 25.2,
+            "position_z": 426.0
+        },
+        {
+            "alias": "goblin_tracker_1",
+            "distance": 10.7,
+            "hp": 9,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 211.1,
+            "position_y": 29.4,
+            "position_z": 411.9
+        },
+        {
+            "alias": "goblin_tracker_2",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 6.1,
+            "hp": 6,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 215.8,
+            "position_y": 31.7,
+            "position_z": 412.3
+        },
+        {
+            "alias": "goblin_tracker_3",
+            "conditions": [
+                {
+                    "duration_left": 6.0,
+                    "id": "ARMS_OF_HADAR",
+                    "name": "Arms Of Hadar"
+                }
+            ],
+            "distance": 30.0,
+            "hp": 1,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 195.6,
+            "position_y": 27.8,
+            "position_z": 425.1
+        },
+        {
+            "alias": "goblin_booyahg_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 23.2,
+            "hp": 11,
+            "max_hp": 16,
+            "name": "Goblin Booyahg",
+            "position_x": 202.7,
+            "position_y": 25.1,
+            "position_z": 422.4
+        }
+    ],
+    "events": [],
+    "generated_at": "2026-09-21T14:13:50.8798402Z",
+    "mode": "combat",
+    "spells": [
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "jump",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_Jump",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "dip",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Dip",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "hide",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_Hide",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "shove",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Shove",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 1.0,
+            "cost": "action",
+            "name": "throw",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Throw_Throw",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 1.0,
+            "cost": "action",
+            "name": "improvised_melee_weapon",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Throw_ImprovisedWeapon",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "dash",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_Dash",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "help",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Help",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disengage",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_Disengage",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "main_hand_attack",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_MainHandAttack",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "concussive_smash",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_ConcussiveSmash",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "command",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Target_Command_Container",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "healing_word",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Target_HealingWord",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "bless",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Target_Bless",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_tiefling",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Tiefling_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_tiefling",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Tiefling_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_drow",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Drow_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_drow",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Drow_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_human",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Human_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_human",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Human_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_githyanki",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Githyanki_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_githyanki",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Githyanki_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_dwarf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Dwarf_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_dwarf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Dwarf_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Elf_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Elf_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_half_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_HalfElf_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_half_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_HalfElf_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_halfling",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Halfling_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_halfling",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Halfling_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_dragonborn",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Dragonborn_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_dragonborn",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Dragonborn_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_half_orc",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_HalfOrc_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_half_orc",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_HalfOrc_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_gnome",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Gnome_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_gnome",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Gnome_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_strong_human",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Human_Strong_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_strong_human",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Human_Strong_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_strong_drow",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Drow_Strong_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_strong_drow",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Drow_Strong_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_strong_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Elf_Strong_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_strong_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Elf_Strong_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_strong_half_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_HalfElf_Strong_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_strong_half_elf",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_HalfElf_Strong_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_masc_strong_tiefling",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Tiefling_Strong_Male",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disguise_self_femme_strong_tiefling",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Shout_DisguiseSelf_Tiefling_Strong_Female",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "resistance",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Resistance",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "guidance",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Guidance",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "sacred_flame",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_SacredFlame",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "fire_bolt",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_FireBolt",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "blessing_of_the_trickster",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_BlessingOfTheTrickster",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "charm_person",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Target_CharmPerson",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "cure_wounds",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Target_CureWounds",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "bane",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "1",
+            "spell_name": "Target_Bane",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 9.0,
+            "cost": "action",
+            "name": "turn_undead",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_TurnUndead",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "invoke_duplicity",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_InvokeDuplicity",
+            "targets_in_range": []
+        }
+    ],
+    "trigger": "state_capture",
+    "turn_actor": "poc_player_cleric",
+    "turn_initiative_index": 2,
+    "turn_initiative_total": 18,
+    "version": 2
+}

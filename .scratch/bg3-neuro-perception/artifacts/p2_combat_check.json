@@ -1,0 +1,467 @@
+{
+    "allies": [
+        {
+            "alias": "tav",
+            "availability": "acting now, can act",
+            "distance": 0.0,
+            "hp": 15,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 216.3,
+            "position_y": 31.6,
+            "position_z": 411.2
+        },
+        {
+            "alias": "poc_player_cleric",
+            "availability": "can act",
+            "distance": 4.7,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 220.2,
+            "position_y": 31.1,
+            "position_z": 408.6
+        },
+        {
+            "alias": "origin_astarion",
+            "availability": "can act",
+            "distance": 8.4,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 223.3,
+            "position_y": 29.9,
+            "position_z": 406.8
+        },
+        {
+            "alias": "poc_player_wizard",
+            "availability": "can act",
+            "distance": 4.1,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 219.7,
+            "position_y": 31.2,
+            "position_z": 408.8
+        },
+        {
+            "alias": "wyll_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 29.9,
+                    "id": "FEATHER_FALL",
+                    "name": "Feather Fall"
+                }
+            ],
+            "distance": 25.3,
+            "hp": 11,
+            "max_hp": 17,
+            "name": "Wyll",
+            "position_x": 197.4,
+            "position_y": 27.7,
+            "position_z": 427.6
+        },
+        {
+            "alias": "zevlor_1",
+            "availability": "can act",
+            "distance": 36.1,
+            "hp": 54,
+            "max_hp": 54,
+            "name": "Zevlor",
+            "position_x": 207.7,
+            "position_y": 35.5,
+            "position_z": 446.0
+        },
+        {
+            "alias": "remira_1",
+            "availability": "can act",
+            "distance": 19.0,
+            "hp": 23,
+            "max_hp": 23,
+            "name": "Remira",
+            "position_x": 217.3,
+            "position_y": 27.5,
+            "position_z": 429.8
+        },
+        {
+            "alias": "aradin_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "duration_left": 12.0,
+                    "id": "BANE",
+                    "name": "Bane"
+                },
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 15.9,
+            "hp": 23,
+            "max_hp": 36,
+            "name": "Aradin",
+            "position_x": 210.3,
+            "position_y": 24.8,
+            "position_z": 424.3
+        },
+        {
+            "alias": "barth_1",
+            "availability": "can act",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                },
+                {
+                    "duration_left": 12.0,
+                    "id": "BANE",
+                    "name": "Bane"
+                }
+            ],
+            "distance": 23.3,
+            "hp": 16,
+            "max_hp": 23,
+            "name": "Barth",
+            "position_x": 206.6,
+            "position_y": 24.9,
+            "position_z": 431.3
+        }
+    ],
+    "available_actions": [
+        "end_turn",
+        "attack_entity: [bugbear_1, za_krug_1, worg_1, goblin_tracker_1, goblin_tracker_2, goblin_booyahg_1, goblin_tracker_3]",
+        "move_to_target: [tav, poc_player_cleric, origin_astarion, poc_player_wizard, wyll_1, zevlor_1, remira_1, aradin_1, barth_1, bugbear_1, za_krug_1, worg_1, goblin_tracker_1, goblin_tracker_2, goblin_booyahg_1, goblin_tracker_3]",
+        "cast_spell: [jump, dip, hide, shove, throw, improvised_melee_weapon, dash, help, disengage, fire_bolt, main_hand_attack, second_wind, hamstring_shot, action_surge, ranged_attack, flourish, piercing_strike, weakening_strike]"
+    ],
+    "distance_reference": "tav",
+    "enemies": [
+        {
+            "alias": "bugbear_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 14.4,
+            "hp": 35,
+            "max_hp": 35,
+            "name": "Bugbear",
+            "position_x": 211.0,
+            "position_y": 24.9,
+            "position_z": 422.7
+        },
+        {
+            "alias": "za_krug_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                },
+                {
+                    "duration_left": 6.0,
+                    "id": "GOB_RECKLESS_ATTACK",
+                    "name": "Gob Reckless Attack"
+                },
+                {
+                    "duration_left": 6.0,
+                    "id": "EXTRA_ATTACK",
+                    "name": "Extra Attack"
+                },
+                {
+                    "duration_left": 6.0,
+                    "id": "GOB_RECKLESS_ATTACK",
+                    "name": "Gob Reckless Attack"
+                }
+            ],
+            "distance": 21.6,
+            "hp": 27,
+            "max_hp": 27,
+            "name": "Za'krug",
+            "position_x": 207.0,
+            "position_y": 24.9,
+            "position_z": 429.5
+        },
+        {
+            "alias": "worg_1",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 17.7,
+            "hp": 33,
+            "max_hp": 33,
+            "name": "Worg",
+            "position_x": 207.7,
+            "position_y": 24.8,
+            "position_z": 425.1
+        },
+        {
+            "alias": "goblin_tracker_1",
+            "distance": 5.7,
+            "hp": 9,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 211.1,
+            "position_y": 29.4,
+            "position_z": 411.9,
+            "status": "cannot act"
+        },
+        {
+            "alias": "goblin_tracker_2",
+            "conditions": [
+                {
+                    "id": "FLANKED",
+                    "name": "Flanked"
+                }
+            ],
+            "distance": 1.2,
+            "hp": 9,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 215.3,
+            "position_y": 31.7,
+            "position_z": 411.8,
+            "status": "cannot act"
+        },
+        {
+            "alias": "goblin_booyahg_1",
+            "distance": 19.0,
+            "hp": 16,
+            "max_hp": 16,
+            "name": "Goblin Booyahg",
+            "position_x": 202.8,
+            "position_y": 25.1,
+            "position_z": 422.8
+        },
+        {
+            "alias": "goblin_tracker_3",
+            "distance": 25.6,
+            "hp": 9,
+            "max_hp": 9,
+            "name": "Goblin Tracker",
+            "position_x": 195.3,
+            "position_y": 27.9,
+            "position_z": 425.3,
+            "status": "cannot act"
+        }
+    ],
+    "events": [],
+    "generated_at": "2026-09-21T13:48:40.9361147Z",
+    "mode": "combat",
+    "spells": [
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "jump",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_Jump",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "dip",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Dip",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "hide",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_Hide",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "shove",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Shove",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 1.0,
+            "cost": "action",
+            "name": "throw",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Throw_Throw",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 1.0,
+            "cost": "action",
+            "name": "improvised_melee_weapon",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Throw_ImprovisedWeapon",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "dash",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_Dash",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "help",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_Help",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "disengage",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_Disengage",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "fire_bolt",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_FireBolt",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "main_hand_attack",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_MainHandAttack",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "second_wind",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_SecondWind",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "hamstring_shot",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_HamstringShot",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "free",
+            "name": "action_surge",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Shout_ActionSurge",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "ranged_attack",
+            "on_cooldown": false,
+            "range": 0.0,
+            "slot": "0",
+            "spell_name": "Projectile_MainHandAttack",
+            "targets_in_range": []
+        },
+        {
+            "aoe": 0.0,
+            "cost": "bonus_action",
+            "name": "flourish",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_OpeningAttack",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "piercing_strike",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_PiercingThrust",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        },
+        {
+            "aoe": 0.0,
+            "cost": "action",
+            "name": "weakening_strike",
+            "on_cooldown": false,
+            "range": 1.5,
+            "slot": "0",
+            "spell_name": "Target_HinderingSmash",
+            "targets_in_range": [
+                "goblin_tracker_2"
+            ]
+        }
+    ],
+    "trigger": "TurnStarted",
+    "turn_actor": "tav",
+    "turn_initiative_index": 1,
+    "turn_initiative_total": 17,
+    "version": 2
+}

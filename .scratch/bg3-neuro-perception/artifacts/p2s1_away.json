@@ -1,0 +1,89 @@
+{
+    "allies": [
+        {
+            "alias": "tav",
+            "distance": 0.0,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 234.3,
+            "position_y": 26.3,
+            "position_z": 400.8
+        },
+        {
+            "alias": "poc_player_cleric",
+            "distance": 3.0,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 234.6,
+            "position_y": 26.4,
+            "position_z": 397.7
+        },
+        {
+            "alias": "origin_astarion",
+            "distance": 4.9,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 236.3,
+            "position_y": 26.7,
+            "position_z": 396.3
+        },
+        {
+            "alias": "poc_player_wizard",
+            "distance": 3.2,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 236.4,
+            "position_y": 26.6,
+            "position_z": 398.5
+        }
+    ],
+    "available_actions": [],
+    "can_rest": true,
+    "distance_reference": "tav",
+    "enemies": [],
+    "events": [],
+    "generated_at": "2026-09-21T13:54:04.5449634Z",
+    "inventory": [],
+    "mode": "exploration",
+    "objects": [
+        {
+            "alias": "kanon_1",
+            "distance": 51.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Kanon",
+            "position_x": 203.6,
+            "position_y": 36.6,
+            "position_z": 441.3,
+            "seen_by": "player",
+            "type": "character"
+        },
+        {
+            "alias": "door_1",
+            "distance": 58.5,
+            "interactions": [
+                "open",
+                "lockpick"
+            ],
+            "lootable": false,
+            "name": "Door",
+            "position_x": 284.4,
+            "position_y": 15.3,
+            "position_z": 372.7,
+            "seen_by": "player",
+            "type": "door"
+        }
+    ],
+    "regions": [],
+    "screen": "exploration",
+    "trigger": "free_roam",
+    "turn_actor": "",
+    "version": 2
+}
