@@ -339,6 +339,65 @@ public class ActionRouterTests : IDisposable
     }
 
     [Fact]
+    public void CastSpell_MultiTargetIds_AllAlliesInRange_Succeeds()
+    {
+        // v0.8.60 (тикет 20): bless на нескольких союзников — одним кастом.
+        // Роутер валидирует каждую цель из target_ids и пропускает дальше.
+        var router = CreateRouter();
+        var state = CombatWithTurn("shadowheart", "shadowheart", "tav", "karlach", "gale");
+        state.Spells.Add(new SpellInfo { SpellName = "Target_Bless", Name = "bless", Cost = "action", Slot = "1", Range = 18, CastsLeft = 1 });
+        state.Allies.First(a => a.Alias == "tav").PositionX = 2;
+        state.Allies.First(a => a.Alias == "gale").PositionX = 3;
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell",
+            """{"spell_name":"bless","target_ids":["tav","karlach","gale"]}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+        Assert.True(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+        var file = File.ReadAllText(Path.Combine(_tmpDir, "action_act-1.json"));
+        var node = System.Text.Json.Nodes.JsonNode.Parse(file)!;
+        var dataNode = System.Text.Json.Nodes.JsonNode.Parse(node["data"]!.GetValue<string>())!;
+        Assert.Equal(3, dataNode["target_ids"]!.AsArray().Count);
+        Assert.Equal("tav", dataNode["target_ids"]![0]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void CastSpell_MultiTargetIds_OneMissing_HonestRefusal()
+    {
+        // v0.8.60 (тикет 20): каждая цель из target_ids должна существовать.
+        var router = CreateRouter();
+        var state = CombatWithTurn("shadowheart", "shadowheart", "tav", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Target_Bless", Name = "bless", Cost = "action", Slot = "1", Range = 18, CastsLeft = 1 });
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell",
+            """{"spell_name":"bless","target_ids":["tav","npc_absent"]}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.TargetMissing, result.ErrorCode);
+        Assert.Contains("npc_absent", result.ErrorDetail);
+        Assert.False(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+    }
+
+    [Fact]
+    public void CastSpell_MultiTargetIds_OneOutOfRange_HonestRefusal()
+    {
+        // v0.8.60 (тикет 20): out-of-range одной цели из target_ids — не кастуем
+        // (иначе движок молча переподберёт и "успех" будет нечестным).
+        var router = CreateRouter();
+        var state = CombatWithTurn("shadowheart", "shadowheart", "tav", "karlach");
+        state.Spells.Add(new SpellInfo { SpellName = "Target_Bless", Name = "bless", Cost = "action", Slot = "1", Range = 18, CastsLeft = 1 });
+        state.Allies.First(a => a.Alias == "tav").PositionX = 100;
+
+        var result = router.ValidateAndDispatch("act-1", "cast_spell",
+            """{"spell_name":"bless","target_ids":["tav","karlach"]}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.TargetNotInRange, result.ErrorCode);
+        Assert.Contains("tav", result.ErrorDetail);
+        Assert.False(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+    }
+
+    [Fact]
     public void CastSpell_UnknownFriendlyName_ListsKnownFriendlyNames()
     {
         var router = CreateRouter();

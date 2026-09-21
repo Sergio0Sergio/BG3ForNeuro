@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.57 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02)
+-- BG3Neuro v0.8.63 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02 + perception 07-08)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.59"
+local MOD_VERSION = "0.8.63"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -2794,6 +2794,79 @@ local function sightLeadOf()
     return sightLeadOfMemo
 end
 
+-- P6 v2 (followup 24): B-гейт не должен эмитить маскированные сущности в эксплорейшне.
+-- Логика зеркалит движковый isVisible (brawl_Utils.lua:266): маскировка — это СТАТУСЫ
+-- (INVISIBLE/SNEAKING), а не Osi.IsInvisible (ловушка тикета 02: возвращал «скрыт от
+-- камеры», не статус — спек 03 rev2 §2). Статусы читаем из сырого StatusMachine, минуя
+-- фильтр visible/internal у conditionsOf.
+-- Ноль новых top-level local'ов: в main-чанке уже ровно 200 активных локалов
+-- (лимит Lua = 200; ошибка «too many local variables» на executeAction в v0.8.63).
+-- Поэтому неймспейс — глобальная таблица (в файле уже есть глобалы:
+-- perceptionActors/perceptionObjects).
+BG3NEURO_SIGHT = {
+    MASKING = { "INVISIBLE", "SNEAKING" },
+    TRUESIGHT = { "TRUESIGHT", "MOD_Generic_Truesight" },
+    SEE_INVIS = { "SEE_INVISIBILITY", "MAG_SEE_INVISIBILITY_HIDDEN_IGNORE_RESTING" },
+    SEE_INVIS_RANGE = 9,
+}
+
+function BG3NEURO_SIGHT.statusIdSet(ent)
+    local set = {}
+    if ent == nil then
+        return set
+    end
+    local statuses = statusListOf(ent)
+    if statuses == nil then
+        return set
+    end
+    for _, st in ipairs(statusItemsOf(statuses)) do
+        local id = tostring(fieldOf(st, "StatusId") or "")
+        if id ~= "" then
+            set[id] = true
+        end
+    end
+    return set
+end
+
+function BG3NEURO_SIGHT.anyStatusIn(set, ids)
+    for _, id in ipairs(ids) do
+        if set[id] then
+            return true
+        end
+    end
+    return false
+end
+
+function BG3NEURO_SIGHT.isMasked(lead, targetGuid)
+    -- true => цель маскирована и лидер не видит сквозь маскировку => не эмитим.
+    local tOk, tEnt = pcall(Ext.Entity.Get, targetGuid)
+    if not tOk or tEnt == nil then
+        return false
+    end
+    local tSet = BG3NEURO_SIGHT.statusIdSet(tEnt)
+    if not BG3NEURO_SIGHT.anyStatusIn(tSet, BG3NEURO_SIGHT.MASKING) then
+        return false
+    end
+    local lOk, lEnt = pcall(Ext.Entity.Get, lead)
+    if lOk and lEnt ~= nil then
+        local lSet = BG3NEURO_SIGHT.statusIdSet(lEnt)
+        if BG3NEURO_SIGHT.anyStatusIn(lSet, BG3NEURO_SIGHT.TRUESIGHT) then
+            return false
+        end
+        if BG3NEURO_SIGHT.anyStatusIn(lSet, BG3NEURO_SIGHT.SEE_INVIS) then
+            local lx, ly, lz = positionOf(lead)
+            local tx, ty, tz = positionOf(targetGuid)
+            if lx ~= nil and tx ~= nil then
+                local d = distance3(lx, ly, lz, tx, ty, tz)
+                if d ~= nil and d <= BG3NEURO_SIGHT.SEE_INVIS_RANGE then
+                    return false
+                end
+            end
+        end
+    end
+    return true
+end
+
 local function sightSees(partySet, targetGuid)
     if partySet[targetGuid] then
         return true
@@ -2803,11 +2876,15 @@ local function sightSees(partySet, targetGuid)
         return false
     end
     local okL, losV = pcall(function() return Osi.HasLineOfSight(lead, targetGuid) end)
-    if okL then
-        return losV == true or tostring(losV) == "1"
+    if not okL then
+        -- LOS недоступен/упал на первом доступе — деградация на дистанцию (не выпиливаем всё).
+        return true
     end
-    -- LOS недоступен/упал на первом доступе — деградация на дистанцию (не выпиливаем всё).
-    return true
+    if not (losV == true or tostring(losV) == "1") then
+        return false
+    end
+    -- P6 v2: геометрия пройдена, но сущность маскирована (невидимость/скрытность) — не эмитим.
+    return not BG3NEURO_SIGHT.isMasked(lead, targetGuid)
 end
 
 local function scanNearbyObjects(ax, ay, az, partySet, ownedAliases)
@@ -2839,7 +2916,6 @@ local function scanNearbyObjects(ax, ay, az, partySet, ownedAliases)
                                 position_y = round1(py or 0),
                                 position_z = round1(pz or 0),
                                 region = currentRegionName(),
-                                seen_by = "player",
                                 type = cls.type,
                                 status = nil,
                                 interactions = cls.interactions,
@@ -3619,6 +3695,11 @@ end
 local function enqueueCastRequest(actorUuid, opts)
     local spellName = opts.spellName
     local targetUuid = opts.target
+    -- v0.8.60 (тикет 20): мультитаргет (bless) — список целей вместо одной.
+    -- Один движковый каст покрывает все Targets (один слот/AP, честная экономика,
+    -- как реальный каст игрока). backward-compat: opts.target остаётся? Нет —
+    -- вызывающие передают opts.targets. Оба смержим с приоритетом targets.
+    local multiTargets = opts.targets
     local pos = opts.pos
     local posX, posY, posZ
     if pos ~= nil then
@@ -3705,15 +3786,28 @@ local function enqueueCastRequest(actorUuid, opts)
         }
     end
 
+    -- v0.8.60 (тикет 20): мультитаргет — Targets содержит каждую цель из списка.
+    -- Порядок важен: движок применяет Buff к каждой Target (bless до 3 целей).
+    -- Back-compat: opts.targets==nil → одна цель из opts.target.
     local targets = {}
-    if targetUuid and targetUuid ~= "" then
+    local targetUuids = {}
+    if type(multiTargets) == "table" and #multiTargets > 0 then
+        for _, tu in ipairs(multiTargets) do
+            if tu ~= nil and tu ~= "" then
+                targetUuids[#targetUuids + 1] = tu
+            end
+        end
+    elseif targetUuid and targetUuid ~= "" then
+        targetUuids[#targetUuids + 1] = targetUuid
+    end
+    for _, tu in ipairs(targetUuids) do
         local targetEntity
-        local tOk, tErr = pcall(function() return Ext.Entity.Get(targetUuid) end)
+        local tOk, tErr = pcall(function() return Ext.Entity.Get(tu) end)
         if tOk and tErr then
             targetEntity = tErr
         end
         if targetEntity == nil then
-            return nil, "Failed to get the target entity"
+            return nil, "Failed to get the target entity: " .. tostring(tu)
         end
         -- v0.8.18: как brawl — позиция цели всегда добавляется в Target.
         local target = { Target = targetEntity, TargetingType = spellType }
@@ -3722,7 +3816,8 @@ local function enqueueCastRequest(actorUuid, opts)
             target.Position = { tp[1], tp[2], tp[3] }
         end
         targets[#targets + 1] = target
-    elseif posX then
+    end
+    if #targetUuids == 0 and posX then
         targets[#targets + 1] = {
             Position = { posX, posY, posZ },
             TargetingType = spellType,
@@ -3815,6 +3910,7 @@ local function enqueueCastRequest(actorUuid, opts)
         forceFlags = forceFlags == true,
         bonusAction = bonusAction == true,
         targetUuid = targetUuid,
+        targetUuids = targetUuids,
         targetPos = targets[1] and targets[1].Position or nil,
         preparedSpells = preparedList,
         queueSize = queue and #queue or -1,
@@ -4267,7 +4363,25 @@ local function executeCast(action)
 
     local stats = Ext.Stats.Get(spellName) -- prototype-имя (X5-нормализация в StateExtractor)
     local spellType = stats and stats.SpellType or "Target"
-    local target = resolveEntity(data.target_id or "")
+    -- v0.8.60 (тикет 20): мультитаргет — target_ids собирает список целей
+    -- (bless до 3 союзников одним кастом). target_id остаётся back-compat
+    -- single-target: добавляется первой целью, если target_ids пуст.
+    local targetIds = {}
+    do
+        local single = resolveEntity(data.target_id or "")
+        if single ~= nil and single ~= "" then
+            targetIds[#targetIds + 1] = single
+        end
+        if type(data.target_ids) == "table" then
+            for _, tid in ipairs(data.target_ids) do
+                local resolved = resolveEntity(tid or "")
+                if resolved ~= nil and resolved ~= "" then
+                    targetIds[#targetIds + 1] = resolved
+                end
+            end
+        end
+    end
+    local target = targetIds[1] -- первый из списка (back-compat для старых веток)
     local pos = data.position
     -- v0.8.56 (тикет 19): роутер инжектит AoE-position без z (у C# нет Z в стейте) —
     -- подставляем Z кастера, иначе очередь/UseSpellAtPosition получат nil.
@@ -4280,7 +4394,7 @@ local function executeCast(action)
     -- v0.8.56 (тикет 19): Zone без цели и без позиции исполнить нечем (очередь
     -- повисла бы в running:true) — честный отказ. Позицию даёт роутер
     -- (авто-центр BestAoECenter) или явный position от Neuro.
-    if spellType == "Zone" and (target == nil or target == "") and pos == nil then
+    if spellType == "Zone" and #targetIds == 0 and pos == nil then
         return false, nil, "action_failed",
             "no_aoe_target: Zone spell '" .. tostring(spellName) .. "' needs target_id or position"
     end
@@ -4291,10 +4405,40 @@ local function executeCast(action)
     -- снаряд летит в ближайшего валидного кандидата (живой бенч 2026-09-21: witch
     -- bolt 22 м при радиусе ~18 м → «в труп», sneak-бросок → «у кастера», bless →
     -- «на кастера»). Позиционные касты (pos только, target пуст) помощник не гейтит.
-    if target ~= nil and target ~= "" then
-        local pvOk, pvCode, pvMsg = preValidateCastTarget(actor, spellName, target)
-        if not pvOk then
-            return false, nil, "action_failed", pvCode .. ": " .. pvMsg
+    -- v0.8.60 (тикет 20): пре-валидация КАЖДОЙ цели из списка (мультитаргет).
+    if #targetIds > 0 then
+        for _, tid in ipairs(targetIds) do
+            local pvOk, pvCode, pvMsg = preValidateCastTarget(actor, spellName, tid)
+            if not pvOk then
+                return false, nil, "action_failed", pvCode .. ": " .. pvMsg
+            end
+        end
+    end
+
+    -- v0.8.61 (тикет 07): книжный гард ДО любого исполнителя каста (единый для честного
+    -- и legacy-путей). Раньше неизвестное имя (нет ни одного прототипа в книге кастера)
+    -- на честном пути форс-пушилось в osiris-очередь и висело в running:true вечно
+    -- (живой стенд 2026-09-21: cast_spell wish → OsirisCastRequests size=1 не дренится,
+    -- результата нет). Теперь — честный отказ no_spell, как в legacy-пути и у C#-роутера.
+    -- Fail-open: если Osi.HasSpell недоступен/чтение не удалось — НЕ отказываем.
+    do
+        -- Прогрев ленивого резолвера Osi: первый доступ кидает и кэширует прокси.
+        pcall(function() return Osi.HasSpell end)
+        local spellCandidates = { spellName, "Projectile_" .. spellName, "Target_" .. spellName }
+        local probed, bookHit = false, false
+        for _, sid in ipairs(spellCandidates) do
+            local hOK, hRes = pcall(function() return Osi.HasSpell(actor, sid) end)
+            if hOK then
+                probed = true
+                if tostring(hRes) == "1" then
+                    bookHit = true
+                    break
+                end
+            end
+        end
+        if probed and not bookHit then
+            return false, nil, "action_failed", "no_spell: " .. tostring(spellName)
+                .. " is not in the caster's book"
         end
     end
 
@@ -4317,9 +4461,19 @@ local function executeCast(action)
     -- data.force_flags остаётся override (nil = авто). Osiris недоступен
     -- (verdict==nil) → не форсим, чтобы не менять поведение вражеских кастов.
     local forceFlags = data.force_flags
-    if forceFlags == nil and target ~= nil and target ~= "" then
-        local verdict = hostilityOf({ pureGuid(actor) }, pureGuid(target))
-        forceFlags = verdict ~= nil and verdict ~= "enemy"
+    -- v0.8.60 (тикет 20): авто-force для МУЛЬТИтаргета: все цели должны быть
+    -- известны (verdict ~= nil) и ни одна не враждебна (совпадает со старой
+    -- single-логикой force = verdict ~= nil and verdict ~= "enemy", обобщённой
+    -- на список). Любая неизвестная/вражеская цель → не форсим честный путь.
+    if forceFlags == nil and #targetIds > 0 then
+        forceFlags = true
+        for _, tid in ipairs(targetIds) do
+            local verdict = hostilityOf({ pureGuid(actor) }, pureGuid(tid))
+            if verdict == nil or verdict == "enemy" then
+                forceFlags = false
+                break
+            end
+        end
     end
     forceFlags = forceFlags == true
     -- v0.8.50 (тикет 18, вариант A): стоимость каста из UseCosts прототипа.
@@ -4355,6 +4509,15 @@ local function executeCast(action)
     end
     local oseiOk, oseiRes, oseiEntry
     if useOsiSpell then
+        -- v0.8.60 (тикет 20): Osi.UseSpell держит одну цель — мультитаргет (bless)
+        -- через legacy-путь не выражается. Честный отказ: multi идёт только
+        -- через движковую очередь (enqueue, Targets-массив, один слот/AP).
+        if #targetIds > 1 then
+            return false, nil, "action_failed",
+                "multi_target_not_supported_with_osi: '" .. tostring(spellName)
+                .. "' has " .. tostring(#targetIds) .. " targets, but use_osi_spell "
+                .. "casts on one target only — drop use_osi_spell for multi-target"
+        end
         -- Реальный игровой каст (v0.8.19, доказано вживую) — прямой Osi.UseSpell.
         -- Стабильное знание из экспериментов:
         --  * голое имя ("FireBolt") даёт story-запись без игрового каста;
@@ -4365,25 +4528,7 @@ local function executeCast(action)
         -- Пробуем кандидатов, приоритет у имён из книги кастера.
         local spellCandidates = { spellName, "Projectile_" .. spellName, "Target_" .. spellName }
         local knownNames = knownSpellCandidates(actor, spellCandidates)
-        -- v0.8.55 (бенч v61b1): голое имя даёт story-запись без игрового каста
-        -- (CastedSpell не приходит, pending висит в running:true вечно). Без
-        -- книжного совпадения — честный отказ, а не выстрел в пустоту.
-        do
-            local bookHit = false
-            for _, sid in ipairs(spellCandidates) do
-                if Osi and Osi.HasSpell then
-                    local hOK, hRes = pcall(Osi.HasSpell, actor, sid)
-                    if hOK and tostring(hRes) == "1" then
-                        bookHit = true
-                        break
-                    end
-                end
-            end
-            if not bookHit then
-                return false, nil, "action_failed", "no_spell: " .. tostring(spellName)
-                    .. " is not in the caster's book"
-            end
-        end
+        -- Книжный гард вынесен выше (единый для честного и legacy-путей, v0.8.61/тикет 07).
         if target then
             for _, sid in ipairs(knownNames) do
                 if not oseiOk then
@@ -4414,6 +4559,7 @@ local function executeCast(action)
             return enqueueCastRequest(actor, {
                 spellName = spellName,
                 target = target,
+                targets = targetIds,
                 pos = pos,
                 spellType = spellType,
                 insertAtFront = insertAtFront,
@@ -4435,9 +4581,11 @@ local function executeCast(action)
         -- сюда не попадает (это валидный исход каста, не сбой машин�ерии).
         pipelineFailed("cast")
         -- Fallback: копьё подальше от pipeline, честных AP не гарантирует.
+        -- v0.8.60 (тикет 20): legacy-cast держит одну цель — для мультитаргета
+        -- не используем (тихий каст только на первую цель, результат "нечестный").
         if pos then
             ok, err = pcall(Osi.UseSpellAtPosition, actor, spellName, pos.x, pos.y, pos.z, 0)
-        elseif target then
+        elseif target and #targetIds <= 1 then
             ok, err = pcall(Osi.UseSpell, actor, spellName, target, "", 1)
         end
     end
@@ -5575,6 +5723,104 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
         return true, nil, nil, nil, { debug = out }
     end
 
+    if name == "perception_probe" then
+        -- Стенд (followup 24, P6 v2): сырые входы B-гейта по кандидатам эксплорейшна.
+        -- Read-only; опционально мутация статуса для сценария невидимости/скрытности.
+        --   { "id":"pp1", "name":"perception_probe", "data":"{}" }
+        --   { ... "data":"{\"apply_status\":{\"target_id\":\"goblin_tracker_1\",\"status\":\"INVISIBLE\",\"duration\":3}}" }
+        local data = action.data or {}
+        local applied, removed = nil, nil
+        if type(data.apply_status) == "table" then
+            local t = resolveCombatActor(data.apply_status.target_id or "")
+            local sid = data.apply_status.status or ""
+            local dur = tonumber(data.apply_status.duration) or 3
+            if t ~= nil and sid ~= "" then
+                local ok, err = pcall(function() return Osi.ApplyStatus(t, sid, dur, 1) end)
+                applied = { target = t, status = sid, ok = ok and true or false,
+                    error = ok and nil or tostring(err) }
+            else
+                applied = { ok = false, error = "target/status unresolved" }
+            end
+        end
+        if type(data.remove_status) == "table" then
+            local t = resolveCombatActor(data.remove_status.target_id or "")
+            local sid = data.remove_status.status or ""
+            if t ~= nil and sid ~= "" then
+                local ok, err = pcall(function() return Osi.RemoveStatus(t, sid) end)
+                removed = { target = t, status = sid, ok = ok and true or false,
+                    error = ok and nil or tostring(err) }
+            else
+                removed = { ok = false, error = "target/status unresolved" }
+            end
+        end
+        local lead = sightLeadOf()
+        local partySet = partySetOf()
+        local lx, ly, lz = nil, nil, nil
+        if lead ~= nil then
+            lx, ly, lz = positionOf(lead)
+        end
+        local function probeRow(g)
+            local pOk, pEnt = pcall(Ext.Entity.Get, g)
+            local ent = (pOk and pEnt ~= nil) and pEnt or nil
+            local px, py, pz = positionOf(g)
+            local d = nil
+            if lx ~= nil and px ~= nil then
+                d = distance3(lx, ly, lz, px, py, pz)
+            end
+            local los = nil
+            if lead ~= nil then
+                local okL, v = pcall(function() return Osi.HasLineOfSight(lead, g) end)
+                los = okL and (v == true or tostring(v) == "1") or nil
+            end
+            local iOk, iV = pcall(function() return Osi.IsInvisible(g) end)
+            local iOk2, iV2 = pcall(function() return Osi.IsInvisibleByScript(g) end)
+            local ids = {}
+            for id in pairs(BG3NEURO_SIGHT.statusIdSet(ent)) do
+                ids[#ids + 1] = id
+            end
+            return {
+                guid = g, alias = displayName(g),
+                distance = round1(d),
+                in_party = partySet[g] and true or false,
+                los = los,
+                is_invisible = iOk and iV or nil,
+                is_invisible_script = iOk2 and iV2 or nil,
+                masked = (lead ~= nil) and BG3NEURO_SIGHT.isMasked(lead, g) or nil,
+                statuses = ids,
+            }
+        end
+        local rows = {}
+        local seen = {}
+        for g in pairs(partySet) do
+            seen[g] = true
+            rows[#rows + 1] = probeRow(g)
+        end
+        for _, compName in ipairs(EXPLORE_OBJECT_TYPES) do
+            for _, g in ipairs(allEntityGuids(compName)) do
+                if not seen[g] then
+                    seen[g] = true
+                    local px, py, pz = positionOf(g)
+                    if lx ~= nil and px ~= nil then
+                        local d = distance3(lx, ly, lz, px, py, pz)
+                        if d ~= nil and d <= EXPLORE_MAX_DISTANCE then
+                            rows[#rows + 1] = probeRow(g)
+                        end
+                    end
+                end
+            end
+        end
+        local masked = {}
+        for _, r in ipairs(rows) do
+            if r.masked then
+                masked[#masked + 1] = r.alias
+            end
+        end
+        _P("[BG3Neuro] perception_probe: rows=" .. tostring(#rows)
+            .. " masked=" .. tostring(#masked))
+        return true, nil, nil, nil,
+            { debug = { lead = lead, applied = applied, removed = removed, masked = masked, rows = rows } }
+    end
+
     if name == "bench_use_spell" then
         -- Стенд (followup 01): списывает ли Osi.UseSpell(actor, sid, target) BA нативно?
         -- Снимаем BonusActionPoint до вызова и после (1.5s — время асинхронного каста).
@@ -5765,6 +6011,11 @@ writeInitialState()
 -- one-shot throw не съел первый вердикт no_range/no_los (живой бенч b07f/b07h/b07i).
 pcall(function() return Osi.GetDistanceTo end)
 pcall(function() return Osi.HasLineOfSight end)
+-- followup 24: прогреваем сигналы perception_probe (P6 v2), чтобы первый probe не терял вердикт.
+pcall(function() return Osi.IsInvisible end)
+pcall(function() return Osi.IsInvisibleByScript end)
+pcall(function() return Osi.ApplyStatus end)
+pcall(function() return Osi.RemoveStatus end)
 startHeartbeatLoop()
 startHeartbeatLoop()
 pollActions()

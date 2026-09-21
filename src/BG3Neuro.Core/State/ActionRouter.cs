@@ -464,8 +464,23 @@ public sealed class ActionRouter
         var actor = data["actor"]?.GetValue<string>() ?? combatState?.TurnActor;
         var caster = combatState?.Allies.FirstOrDefault(a => a.Alias == actor);
 
-        var targetId = data["target_id"]?.GetValue<string>();
-        if (!string.IsNullOrWhiteSpace(targetId))
+        // v0.8.60 (тикет 20): multi-target cast (bless) — each provided target is
+        // validated for existence + range; single target_id stays back-compat,
+        // target_ids (list) enlarges the set. One engine cast covers all targets.
+        var targetIds = data["target_ids"]?.AsArray()
+            .Select(x => x?.GetValue<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!)
+            .ToList()
+            ?? new List<string>();
+
+        var singleId = data["target_id"]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(singleId))
+        {
+            targetIds.Insert(0, singleId);
+        }
+
+        foreach (var targetId in targetIds)
         {
             // v0.8.56 (тикеты 16/18): friendly buffs target allies — search both
             // sides. Honesty lives in the mod (AP/slot gates + post-success
@@ -482,7 +497,8 @@ public sealed class ActionRouter
                 return ValidationResult.Fail(ErrorCode.TargetNotInRange, $"Target '{targetId}' is out of range of '{spellName}'");
             }
         }
-        else if (spell is not null && spell.Aoe > 0 && data["coverage"] is not null)
+
+        if (targetIds.Count == 0 && spell is not null && spell.Aoe > 0 && data["coverage"] is not null)
         {
             var requested = data["coverage"]!.AsArray()
                 .Select(x => x?.GetValue<string>())
@@ -522,6 +538,7 @@ public sealed class ActionRouter
         }
 
         if (!string.IsNullOrWhiteSpace(data["target_id"]?.GetValue<string>())
+            || data["target_ids"] is not null
             || data["coverage"] is not null
             || data["position"] is not null)
         {

@@ -25,13 +25,14 @@
   },
   {
     "name": "cast_spell",
-    "description": "Cast a spell; for AoE, provide target_id, coverage, or the centre position.",
+    "description": "Cast a spell; for AoE, provide target_id, coverage, or the centre position. For multi-target spells (e.g. bless), provide target_ids.",
     "schema": {
       "type": "object",
       "required": ["spell_name"],
       "properties": {
         "spell_name": { "type": "string" },
         "target_id": { "type": "string" },
+        "target_ids": { "type": "array", "items": { "type": "string" } },
         "coverage": { "type": "array", "items": { "type": "string" } },
         "position": {
           "type": "object",
