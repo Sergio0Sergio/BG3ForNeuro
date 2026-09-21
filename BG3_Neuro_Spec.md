@@ -188,10 +188,8 @@ He says: "..."
 
 ```markdown
 ## Mode: normal
-## Objects (seen by Karlach, 5)
+## Objects (8)
 - goblin_camp_sign (readable, 5m)
-...
-## Objects (seen by Shadowheart, 3)
 ...
 ## Available actions
 - move_to_entity: [...]
@@ -199,6 +197,8 @@ He says: "..."
 - open_map
 - toggle_mode: [normal]
 ```
+
+> Perception contract rev 2 (`.scratch/bg3-neuro-perception/spec.md`): emission is **binary** — an entity is either on screen (emitted with `perception="visible"`, true current position) or absent from the state entirely. Per-character `seen by` grouping and the `seen_by` field are **removed** (single `## Objects (N)` header).
 
 > Note: `toggle_mode` in v1 shows only `[normal]` (see §5.3 X3).
 

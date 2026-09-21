@@ -82,18 +82,20 @@ Result: all items checked + 139 automated tests green (`dotnet test` + `tests\sm
 эксплорейшн + бой; инжекты `drive_action.ps1` серийно. Исходы по `issues/05-acceptance-and-bench.md`.
 
 - [x] **P1 засада не видна** (v082): эксплорейшн у ворот, камера вне двора → 18 вражеских сущностей не в `objects`/`enemies`.
-- [ ] **P2 вход в LOS**: сущность вошла в кадр → появилась в `state`, `perception="visible"`, позиция актуальная.
-- [ ] **P3 уход из вида**: ушла за укрытие/кадр → исчезла из `state` (`known`/`last_seen` отсутствуют).
+- [x] **P2 вход в LOS** (2026-09-21, v0.8.60): партия отходила и возвращалась; при возврате наземные сущности снова в `objects` с актуальной позицией (`p2s4_front.json`, 18 объектов, tav 218.3/31.6/410.3). Поля `perception` в стейте нет — видимость выражается присутствием/отсутствием; контрпример по дистанции: 14 сущностей на 17.5–51.9 м (< `EXPLORE_MAX_DISTANCE=60`).
+- [x] **P3 уход из вида** (2026-09-21, v0.8.60): отход партии на ~18 м → 16 персонажей исчезли из `objects` (`p2s1_away.json`, 2 объекта; `known`/`last_seen` отсутствуют). Дроп честно по LOS, а не по лимиту 60 м: те же сущности на S1 были 17.5–51.9 м.
 - [x] **P4 бой — полный ростер** (v082): все участники боя в `enemies`, в т.ч. заэкранные и невидимый-силуэт; позиции истинные.
 - [x] **P5 отказ по невидимой цели** (v082): действие с `target_id` вне `state` → роутер `TargetMissing` (Channel A); мод `no_perception` (04b).
-- [ ] **P6 невидимый вне боя в кадре**: скрывшийся NPC в зоне камеры не эмитится (не воспроизводится на стенде — нет инвиз-NPC у ворот).
+- [x] **P6 невидимый вне боя в кадре** (2026-09-21, v0.8.63, PAK v095) — **P6 v2 закрыт**: B-гейт теперь режет маскированных. `sightSees` после положительного LOS зовёт `BG3NEURO_SIGHT.isMasked` (сырой `StatusMachine`: у цели есть `INVISIBLE`/`SNEAKING`, а у лидера нет `TRUESIGHT`/`MOD_Generic_Truesight` и see-invisibility ≤9 м; fail-open). Живо на стенде (файловый мост, `perception_probe`): baseline `masked=[]` (18 не-партийных объектов = ровно строки `los=true`; ~20 сущностей с `is_invisible:1` без маскирующего статуса **не** режутся — ловушка спеки §2 подтверждена); `apply_status INVISIBLE` на Ogre Brute → `masked=["Ogre Brute"]`, `objects` **18→17**; `remove_status` → 18; `SNEAKING` → masked; `TRUESIGHT` у лидера → исключение (`masked=[]`). Сервер `v0.8.63 loaded`, Lua-ошибок нет, диспатч median 11.1 мс. NB: `Osi.IsInvisible` в гейте не используется.
 - [x] **P7 партия** (v082): действия по союзникам (каст/движение/атака) проходят перцепт-гейт.
 - [x] **P8 AoE-точка** (v083 r9): `cast_spell` с `position` — не гейтится восприятием в v1.
-- [ ] **Регрессия**: существующие боксы Combat/Exploration §9.5 остаются зелёными после включения фильтра.
-- [ ] **Стоимость**: median эмиссии ≤ 20 мс. Exploration v081 = 10.8–13.8 мс ✓; combat
-  `TurnStarted` (`captureCombatState`) = **23.4 / 38.5 мс — выше порога** (тикет
-  `bg3-neuro-followups/issues/21-combat-capture-cost.md`): нужен чистый замер медианы +
-  решение «оптимизация vs пересмотр порога».
+- [x] **Регрессия** (2026-09-21, v0.8.60): Combat/Exploration-боксы §9.5 остаются зелёными после включения фильтра — ростер, тёрн-луп, лечение и экономика проверены заново через файловый мост (см. «Run 2026-09-21 (v0.8.60)»). Фидинг: неизвестный спелл на честном пути не отсекается (исправлено и проверено вживую в v0.8.61, фоллоу-ап `unknown-spell-stuck-cast`).
+- [x] **Стоимость** (2026-09-21, v0.8.60, живой лог `Extender Runtime 2026-09-21 13-47-00.log`):
+  median эмиссии ≤ 20 мс выполнен в обоих режимах — **exploration** (`exploreLoop`,
+  `:5795`) n=336, **med 11.20 мс**, p90 14.17, max 18.16; **combat** (`TurnStarted`/
+  `captureCombatState`, `:500`) n=25, **med 9.51 мс**, p90 14.05, max 18.93. Оба медианы
+  под порогом; прежние 23.4/38.5 мс (тикет 21) — одиночные выбросы на более тяжёлом поле,
+  не воспроизводятся (тикет 21 закрыт: порог достигнут, оптимизация не нужна).
 
 ## Run 2026-09-14 (v0.8.25, live benchmark — goblin gate melee, RU locale)
 
@@ -387,3 +389,61 @@ v086 (Osi lazy-resolver warm-up + retry) → v087 (TargetRadius fallback) → v0
 Ticket 06 closed `resolved`. Follow-ups remain: mechanic №2 (in-range "bless lands on
 self / sneak at caster" — not reproduced after fix), multi-target bless (separate
 ticket), P2/P3 LOS walks, combat-capture cost (ticket 21).
+
+## Run 2026-09-21 (v0.8.60, perception regression §9.5 — combat/turn/heal, file bridge)
+
+Bridge: SE heartbeat `v0.8.60`, file bridge only (App/Randy не участвовали),
+инжекты строго серийно (`drive_action.ps1`). Save = до засады у ворот; засада
+триггернута вручную. Артефакты: `artifacts/reg0_combat.json` … `reg7_cap.json`.
+
+### Регрессия после включения фильтра — passed
+- [x] **полный ростер** (`reg0_combat`): `mode=combat`, `turn=tav`, 8 врагов
+      (`goblin_brawler_1`, `za_krug_1`, `bugbear_1`, `worg_1`, `goblin_tracker_1..3`,
+      `goblin_booyahg_1`) + 9 союзников — фильтр не прячет легитимных участников.
+- [x] **атака по видимому врагу** (id `reg1_attack`): `attack_entity` tav →
+      `goblin_tracker_2` (1.2 м) → `prevalidate verdict=pass`, `sid=Target_MainHandAttack`,
+      каст ушёл в `OsirisCastRequests`; **ресурс-снапшот AP 1.0→0.0**. Промах по броску
+      (HP 9/9) — `success:true` ≠ урон.
+- [x] **тёрн-луп** (id `reg2_end`, `reg3_end`): `end_turn` ×2 → `ended:true`, `turn_delta`;
+      порядок `tav → aradin_1 → origin_astarion → za_krug_1 (ИИ) → remira_1 (ИИ) → cleric`.
+- [x] **лечение** (id `reg6_heal`): ход клерика (Shadowheart), `cast_spell healing_word`
+      → self → `economy`: `BonusActionPoint 1.0→0.0`, `SpellSlot L1 1.0→0.0`;
+      `state_capture` → HP **9→13**. `mode=combat`, `spells=57`.
+
+### Findings / notes
+- [x] **`bg3_to_neuro.json` в бою пишется только на `TurnStarted`** (и смене режима),
+      не после действий — пост-эффект действия (урон/лечение) виден лишь через
+      принудительный `state_capture` (`BG3Neuro.lua:5473`). Для бенча после каждого
+      действия дёргать `state_capture`.
+- [x] **`availability` в стейте отражает владение ходом, не остаток AP** — после атаки
+      tav показывался «acting now, can act», хотя AP уже 0 (ресурс-снапшот). Экономику
+      судить только по `resource_snapshot_<id>_{before,after}.json`, не по `availability`.
+- [x] **ФИДИНГ — неизвестный спелл на честном пути не отсекается** (id `reg8_refuse`, v0.8.60):
+      `cast_spell wish` → мод собрал `spell=wish` (`SourceType: Osiris`), castOptions
+      `IgnoreHasSpell,IgnoreCastChecks,IgnoreSpellRolls,IgnoreTargetChecks,Forced,Immediate`,
+      положил в `OsirisCastRequests` (**size=1, не дренится**); `result_reg8_refuse.json`
+      навсегда `running:true`, action не финализируется. Внятный `no_spell` есть только на
+      legacy-пути (`use_osi_spell`, `:4443`) и в C#-роутере (валидирует имя до мода). На
+      честном пути `executeCast` не проверяет книгу — фоллоу-ап
+      `bg3-neuro-perception/issues/07-unknown-spell-stuck-cast.md`.
+      **Исправлено и проверено вживую (v0.8.61, 2026-09-21):** единый книжный гард `Osi.HasSpell`
+      до enqueue, fail-open. `cast_spell wish` → мгновенный финал `success:false,
+      no_spell: wish is not in the caster's book`; `cast_spell fire_bolt` (валидный) → `success:true`,
+      AP 1.0→0.0. См. «Run 2026-09-21 (v0.8.61)».
+- Замечание: `bg3_to_neuro.json` в этом save `party_refs` = только Tav + Shadowheart
+      (партия урезана), но `allies`=9 включает союзных NPC (`aradin_1`, `wyll_1`, `zevlor_1`…).
+
+## Run 2026-09-21 (v0.8.61, ticket 07 fix - file bridge, combat save)
+
+Цель: живая проверка книжного гарда (см. выше). PAK v092 установлен, `heartbeat.version = 0.8.61`.
+
+- [x] **Негатив — `cast_spell wish`** (id `t07_wish`, ход Тава): результат финализирован сразу
+      `{ success:false, error_code:"action_failed", error_detail:"no_spell: wish is not in the caster's book" }`;
+      `running:true` больше не висит, osiris-запрос не пушится.
+- [x] **Fail-open — `cast_spell fire_bolt` → `goblin_tracker_2`** (id `t07_firebolt`): понятное имя
+      срезолвилось в `Projectile_FireBolt` (`cast_debug.json`), финал `success:true`,
+      `resource_snapshot_*`: **ActionPoint 1.0 → 0.0** (BA/слоты без изменений).
+- [x] **Пайплайн жив после отказа**: `heartbeat` свежий, `cast_debug.json` `queueSize=0`.
+- Артефакты: `result_t07_wish.json`, `result_t07_firebolt.json`,
+      `resource_snapshot_t07_firebolt_{before,after}.json`, `cast_debug.json` в
+      `%LOCALAPPDATA%\Larian Studios\Baldur's Gate 3\Script Extender\BG3Neuro\`.

@@ -1,7 +1,7 @@
 # 19 — AoE cast_spell with empty coverage has no autonomous targeting
 
 Type: task (design + implement + live bench)
-Status: resolved (2026-09-19)
+Status: resolved (2026-09-21 — all residual items closed on the live bench)
 Blocked by: none
 
 ## Decision (2026-09-19): Z = caster Z via mod fallback
@@ -24,6 +24,31 @@ Blocked by: none
   types (checked-in behavior for known types unchanged). PAK v064
   (`C877D8F1…`) built. Bench pending restart: Gale Thunderwave via stack → expect
   injected position + damage + AP/slot deduction.
+
+## Residual items closed on the live bench (2026-09-21, v0.8.60 / PAK v091, gate scene, solo Gale turn)
+
+- **(a) State emitter `aoe`/`range` on Gale's turn — VERIFIED LIVE**: Gale solo
+  `turn_actor` this session; `bg3_to_neuro.json` spells contain
+  `thunderwave aoe=5.0 range=5.0` (Decimal, not 0/0). The v0.8.57 `Range`/`Base`
+  fallback works on a real wizard turn. (Captured via `state_capture`, id `c19cap`.)
+- **(b) Router `FillAoEPosition` auto-inject E2E via stack — VERIFIED LIVE** via
+  official Randy (neuro-sdk) WS server on :8000 + App:
+  - Inject `cast_spell` with ONLY `{"actor":"poc_player_wizard","spell_name":
+    "thunderwave"}` (no target_id/coverage/position), id `c19E2E`, POST to Randy
+    `http://localhost:1337/`.
+  - Randy → App WS `action` → router `FillAoEPosition` picked ImpactPoint X/Y for
+    Gale — `cast_debug.json` shows `targetPos [215.3, 31.7, 408.75]` (z from caster
+    fallback), `targetUuids=[]`, spell `Zone_Thunderwave`, queue `osiris`.
+  - Mod accepted the ground-target cast; WS `action/result success:true`.
+  - Note: per-action `result_c19E2E.json` = `cast_failed "Cast interrupted/failed"`
+    because Gale had **AP=0.0 at inject time** (resource snapshots both 1
+    AP=0.0/BA=1.0/Movement=9.0, L1 slot 2.0→2.0 untouched; enemy HP all full) —
+    the engine interrupted the cast for lack of Action Points, NOT a mod/router
+    defect. `cast_failed` = engine interruption with no resource/movement side
+    effects; auto-position injection itself proven.
+- Stack-verify method worth keeping: `neuro-sdk/neuro-sdk/Randy` (`npm start`,
+  WS :8000 + HTTP :1337 for manual action POSTing) is the real neuro emulator the
+  App connects to — App has no HTTP endpoint of its own.
 
 ## Mod side verified live (2026-09-19, v0.8.57 / PAK v064, gate scene)
 - **(v98t1) Thunderwave, Gale → explicit position (215.3,31.7), NO z, file bridge**:

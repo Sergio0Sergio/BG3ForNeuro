@@ -50,4 +50,14 @@ Implementation of the router BA gate (mod code + PAK rebuild) is a follow-up, no
 | `bonus_action` tav offhand #2 (`bax3`) | `{"success": false, "error_code": "action_failed", "error_detail": "Bonus action already used this turn (BA budget enforced in-router)"}` + log "legacy bonus REFUSED: ..." |
 | `bonus_action` tav offhand #3 (`bax4`) same turn | REFUSED again (same error), correct — still Tav's turn |
 
-**Reset caveat:** the budget clears on the next `TurnStarted` (single line in the listener, luaparse OK), but this bench save is static — the engine turn never leaves Tav (100 s poll: `turn_actor=tav` throughout; legacy `end_turn` doesn't advance it: `end_turn verify: ended=false`), so a *fresh-Tav-turn* allowance could not be observed live. The reset leg is therefore bench-pending on a save where combat turns actually cycle; the gate refusal itself (the ticket's core) is proven.
+**Reset caveat:** the budget clears on the next `TurnStarted` (single line in the listener, luaparse OK), but the original bench save was static — the engine turn never left Tav (100 s poll: `turn_actor=tav` throughout; legacy `end_turn` doesn't advance it: `end_turn verify: ended=false`), so a *fresh-Tav-turn* allowance could not be observed live then.
+
+**Reset leg — VERIFIED live (2026-09-21, v0.8.60, save with Tav + Astarion offhand-equipped, live fight at the gate cycling real turns).** Same actor across two consecutive turns, honest router path (no `force_legacy`):
+
+| inject | turn | result |
+|---|---|---|
+| `bonus_action` astarion offhand #1 (`bzA1`, target `goblin_tracker_4`) | 1st Astarion turn | `{"success": true}` — accepted, budget marked |
+| `bonus_action` astarion offhand #2 (`bzA2`, same target) | same turn | `{"success": false, "error_code": "action_failed", "error_detail": "Bonus action already used this turn (BA budget enforced in-router)"}` + log `[BG3Neuro] bonus REFUSED: BA already used this turn (in-router budget)` |
+| `bonus_action` astarion offhand #3 (`bzA3`, target `goblin_booyahg_1`) | **2nd Astarion turn** (full turn cycle passed) | `{"success": false, "error_code": "cast_failed", "error_detail": "Cast interrupted/failed"}` — **NOT refused**; the router budget gate was passed (cast attempted, failed only on range/melee distance), and no new `bonus REFUSED` line appears in the SE log for bzA3 |
+
+**Conclusion:** the `TurnStarted` reset (`bonusUsedThisTurn = {}`) is proven live — a fresh turn re-allows the bonus action after a refused second use in the prior turn. Ticket 01 fully resolved (gate refusal + budget enforcement + reset cycle).
