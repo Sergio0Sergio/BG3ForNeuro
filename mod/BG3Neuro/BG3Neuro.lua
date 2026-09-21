@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.63"
+local MOD_VERSION = "0.8.64"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -4669,7 +4669,103 @@ end
 
 initDialogueBridge()
 
--- Финализация всех «кликов в полёте»: успех (DialogEnded) — клик сработал,
+-- ======================================================================
+-- v0.8.64 (тикет 25): лёгкий отдых (Take Short Rest) — UI-кнопка в клиентской
+-- половине. Серверного инициатора у лёгкого отдыха нет (research 2026-09-21:
+-- в Osi/ECS/story только внутренний event ShortRested; единственный путь —
+-- клик по кнопке через Noesis). Отдельный канал BG3NeuroRest, диалоговый не трогаем.
+-- ВАЖНО (тикет 24): главный чанк на лимите 200 активных локалов — весь модуль
+-- живёт на глобальной таблице BG3NEURO_REST, топ-левел local здесь недопустим.
+-- ======================================================================
+BG3NEURO_REST = {
+    channel = "BG3NeuroRest",
+    bridge = nil,
+    pending = {},                    -- { id = <action_id> } — клики в полёте
+    clientAlive = true,              -- оптимизм: обе половины в одном PAK; первый провал честно флёт
+    unavailable = false,
+    retries = 0,
+    maxRetries = 4,                  -- сколько раз переспрашиваем клиента, пока UI открывается
+    retryDelayMs = 700,
+    probeTimeoutMs = 5000,
+    editVersion = nil,               -- актуальная версия проставляется в init()
+}
+
+function BG3NEURO_REST.bridgeOk()
+    return Ext ~= nil and Ext.Net ~= nil and BG3NEURO_REST.bridge ~= nil
+        and BG3NEURO_REST.unavailable == false
+end
+
+function BG3NEURO_REST.init()
+    local chanName = BG3NEURO_REST.channel
+    BG3NEURO_REST.editVersion = MOD_VERSION
+    local okC, channel = pcall(function()
+        return Ext.Net.CreateChannel(ModuleUUID or MOD_NAME, chanName)
+    end)
+    if not okC or channel == nil then
+        BG3NEURO_REST.unavailable = true
+        _P("[BG3Neuro] rest: NetChannel create failed: " .. tostring(channel))
+        return
+    end
+    BG3NEURO_REST.bridge = channel
+
+    local okH, errH = pcall(function()
+        channel:SetHandler(function(msg, user)
+            if type(msg) ~= "table" or msg.kind ~= "bg3neuro_rest_click_result" then
+                return
+            end
+            BG3NEURO_REST.clientAlive = true
+            BG3NEURO_REST.unavailable = false
+            if msg.ok == true then
+                -- fire-only: клик ушёл в UI; финал — следующий state (ShortRestPoint/HP),
+                -- как у long rest (LongRestFinished/Cancelled). Ничего не пишем.
+                _P("[BG3Neuro] rest: click fired (action=" .. tostring(msg.action_id or "")
+                    .. ", ver=" .. tostring(msg.client_ver or ""))
+                for i = 1, #BG3NEURO_REST.pending do
+                    if BG3NEURO_REST.pending[i].id == msg.action_id then
+                        table.remove(BG3NEURO_REST.pending, i)
+                        return
+                    end
+                end
+                return
+            end
+            -- ok=false: для 'retry:...' клиент просит подождать (UI открывается) —
+            -- переспрашиваем с паузой; иначе — честный not_supported.
+            local reason = tostring(msg.reason or "unknown")
+            for i = 1, #BG3NEURO_REST.pending do
+                local pd = BG3NEURO_REST.pending[i]
+                if pd.id == msg.action_id then
+                    if string.sub(reason, 1, 6) == "retry:" and BG3NEURO_REST.retries < BG3NEURO_REST.maxRetries then
+                        BG3NEURO_REST.retries = BG3NEURO_REST.retries + 1
+                        _P("[BG3Neuro] rest: click retry %d/%d (%s)", BG3NEURO_REST.retries,
+                            BG3NEURO_REST.maxRetries, reason)
+                        Ext.Timer.WaitForRealtime(BG3NEURO_REST.retryDelayMs, function()
+                            pcall(function()
+                                BG3NEURO_REST.bridge:Broadcast({
+                                    kind = "bg3neuro_rest_click",
+                                    action_id = pd.id,
+                                })
+                            end)
+                        end)
+                        return
+                    end
+                    table.remove(BG3NEURO_REST.pending, i)
+                    _P("[BG3Neuro] rest: click failed: " .. reason)
+                    writeResult(pd.id, false, nil, "not_supported",
+                        "RestClickExecutor: the client could not trigger Take Short Rest: " .. reason)
+                    return
+                end
+            end
+        end)
+    end)
+    if not okH then
+        BG3NEURO_REST.unavailable = true
+        _P("[BG3Neuro] rest: SetHandler failed: " .. tostring(errH))
+    end
+    _P("[BG3Neuro] rest: NetChannel ready (module=" .. tostring(ModuleUUID or MOD_NAME)
+        .. ", channel=" .. BG3NEURO_REST.channel .. ")")
+end
+
+BG3NEURO_REST.init()
 -- диалог закрыт, спорить не с чем.
 local function finalizeAllDialogueOptions()
     for i = 1, #pendingDialogue do
@@ -5252,8 +5348,25 @@ local function executeRest(action)
     -- РџРѕР»РЅС‹Р№ РѕС‚РґС‹С… вЂ” Osi.RequestLongRest (research §9) + РіРµР№С‚ CanAllPartiesLongRest (C#-РІР°Р»РёРґР°С‚РѕСЂ).
     -- Частичный (лёгкий) отдых публичной Osiris-функции не имеет (story-side).
     if data.rest_type ~= "full" then
-        -- TODO(client): лёгкий отдых — UI-кнопка Take Short Rest; структурный ack, финал — state.
-        return true, true, nil, nil
+        -- v0.8.64 (тикет 25): клиентский UI-клик по кнопке Take Short Rest
+        -- (серверного вызова нет — ShortRested внутренний story-event). Fire-only:
+        -- клик ушёл через NetChannel, финал — следующий state (ShortRestPoint/HP).
+        if BG3NEURO_REST.bridgeOk() == false then
+            return false, nil, "not_supported",
+                "RestClickExecutor unavailable: NetChannel not created — client half of the mod not installed (Q4)"
+        end
+        BG3NEURO_REST.retries = 0
+        local okB, errB = pcall(function()
+            BG3NEURO_REST.bridge:Broadcast({
+                kind = "bg3neuro_rest_click",
+                action_id = action.id,
+            })
+        end)
+        if not okB then
+            return false, nil, "not_supported", "RestClickExecutor send failed: " .. tostring(errB)
+        end
+        BG3NEURO_REST.pending[#BG3NEURO_REST.pending + 1] = { id = action.id }
+        return true, true, nil, nil -- success, running (финал — следующий state)
     end
 
     local ok, err = pcall(Osi.RequestLongRest, actor, 0)
@@ -5847,6 +5960,53 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
             writeResult(action.id, true, false, nil, nil, { debug = p })
         end
         Ext.Timer.WaitForRealtime(1500, finish)
+        return true, true, nil, nil
+    end
+
+    if name == "rest_probe" then
+        -- Стенд (тикет 25): живой скан клиентского UI — состояние state machine,
+        -- виджеты-корни, кнопки (для подбора селекторов Take Short Rest / открывалки
+        -- меню лагеря). Ответ клиента приходит requestHandler'ом BroadcastMessage.
+        --   { "id": "rp1", "name": "rest_probe", "data": "{}" }
+        if BG3NEURO_REST.bridgeOk() == false then
+            return false, nil, "not_supported",
+                "RestClickExecutor unavailable: NetChannel not created — client half of the mod not installed (Q4)"
+        end
+        local probeSeq = (BG3NEURO_REST.probeSeq or 0) + 1
+        BG3NEURO_REST.probeSeq = probeSeq
+        local probePending = true
+        local okB = pcall(function()
+            Ext.Net.BroadcastMessage(BG3NEURO_REST.channel,
+                Ext.Json.Stringify({ kind = "bg3neuro_rest_probe", seq = probeSeq }),
+                nil, ModuleUUID or MOD_NAME,
+                function(reply, binary)
+                    probePending = false
+                    BG3NEURO_REST.clientAlive = true
+                    BG3NEURO_REST.unavailable = false
+                    local parsed = Ext.Json.Parse(reply, binary)
+                    if type(parsed) ~= "table" then
+                        parsed = { probe_error = tostring(parsed) }
+                    end
+                    _P("[BG3Neuro] rest_probe: state=" .. tostring(parsed.state or "nil")
+                        .. " roots=" .. #(parsed.roots or {})
+                        .. " buttons=" .. #(parsed.ui_buttons or {})
+                        .. " rest_menu_open=" .. tostring(parsed.rest_menu_open == true))
+                    writeResult(action.id, true, false, nil, nil, { debug = parsed })
+                end,
+                nil, false)
+        end)
+        if not okB then
+            return false, nil, "action_failed", "rest_probe broadcast failed"
+        end
+        Ext.Timer.WaitForRealtime(BG3NEURO_REST.probeTimeoutMs, function()
+            if probePending then
+                probePending = false
+                BG3NEURO_REST.clientAlive = false
+                _P("[BG3Neuro] rest_probe: client did not answer within " .. BG3NEURO_REST.probeTimeoutMs .. "ms")
+                writeResult(action.id, true, false, nil, nil,
+                    { debug = { probe_timeout = BG3NEURO_REST.probeTimeoutMs } })
+            end
+        end)
         return true, true, nil, nil
     end
 

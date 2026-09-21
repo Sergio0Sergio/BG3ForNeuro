@@ -1,9 +1,11 @@
--- BG3NeuroClient.lua v0.8.57 — клиентская половина мода (тикет bg3-neuro-dialogue-click).
+-- BG3NeuroClient.lua v0.8.58 — клиентская половина мода (тикеты bg3-neuro-dialogue-click, 25).
 -- Живёт в клиентском контексте (Ext.UI / Noesis), грузится через BootstrapClient.lua.
 -- Задачи:
 --   1) снапшот вариантов диалога (line + options) для сервера по NetChannel
 --      "BG3NeuroDialogue" (тот же module+channel, что в серверном BG3Neuro.lua);
 --   2) реальный клик по выбранному варианту через Noesis (ICommand:Execute()).
+--   v0.8.58 (тикет 25): лёгкий отдых — канал "BG3NeuroRest": скан UI (rest_probe)
+--      и клик по кнопке Take Short Rest (меню лагеря открываем программно).
 -- Клик-механика (research 01 + UI.inl): вариант — Button-подобный элемент с Command
 -- (Noesis::BaseCommand:CanExecute/Execute). Порядок candidates = порядок обхода
 -- UI-дерева = UI-порядок (option_index 1-based). Поиск по option_index, при
@@ -12,7 +14,7 @@
 
 local DIALOGUE_CHANNEL = "BG3NeuroDialogue"
 local OPTION_DEPTH_CAP = 12
-_G["BG3Neuro_VERSION"] = "0.8.57" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
+_G["BG3Neuro_VERSION"] = "0.8.58" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
 local MAX_VISITED = 3000
 local DIALOGUE_HINTS = { "dialog", "dialogue", "conversation" }
 local NON_DIALOGUE_HINTS = { "hotbar", "actionbar", "toolbar", "minimap", "tooltip",
@@ -477,3 +479,257 @@ local function initBridge()
 end
 
 initBridge()
+
+-- ======================================================================
+-- v0.8.58 (тикет 25): лёгкий отдых через UI-клик.
+-- Отдельный канал "BG3NeuroRest": сервер шлёт bg3neuro_rest_click, клиент
+-- открывает меню лагеря (кнопка с командой; если не открыто — retry-причины,
+-- сервер переспрашивает с паузой) и кликает Take Short Rest. Сервер шлёт
+-- bg3neuro_rest_probe — клиент возвращает скан UI (подбор селекторов).
+-- ======================================================================
+local REST_CHANNEL = "BG3NeuroRest"
+local restBridge = nil
+local REST_OPEN_HINTS = { "camp", "rest", "fire", "tent", "endtheday", "gather" }
+local BUTTON_REPORT_CAP = 250
+
+local function textLooksLikeShortRest(s)
+    local t = string.lower(s or "")
+    if t == "" then
+        return false
+    end
+    if string.find(t, "short") == nil or string.find(t, "rest") == nil then
+        return false
+    end
+    if string.find(t, "long") ~= nil then
+        return false
+    end
+    return true
+end
+
+local function hintMatch(s)
+    s = string.lower(s or "")
+    for _, h in ipairs(REST_OPEN_HINTS) do
+        if string.find(s, h) ~= nil then
+            return true
+        end
+    end
+    return false
+end
+
+-- Первый непустой текст в поддереве el (глубина <= 3) — у кнопок текст часто
+-- лежит в дочернем TextBlock, а не в свойстве Button.Text.
+local function firstChildText(el)
+    local function probe(e, d)
+        if e == nil or d > 3 then
+            return nil
+        end
+        local t = elText(e)
+        if t ~= nil then
+            return t
+        end
+        local cnt = safe(function() return tonumber(e.ChildrenCount) end) or 0
+        for i = 1, cnt do
+            local ch = safe(function() return e:Child(i) end)
+            local got = probe(ch, d + 1)
+            if got ~= nil then
+                return got
+            end
+        end
+        return nil
+    end
+    return probe(el, 0)
+end
+
+-- Все Button/Command-элементы во всех активных корнях (primitive-профили).
+local function scanUiButtons()
+    local out = {}
+    local seen = {}
+    for _, root in ipairs(collectRoots()) do
+        local visited = {}
+        walk(root, 0, visited, function(el, depth)
+            if seen[el] then
+                return
+            end
+            seen[el] = true
+            local typ = elType(el)
+            if isButtonish(typ) and hasCommand(el) then
+                out[#out + 1] = {
+                    el = el,
+                    text = elText(el),
+                    child = firstChildText(el),
+                    typ = tostring(typ or ""),
+                    name = tostring(elProp(el, "Name") or ""),
+                    file = tostring(fileName(el) or ""),
+                }
+            end
+        end)
+    end
+    return out
+end
+
+local function findShortRestButton(buttons)
+    for _, b in ipairs(buttons) do
+        if textLooksLikeShortRest(b.text) or textLooksLikeShortRest(b.child)
+            or string.find(string.lower(b.typ .. " " .. b.name .. " " .. b.file), "shortrest") ~= nil
+            or string.find(string.lower(b.name .. " " .. b.file), "short.rest") ~= nil then
+            return b
+        end
+    end
+    return nil
+end
+
+local function uiStateName()
+    local sm = safe(function() return Ext.UI.GetStateMachine() end)
+    if sm == nil then
+        return nil
+    end
+    return safe(function() return tostring(sm.State) end)
+end
+
+local function restMenuOpen()
+    local st = string.lower(uiStateName() or "")
+    if string.find(st, "rest") ~= nil or string.find(st, "camp") ~= nil then
+        return true
+    end
+    return findShortRestButton(scanUiButtons()) ~= nil
+end
+
+-- Клик по кнопке через её ICommand (параметр: CommandParameter > DataContext > сам элемент).
+local function clickButton(el)
+    local cmd = elProp(el, "Command")
+    if cmd == nil then
+        return false, "no Command"
+    end
+    local param = elProp(el, "CommandParameter")
+    if param == nil then
+        param = elProp(el, "DataContext")
+    end
+    if param == nil then
+        param = el
+    end
+    local ok = pcall(function() cmd:Execute(param) end)
+    if not ok then
+        return false, "Command:Execute threw"
+    end
+    return true, nil
+end
+
+-- Открыть меню отдыха: если кнопка Take Short Rest уже видна — уже открыто.
+-- Иначе ищем кнопку-«открывалку» (имя/файл/тип по REST_OPEN_HINTS) и кликаем.
+local function openCampMenu()
+    if restMenuOpen() then
+        return true, nil
+    end
+    local buttons = scanUiButtons()
+    for _, b in ipairs(buttons) do
+        local hay = b.typ .. " " .. b.name .. " " .. b.file
+        if hintMatch(hay) and not textLooksLikeShortRest(b.text) and not textLooksLikeShortRest(b.child) then
+            local ok, reason = clickButton(b)
+            if ok then
+                log("rest: camp opener clicked (%s)", tostring(b.name ~= "" and b.name or b.file or b.typ))
+                return true, nil
+            end
+        end
+    end
+    return false, "no camp/rest opener button (" .. table.concat(REST_OPEN_HINTS, ",") .. ")"
+end
+
+local function performRestClick(msg)
+    local actionId = msg.action_id
+
+    if not restMenuOpen() then
+        local opened, reason = openCampMenu()
+        if not opened then
+            return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = false,
+                reason = "retry:menu_not_open: " .. tostring(reason) }
+        end
+        -- открылка кликнута в этом же кадре; кнопка Take Short Rest появится через пару UI-фреймов
+        return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = false,
+            reason = "retry:menu_opened_await_button" }
+    end
+
+    local target = findShortRestButton(scanUiButtons())
+    if target == nil then
+        return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = false,
+            reason = "fatal:no_short_rest_button_in_ui" }
+    end
+
+    local ok, reason = clickButton(target)
+    if not ok then
+        return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = false,
+            reason = "fatal:click_failed: " .. tostring(reason) }
+    end
+    log("rest: Take Short Rest clicked (action=%s)", tostring(actionId or ""))
+    return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = true }
+end
+
+local function buildRestProbeReply()
+    local state = uiStateName()
+    local roots = collectRoots()
+    local rootsInfo = {}
+    for i = 1, math.min(#roots, 40) do
+        local root = roots[i]
+        rootsInfo[#rootsInfo + 1] = {
+            i = i,
+            type = tostring(elType(root) or ""),
+            name = tostring(elProp(root, "Name") or ""),
+            file = tostring(fileName(root) or ""),
+        }
+    end
+    local buttons = scanUiButtons()
+    local btnInfo = {}
+    for i = 1, math.min(#buttons, BUTTON_REPORT_CAP) do
+        local b = buttons[i]
+        btnInfo[#btnInfo + 1] = {
+            typ = b.typ,
+            name = b.name,
+            file = b.file,
+            text = tostring(b.text or ""),
+            child = tostring(b.child or ""),
+        }
+    end
+    return {
+        kind = "bg3neuro_rest_probe_reply",
+        state = state,
+        roots = rootsInfo,
+        ui_buttons = btnInfo,
+        rest_menu_open = restMenuOpen(),
+    }
+end
+
+local function initRestBridge()
+    local okC, channel = pcall(function()
+        return Ext.Net.CreateChannel((ModuleUUID or "BG3Neuro"), REST_CHANNEL)
+    end)
+    if not okC or channel == nil then
+        log("rest: NetChannel create failed: %s", tostring(channel))
+        return
+    end
+    restBridge = channel
+
+    local okReq = pcall(function()
+        restBridge:SetRequestHandler(function(msg)
+            if type(msg) ~= "table" or msg.kind ~= "bg3neuro_rest_probe" then
+                return nil
+            end
+            return buildRestProbeReply()
+        end)
+    end)
+    local okMsg = pcall(function()
+        restBridge:SetHandler(function(msg, user)
+            if type(msg) ~= "table" or msg.kind ~= "bg3neuro_rest_click" then
+                return
+            end
+            log("rest: click (action=%s)", tostring(msg.action_id or ""))
+            restBridge:SendToServer(performRestClick(msg))
+        end)
+    end)
+
+    if okReq and okMsg then
+        log("rest: bridge ready (channel=%s)", REST_CHANNEL)
+    else
+        log("rest: bridge handlers failed: req=%s msg=%s", tostring(okReq), tostring(okMsg))
+    end
+end
+
+initRestBridge()

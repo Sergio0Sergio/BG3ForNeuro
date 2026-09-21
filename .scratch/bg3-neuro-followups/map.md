@@ -5,7 +5,7 @@ Tracked: 7 tickets produced from the two-axis code-review of `HEAD` -> working t
 Tracker: local markdown (`.scratch/<effort>/`), conventions of `issue-tracker-local.md`.
 
 ## Open (backlog)
-- [ ] 25-short-rest-ui-click — `rest {"rest_type":"short"}` is a hollow ack (`executeRest` TODO(client) — no public Osiris fn, needs client-UI click like dialogue-click). See issues/25-short-rest-ui-click.md
+- [~] 25-short-rest-ui-click — **in-progress (implementation done, PAK v096 / v0.8.64, awaiting live bench)** — `rest {"rest_type":"partial"}` был hollow ack (`executeRest` TODO(client)). Research (2026-09-21, static): no server-side short-rest trigger exists (curated osi_signatures — only `RequestLongRest*`/`SetShortRestAvailable`/gossip-camp family; ECS `EsvRestShortRestSystem`/`NETMSG_SHORT_REST`/`ShortRestPoint` (a24ca5e2-…) без публичного пуска; story only reacts to internal `ShortRested` — не Osi-callable) → единственный путь — клиентский UI-клик как в dialogue-click. Реализовано: серверный глобальный модуль `BG3NEURO_REST` (канал `BG3NeuroRest`, click-result + retry на `retry:*`, `executeRest` short-ветка → broadcast `bg3neuro_rest_click`, bench-экшен `rest_probe`), клиентский сканер `scanUiButtons()`/`openCampMenu()`/`clickButton()`. luaparse OK, active-local max 200/200 (= HEAD; топ-левел локалов 0). Бенч после перезапуска игры. See issues/25-short-rest-ui-click.md
 - [ ] 26-travel-cross-region — `travel_to` cross-region is a hollow ack (`executeTravel` TODO(game) — candidates `Osi.TeleportTo`/`GetNearestWaypoint` unprobed). See issues/26-travel-cross-region.md
 
 ## Status
