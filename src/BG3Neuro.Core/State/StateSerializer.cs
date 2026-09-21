@@ -221,51 +221,47 @@ public static class StateSerializer
         if (state.Mode == "exploration" && state.Objects.Count > 0)
         {
             sb.AppendLine();
-            foreach (var group in state.Objects.GroupBy(o => o.SeenBy ?? "-"))
+            var objects = state.Objects;
+            var capped = exploration.MaxVisibleObjects > 0 && objects.Count > exploration.MaxVisibleObjects
+                ? objects.Take(exploration.MaxVisibleObjects).ToList()
+                : objects;
+            sb.Append("## Objects (").Append(objects.Count).Append(')').AppendLine();
+            foreach (var obj in capped)
             {
-                var seenBy = group.Key;
-                var objects = group.ToList();
-                var capped = exploration.MaxVisibleObjects > 0 && objects.Count > exploration.MaxVisibleObjects
-                    ? objects.Take(exploration.MaxVisibleObjects).ToList()
-                    : objects;
-                sb.Append("## Objects (seen by ").Append(seenBy == "-" ? "player" : seenBy).Append(", ").Append(objects.Count).Append(')').AppendLine();
-                foreach (var obj in capped)
+                sb.Append("- ").Append(obj.Alias);
+                if (!string.IsNullOrWhiteSpace(obj.Name))
                 {
-                    sb.Append("- ").Append(obj.Alias);
-                    if (!string.IsNullOrWhiteSpace(obj.Name))
-                    {
-                        sb.Append(" (").Append(obj.Name).Append(')');
-                    }
-
-                    if (state.Mode == "exploration")
-                    {
-                        sb.Append(' ').Append(FormatExplorationDistance(obj.Distance, obj.Region, exploration.DistanceFormat));
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(obj.Status))
-                    {
-                        sb.Append(", ").Append(obj.Status);
-                    }
-
-                    if (obj.Interactions.Count > 0)
-                    {
-                        sb.Append(": [").Append(string.Join(", ", obj.Interactions)).Append(']');
-                    }
-                    else if (obj.Lootable)
-                    {
-                        sb.Append(": [take]");
-                    }
-
-                    sb.AppendLine();
+                    sb.Append(" (").Append(obj.Name).Append(')');
                 }
 
-                if (objects.Count > capped.Count)
+                if (state.Mode == "exploration")
                 {
-                    sb.Append("- … and ").Append(objects.Count - capped.Count).Append(" more").AppendLine();
+                    sb.Append(' ').Append(FormatExplorationDistance(obj.Distance, obj.Region, exploration.DistanceFormat));
+                }
+
+                if (!string.IsNullOrWhiteSpace(obj.Status))
+                {
+                    sb.Append(", ").Append(obj.Status);
+                }
+
+                if (obj.Interactions.Count > 0)
+                {
+                    sb.Append(": [").Append(string.Join(", ", obj.Interactions)).Append(']');
+                }
+                else if (obj.Lootable)
+                {
+                    sb.Append(": [take]");
                 }
 
                 sb.AppendLine();
             }
+
+            if (objects.Count > capped.Count)
+            {
+                sb.Append("- … and ").Append(objects.Count - capped.Count).Append(" more").AppendLine();
+            }
+
+            sb.AppendLine();
         }
 
         if (state.Regions.Count > 0)

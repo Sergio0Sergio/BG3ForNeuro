@@ -39,7 +39,6 @@ public sealed class ExplorationObject
     public required string Name { get; set; }
     public double Distance { get; set; }
     public string? Region { get; set; }
-    public string? SeenBy { get; set; }
     public string? Type { get; set; }
     public string? Status { get; set; }
     public List<string> Interactions { get; set; } = new();

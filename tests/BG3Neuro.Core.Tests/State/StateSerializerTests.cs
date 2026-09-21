@@ -238,7 +238,7 @@ public class StateSerializerTests
       "can_rest": true,
       "objects": [
         { "alias": "wooden_door", "name": "Деревянная дверь", "distance": 3, "status": "закрыта", "interactions": ["открыть", "заламать", "толкнуть"] },
-        { "alias": "goblin_camp_sign", "name": "Знак лагеря гоблинов", "distance": 120, "region": "Роща", "seen_by": "shadowheart" },
+        { "alias": "goblin_camp_sign", "name": "Знак лагеря гоблинов", "distance": 120, "region": "Роща" },
         { "alias": "goblin_corpse", "name": "Труп гоблина", "distance": 5, "lootable": true }
       ],
       "regions": [
@@ -324,7 +324,6 @@ public class StateSerializerTests
         Assert.True(state.CanRest);
         Assert.Equal(3, state.Objects.Count);
         Assert.Equal("wooden_door", state.Objects[0].Alias);
-        Assert.Equal("shadowheart", state.Objects[1].SeenBy);
         Assert.Equal("Роща", state.Objects[1].Region);
         Assert.True(state.Objects[2].Lootable);
         Assert.Equal(2, state.Regions.Count);
@@ -340,8 +339,7 @@ public class StateSerializerTests
         var md = StateSerializer.ToMarkdown(state);
 
         Assert.Contains("## Mode: exploration", md);
-        Assert.Contains("## Objects (seen by player, 2)", md);
-        Assert.Contains("## Objects (seen by shadowheart, 1)", md);
+        Assert.Contains("## Objects (3)", md);
         Assert.Contains("- wooden_door (Деревянная дверь) 3m, закрыта: [открыть, заламать, толкнуть]", md);
         Assert.Contains("region: Роща", md);
         Assert.Contains("- goblin_corpse (Труп гоблина) 5m: [take]", md);
@@ -394,8 +392,8 @@ public class StateSerializerTests
         state.Objects.Add(new ExplorationObject { Alias = "barrel_1", Name = "Бочка", Distance = 6 });
         var md = StateSerializer.ToMarkdown(state, new ExplorationStateConfig { MaxVisibleObjects = 2 });
 
-        Assert.Contains("- … and 1 more", md);
-        Assert.Contains("(seen by player, 3)", md);
+        Assert.Contains("- … and 2 more", md);
+        Assert.Contains("## Objects (4)", md);
     }
 
     [Fact]
