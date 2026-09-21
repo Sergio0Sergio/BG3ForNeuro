@@ -81,16 +81,19 @@ Result: all items checked + 139 automated tests green (`dotnet test` + `tests\sm
 Предусловия: реализованы B (эмиссия) и A (feasible), мод-гейт (04b); стенд на воротах,
 эксплорейшн + бой; инжекты `drive_action.ps1` серийно. Исходы по `issues/05-acceptance-and-bench.md`.
 
-- [ ] **P1 засада не видна**: эксплорейшн у ворот, камера вне двора → 18 вражеских сущностей не в `objects`/`enemies`.
+- [x] **P1 засада не видна** (v082): эксплорейшн у ворот, камера вне двора → 18 вражеских сущностей не в `objects`/`enemies`.
 - [ ] **P2 вход в LOS**: сущность вошла в кадр → появилась в `state`, `perception="visible"`, позиция актуальная.
 - [ ] **P3 уход из вида**: ушла за укрытие/кадр → исчезла из `state` (`known`/`last_seen` отсутствуют).
-- [ ] **P4 бой — полный ростер**: все участники боя в `enemies`, в т.ч. заэкранные и невидимый-силуэт; позиции истинные.
-- [ ] **P5 отказ по невидимой цели**: действие с `target_id` вне `state` → роутер `TargetMissing` (Channel A); мод `no_perception` (04b).
-- [ ] **P6 невидимый вне боя в кадре**: скрывшийся NPC в зоне камеры не эмитится.
-- [ ] **P7 партия**: действия по союзникам (каст/движение/атака) проходят перцепт-гейт.
-- [ ] **P8 AoE-точка**: `cast_spell` с `position` — не гейтится восприятием в v1.
+- [x] **P4 бой — полный ростер** (v082): все участники боя в `enemies`, в т.ч. заэкранные и невидимый-силуэт; позиции истинные.
+- [x] **P5 отказ по невидимой цели** (v082): действие с `target_id` вне `state` → роутер `TargetMissing` (Channel A); мод `no_perception` (04b).
+- [ ] **P6 невидимый вне боя в кадре**: скрывшийся NPC в зоне камеры не эмитится (не воспроизводится на стенде — нет инвиз-NPC у ворот).
+- [x] **P7 партия** (v082): действия по союзникам (каст/движение/атака) проходят перцепт-гейт.
+- [x] **P8 AoE-точка** (v083 r9): `cast_spell` с `position` — не гейтится восприятием в v1.
 - [ ] **Регрессия**: существующие боксы Combat/Exploration §9.5 остаются зелёными после включения фильтра.
-- [ ] **Стоимость**: средняя стоимость тика эмиссии ≤ 20 мс (5 прогонов, медиана) в бою и в эксплорейшне.
+- [ ] **Стоимость**: median эмиссии ≤ 20 мс. Exploration v081 = 10.8–13.8 мс ✓; combat
+  `TurnStarted` (`captureCombatState`) = **23.4 / 38.5 мс — выше порога** (тикет
+  `bg3-neuro-followups/issues/21-combat-capture-cost.md`): нужен чистый замер медианы +
+  решение «оптимизация vs пересмотр порога».
 
 ## Run 2026-09-14 (v0.8.25, live benchmark — goblin gate melee, RU locale)
 
@@ -356,3 +359,31 @@ Grove-gate combat, injects strictly serial via `POST /` + `data` as JSON string.
 - [ ] **Dialog / Exploration via stack** — not run (save loads straight into combat;
       dialog→combat transition was verified 2026-09-17 via file bridge).
 - [ ] **Mod/game restart resilience** — not run (requires PAK swap + restart mid-bench).
+
+## Run 2026-09-21 (v0.8.59 / PAK v090, ticket 06 — ranged cast honesty, gates ambush)
+
+Bridge: PAK v090 (MD5 `40F45BC5470724BEDBB1A8733319D625`), SE heartbeat `v0.8.59`, live game
+via file bridge, deterministic injects (serial, `drive_action.ps1`). Diagnosis ladder:
+v086 (Osi lazy-resolver warm-up + retry) → v087 (TargetRadius fallback) → v088
+(`prevalidate_latest.json` diagnostic) → v090 (final). Root cause found via `caststats`:
+`Projectile_FireBolt` = `Range=0` (NUMBER), `TargetRadius=18`, `SpellType=Projectile`.
+
+### Ticket 06 — passed
+- [x] **honest no_range before the engine** (id c05): `cast_spell fire_bolt` tav →
+      `goblin_tracker_3` at 20.2 m (range 18) → `action_failed` `"no_range:
+      Projectile_FireBolt target … is 20.2 m away (range 18 m)"`, verdict in
+      `prevalidate_latest.json` = `no_range`; projectile does NOT get re-targeted
+      by the engine (no "lightning into the corpse", no visual).
+- [x] **in-range control** (id c06): `fire_bolt` tav → `goblin_tracker_1` at 1.9 m →
+      verdict `pass`, engine accepts (`success:true`). Correct in/out discrimination.
+- [x] **in-range projectile path** (v085 b07g): Gale `fire_bolt` → target at ~7 m →
+      `success`, projectile visually flies INTO the target (user), fair miss (no damage).
+- [x] **diagnostic tooling**: `prevalidate_latest.json` (range, dist_1/final, los,
+      verdict) written per cast; session median 12.16 ms over 189 dispatch iterations.
+- [x] **no regression**: cast_failed no longer masks engine re-targeting; sneak
+      without advantage is refused by the engine itself (`cast_failed`) — not a
+      projectile-path test.
+
+Ticket 06 closed `resolved`. Follow-ups remain: mechanic №2 (in-range "bless lands on
+self / sneak at caster" — not reproduced after fix), multi-target bless (separate
+ticket), P2/P3 LOS walks, combat-capture cost (ticket 21).

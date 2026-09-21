@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.57"
+local MOD_VERSION = "0.8.59"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -963,7 +963,12 @@ end
 -- На каждый TurnStarted (или по действию state_capture) строит combat-state
 -- по схеме C# CombatState (snake_case) и пишет его в bg3_to_neuro.json:
 --   turn_actor + инициатива, allies/enemies (alias, name, hp, max_hp, distance,
---   position_x/y, conditions/availability/status), available_actions.
+--   position_x/y/z, conditions/availability/status), available_actions,
+--   distance_reference (v0.8.58): alias/guid действующего аватара, ОТ КОТОРОГО
+--   посчитаны все distance (в exploration — первый аватар партии). Порядок
+--   семантики: distance — от distance_reference, а не от кастера/потребителя;
+--   настоящие дистанции от интересующей стороны считает потребитель по
+--   position_x/y/z.
 -- Дополнительно регистрирует alias→guid в ENTITY_BY_ALIAS, чтобы
 -- move_to_target/attack_entity/cast_spell резолвили цели по коротким именам;
 -- псевдонимы стабильны в рамках одного боя (один и тот же враг — один и тот же alias).
@@ -1596,6 +1601,44 @@ local function registerAlias(guid, isControlled, taken)
     combatAliases[guid] = alias
     ENTITY_BY_ALIAS[alias] = guid
     return alias
+end
+
+-- 04b (тикет 04b): мод-side авторитетный перцепт-гейт. Перцепт-набор = guid'ы
+-- партии ∪ эмитированных объектов ∪ врагов ИЗ ПОСЛЕДНЕГО построенного state
+-- (зеркало того, что видит роутер C#). Роутер гейтит по стейту в момент валидации;
+-- здесь тот же набор на момент ИСПОЛНЕНИЯ — стейл-зеркало и пути мимо стейта не
+-- протащат действие по невидимой цели. Обновляется в buildExplorationState и
+-- captureCombatState (полный билд). Символы сделаны глобальными (как build*),
+-- чтобы не прижимать остаток к лимиту 200 локальных в main function (merge).
+perceptionActors = {}
+perceptionObjects = {}
+function refreshPerceptionSet(state)
+    local actors = {}
+    local objects = {}
+    local function addTo(map, alias)
+        if alias ~= nil then
+            local g = ENTITY_BY_ALIAS[alias]
+            if g ~= nil then
+                map[g] = true
+            end
+        end
+    end
+    for _, ent in ipairs(state.allies or {}) do
+        addTo(actors, ent.alias)
+    end
+    for _, ent in ipairs(state.enemies or {}) do
+        addTo(actors, ent.alias)
+    end
+    for _, ent in ipairs(state.objects or {}) do
+        addTo(objects, ent.alias)
+    end
+    -- партия всегда в наборе (не гейтится), даже если allies в state пуст на каком-то пути
+    for g in pairs(partyAvatars()) do
+        actors[g] = true
+        objects[g] = true
+    end
+    perceptionActors = actors
+    perceptionObjects = objects
 end
 
 local function participantGuids(combatComp)
@@ -2495,6 +2538,7 @@ function captureCombatState(event, force)
                     distance = dist or 0,
                     position_x = round1(px or 0),
                     position_y = round1(py or 0),
+                    position_z = round1(pz or 0),
                 }
                 local conditions = conditionsOf(ent)
                 if #conditions > 0 then
@@ -2526,6 +2570,11 @@ function captureCombatState(event, force)
             end
         end
     end
+
+    -- 05 (v0.8.58): рамка отсчёта для distance/position — действующий аватар
+    -- (см. comment-схему ~965). Потребитель сам считает дистанции от кастера:
+    -- это убирает класс ошибок "ближайший к Таву оказался не ближайший к Астариону".
+    state.distance_reference = tostring(combatAliases[actingClean] or actingClean or acting or "")
 
     state.available_actions[#state.available_actions + 1] = "end_turn"
     if #state.enemies > 0 then
@@ -2568,6 +2617,9 @@ function captureCombatState(event, force)
         state.available_actions[#state.available_actions + 1] =
             "cast_spell: [" .. table.concat(castNames, ", ") .. "]"
     end
+
+    -- 04b: перцепт-набор из полного combat-билда (партия ∪ враги ∪ видимые объекты).
+    refreshPerceptionSet(state)
 
     writeStateFile(state)
     diag.stage = "done"
@@ -2719,6 +2771,45 @@ local function classifyObject(guid)
     return { type = typ, interactions = interactions, lootable = lootable }
 end
 
+-- B-сенсор (06/B): движковое зрение. Эмпирически (research/02, зонды v076/v079):
+-- Osi.CanSee в exploration различает только членов партии (CanSee(lead,NPC)=0 у всех
+-- NPC, даже в 11-15 м) — непригоден для видимости объектов. Рабочий оракул окклюзии —
+-- Osi.HasLineOfSight(lead, target): LOS=1 у открытого NPC, LOS=0 у NPC за воротами.
+-- Видимое = смотреть от стабильного лидера партии (первый аватар, мемо один раз).
+-- pcall защищает от одноразового throw ленивого резолвера Osi (AGENTS.md).
+local sightLeadOfMemo = nil
+local function sightLeadOf()
+    if sightLeadOfMemo == nil then
+        for g in pairs(partyAvatars()) do
+            sightLeadOfMemo = g
+            break
+        end
+        if sightLeadOfMemo == nil then
+            for g in pairs(partySetOf()) do
+                sightLeadOfMemo = g
+                break
+            end
+        end
+    end
+    return sightLeadOfMemo
+end
+
+local function sightSees(partySet, targetGuid)
+    if partySet[targetGuid] then
+        return true
+    end
+    local lead = sightLeadOf()
+    if lead == nil then
+        return false
+    end
+    local okL, losV = pcall(function() return Osi.HasLineOfSight(lead, targetGuid) end)
+    if okL then
+        return losV == true or tostring(losV) == "1"
+    end
+    -- LOS недоступен/упал на первом доступе — деградация на дистанцию (не выпиливаем всё).
+    return true
+end
+
 local function scanNearbyObjects(ax, ay, az, partySet, ownedAliases)
     local out = {}
     local added = {}
@@ -2733,19 +2824,28 @@ local function scanNearbyObjects(ax, ay, az, partySet, ownedAliases)
                 if px ~= nil and ax ~= nil then
                     local d = distance3(ax, ay, az, px, py, pz)
                     if d ~= nil and d <= EXPLORE_MAX_DISTANCE then
-                        added[g] = true
                         local cls = classifyObject(g)
-                        out[#out + 1] = {
-                            alias = registerAlias(g, false, ownedAliases),
-                            name = displayName(g),
-                            distance = round1(d) or 0,
-                            region = currentRegionName(),
-                            seen_by = "player",
-                            type = cls.type,
-                            status = nil,
-                            interactions = cls.interactions,
-                            lootable = cls.lootable,
-                        }
+                        if cls.type == "character" and not sightSees(partySet, g) then
+                            -- 06/B: персонаж вне движкового зрения — не эмитируем
+                            -- (контракт 03 rev2: только то, что реально видно движку).
+                            added[g] = true
+                        else
+                            added[g] = true
+                            out[#out + 1] = {
+                                alias = registerAlias(g, false, ownedAliases),
+                                name = displayName(g),
+                                distance = round1(d) or 0,
+                                position_x = round1(px or 0),
+                                position_y = round1(py or 0),
+                                position_z = round1(pz or 0),
+                                region = currentRegionName(),
+                                seen_by = "player",
+                                type = cls.type,
+                                status = nil,
+                                interactions = cls.interactions,
+                                lootable = cls.lootable,
+                            }
+                        end
                     end
                 end
             end
@@ -2955,15 +3055,16 @@ function buildExplorationState(trigger)
         if px ~= nil and ax ~= nil then
             dist = round1(distance3(ax, ay, az, px, py, pz))
         end
-        state.allies[#state.allies + 1] = {
-            alias = alias,
-            name = displayName(g),
-            hp = hp or 0,
-            max_hp = maxHp or 0,
-            distance = dist or 0,
-            position_x = round1(px or 0),
-            position_y = round1(py or 0),
-        }
+state.allies[#state.allies + 1] = {
+                            alias = alias,
+                            name = displayName(g),
+                            hp = hp or 0,
+                            max_hp = maxHp or 0,
+                            distance = dist or 0,
+                            position_x = round1(px or 0),
+                            position_y = round1(py or 0),
+                            position_z = round1(pz or 0),
+                        }
     end
 
     state.objects = scanNearbyObjects(ax, ay, az, party, taken)
@@ -2971,6 +3072,10 @@ function buildExplorationState(trigger)
     state.inventory = scanPartyInventory(party)
     local okRest, canRest = pcall(Osi.CanAllPartiesLongRest)
     state.can_rest = okRest and (canRest == true or tostring(canRest) == "1") or false
+    -- 05 (v0.8.58): рамка отсчёта distance/position — saga-тест: см. комментарий
+    -- в captureCombatState (действующий аватар, в free-roam — первый из партии).
+    state.distance_reference = tostring(combatAliases[acting] or acting or "")
+    refreshPerceptionSet(state)
 
     return state
 end
@@ -3790,6 +3895,123 @@ local function knownSpellCandidates(actor, candidates)
     return knownNames
 end
 
+-- v0.8.58 (тикет 06): радиус каста из прототипа спелла. Числа возвращаем как есть;
+-- строковые оружейные диапазоны сводим к константам (перевод как во Brawl
+-- convertSpellRangeToNumber). nil → «диапазона нет»: цель не гейтим (fail-open).
+-- v0.8.58 fix (живой бенч b06-1): у ranged weapon-маневров Range прототипа = "0"
+-- (Projectile_SneakAttack), и трактовка 0 как «радиус 0» ложно отклоняла ЛЮБУЮ
+-- дистанцию (no_range даже на близкой цели). 0 — это «движок подставит радиус
+-- из оружия», а не фиксированный ноль: для Projectile_* возвращаем константу
+-- ranged 15 м (только ловит грубый out-of-range), для остальных — nil (fail-open).
+local function castRangeOf(sid)
+    -- v0.8.59 (тикет 06, живой бенч c04): Range у снарядов-прототипов — ЧИСЛО 0
+    -- (движок подставит радиус оружия/спелла), а у firebolt реальную дальность держит
+    -- TargetRadius=18 (caststats: range=0, targetRadius=18, SpellType=Projectile).
+    -- Старая number-ветка (rng>0 and rng or nil) молча давала nil на 0, до
+    -- TargetRadius/Projectile_-фолбэка дело не доходило → fail-open → движковый
+    -- cast_failed вместо честного no_range. Нормализуем едино (число или строка),
+    -- 0/<=0 → TargetRadius → Projectile_ default 15 → melee/unknown fail-open.
+    local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
+    if not stOK or not stRes then
+        return nil
+    end
+    local rng = stRes.Range
+    local n = type(rng) == "number" and rng or tonumber(tostring(rng))
+    if n ~= nil and n > 0 then
+        return n
+    end
+    if n ~= nil and n <= 0 then
+        local tr = stRes.TargetRadius
+        local tn = type(tr) == "number" and tr or tonumber(tostring(tr or ""))
+        if tn ~= nil and tn > 0 then
+            return tn
+        end
+        if sid:find("^Projectile_") then
+            return 15 -- типичный ranged default; только ловит грубый out-of-range
+        end
+        return nil -- melee/unknown: fail-open, не гейтим
+    end
+    local s = tostring(rng)
+    if s:find("RangedMainWeaponRange") or s:find("MainWeaponRange") then
+        return 15 -- типичный short bow; ловит только грубый out-of-range
+    end
+    if s:find("MeleeMainWeaponRange") then
+        return 1.5
+    end
+    if s:find("ThrownObjectRange") then
+        return 18
+    end
+    return nil
+end
+
+-- v0.8.58 (тикет 06): пре-валидация дистанции и LOS до пуша ServerCastRequest —
+-- дизайн как во Brawl Actions.useSpell. При вне-радиусной цели движок отклоняет
+-- цель запроса (CastSpellFailed) и САМ подбирает ближайшего валидного кандидата
+-- (живой стенд 2026-09-21: witch bolt 22 м при радиусе ~18 м → снаряд ушёл в труп;
+-- sneak-бросок на ближнюю цель → снаряд «у кастера»; bless → лёг на кастера). Здесь
+-- честный отказ (no_range / no_los) ДО запроса, чтобы движку нечего было
+-- переподбирать. Позиционные касты (без цели) не гейтим. Возвращает (true) либо
+-- (false, код, причина).
+-- v0.8.59 (тикет 06, живой бенч b07f/b07h/b07i): Osi — ленивый резолвер: ПЕРВЫЙ
+-- вызов GetDistanceTo/HasLineOfSight в свежем процессе кидает, pcall глотает
+-- (dOk=false) и гейт молча пропускает цель, движок потом сам делает cast_failed
+-- без нашего честного no_range. Поэтому результат первого вызова не принимаем —
+-- повторный вызов у того же резолвера уже работает (те же пре-валиды b06-1).
+local function preValidateCastTarget(actor, sid, target)
+    if target == nil or target == "" then
+        return true
+    end
+    local range = castRangeOf(sid)
+    -- v0.8.59 (тикет 06, диагностика c02a): что реально видит пре-валидатор — его
+    -- возврат (no_range/no_los) не должен быть мёртвым кодом. Пишем отдельный файл.
+    local dbg = { sid = sid, actor = tostring(actor), target = tostring(target), range = range }
+    if range ~= nil and range > 0 then
+        -- первый вызов Osi в процессе может упасть (ленивый резолвер) — пробуем дважды
+        local dVal
+        for attempt = 1, 2 do
+            local dOk
+            dOk, dVal = pcall(Osi.GetDistanceTo, actor, target)
+            dbg["dist_" .. attempt] = tostring(dVal)
+            dbg["dist_ok_" .. attempt] = dOk
+            if dOk then
+                break
+            end
+        end
+        dbg.dist_final = tostring(dVal)
+        if type(dVal) == "number" then
+            -- +1 м на флуктуацию позиций на грани радиуса: отказ только при явном перелёте.
+            if dVal > range + 1.0 then
+                dbg.verdict = "no_range"
+                pcall(Ext.IO.SaveFile, RESULT_DIR .. "/prevalidate_latest.json", Ext.Json.Stringify(dbg))
+                return false, "no_range",
+                    tostring(sid) .. " target " .. tostring(target) .. " is "
+                    .. string.format("%.1f", dVal) .. " m away (range "
+                    .. string.format("%.0f", range) .. " m)"
+            end
+        end
+    end
+    local lRes
+    for attempt = 1, 2 do
+        local lOk
+        lOk, lRes = pcall(Osi.HasLineOfSight, actor, target)
+        dbg["los_" .. attempt] = tostring(lRes)
+        dbg["los_ok_" .. attempt] = lOk
+        if lOk then
+            break
+        end
+    end
+    dbg.los_final = tostring(lRes)
+    if tostring(lRes) == "0" then
+        dbg.verdict = "no_los"
+        pcall(Ext.IO.SaveFile, RESULT_DIR .. "/prevalidate_latest.json", Ext.Json.Stringify(dbg))
+        return false, "no_los",
+            tostring(sid) .. " has no line of sight to " .. tostring(target)
+    end
+    dbg.verdict = "pass"
+    pcall(Ext.IO.SaveFile, RESULT_DIR .. "/prevalidate_latest.json", Ext.Json.Stringify(dbg))
+    return true
+end
+
 -- v0.8.28 (followup 07): честный enqueue-проход по кандидатам (был продублирован
 -- в executeAttack/executeBonusAction; отличался только флагом bonusAction).
 -- Логика та же: Ext.Stats.Get → SpellType, enqueueCastRequest с формулой followup 04
@@ -3801,6 +4023,13 @@ local function honestEnqueue(actor, target, knownNames, opts)
     local lastErr
     for _, sid in ipairs(knownNames) do
         if usedSid == nil then
+            -- v0.8.58 (тикет 06): пре-валидация кандидата (дистанция/LOS). Не прошёл —
+            -- enqueue НЕ вызываем, движку нечего переподбирать; причина в lastErr,
+            -- следующий кандидат. nil-target (позиционные) пропускаются помощником.
+            local pvOk, pvCode, pvMsg = preValidateCastTarget(actor, sid, target)
+            if not pvOk then
+                lastErr = pvCode .. ": " .. pvMsg
+            else
             local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
             local sType = "Target"
             if stOK and stRes and stRes.SpellType then
@@ -3824,6 +4053,7 @@ local function honestEnqueue(actor, target, knownNames, opts)
             else
                 lastErr = enqOK and tostring(enqErr) or tostring(enqRes)
             end
+        end
         end
     end
     return usedSid, lastErr
@@ -4053,6 +4283,19 @@ local function executeCast(action)
     if spellType == "Zone" and (target == nil or target == "") and pos == nil then
         return false, nil, "action_failed",
             "no_aoe_target: Zone spell '" .. tostring(spellName) .. "' needs target_id or position"
+    end
+
+    -- v0.8.58 (тикет 06): честный отказ ДО любого исполнителя каста (enqueue И
+    -- Osi.UseSpell) при неподходящей целевой цели — out-of-range / нет LOS. Иначе
+    -- движок переподбирает цель сам: инжект числится успешным (CastedSpell), а
+    -- снаряд летит в ближайшего валидного кандидата (живой бенч 2026-09-21: witch
+    -- bolt 22 м при радиусе ~18 м → «в труп», sneak-бросок → «у кастера», bless →
+    -- «на кастера»). Позиционные касты (pos только, target пуст) помощник не гейтит.
+    if target ~= nil and target ~= "" then
+        local pvOk, pvCode, pvMsg = preValidateCastTarget(actor, spellName, target)
+        if not pvOk then
+            return false, nil, "action_failed", pvCode .. ": " .. pvMsg
+        end
     end
 
     -- v0.8.17: pcall-обёртка enqueueCastRequest — ловим точную ошибку API вместо всплытия.
@@ -4593,10 +4836,17 @@ local function executeAttack(action)
         end
         for _, sid in ipairs(knownNames) do
             if not ok then
-                ok, err = pcall(Osi.UseSpell, actor, sid, target)
-                if ok then
-                    usedWeaponSpell = true
-                    usedSid = sid
+                -- v0.8.58 (тикет 06): пре-валидация и на legacy-пути — иначе
+                -- Osi.UseSpell по вне-радиусной цели даст тот же переподбор движком.
+                local pvOk, pvCode, pvMsg = preValidateCastTarget(actor, sid, target)
+                if pvOk then
+                    ok, err = pcall(Osi.UseSpell, actor, sid, target)
+                    if ok then
+                        usedWeaponSpell = true
+                        usedSid = sid
+                    end
+                else
+                    err = pvCode .. ": " .. pvMsg
                 end
             end
         end
@@ -4747,11 +4997,17 @@ local function executeBonusAction(action)
         end
         for _, sid in ipairs(knownNames) do
             if not ok then
-                ok, err = pcall(Osi.UseSpell, actor, sid, target)
-                if ok then
-                    usedSid = sid
-                    bonusUsedThisTurn[actor] = true
-                    _P("[BG3Neuro] legacy bonus: BA budget enforced in-router (no engine writer)")
+                -- v0.8.58 (тикет 06): пре-валидация и на legacy-пути бонусной атаки.
+                local pvOk, pvCode, pvMsg = preValidateCastTarget(actor, sid, target)
+                if pvOk then
+                    ok, err = pcall(Osi.UseSpell, actor, sid, target)
+                    if ok then
+                        usedSid = sid
+                        bonusUsedThisTurn[actor] = true
+                        _P("[BG3Neuro] legacy bonus: BA budget enforced in-router (no engine writer)")
+                    end
+                else
+                    err = pvCode .. ": " .. pvMsg
                 end
             end
         end
@@ -4940,6 +5196,38 @@ local function executeAction(action)
     -- состояние режима держит только открытие через open_map/open_inventory).
     if name ~= "open_map" and name ~= "open_inventory" then
         currentScreen = "exploration"
+    end
+
+    -- 04b (тикет 04b): авторитетный перцепт-гейт мода — зеркало роутерной матрицы
+    -- тикета 04 ПЕРЕД честными отказами хендлеров (порядок: гейт → отказ → исполнение).
+    -- attack/cast_spell/move_to_target/bonus_action/use_item → партия ∪ враги;
+    -- move_to_entity/interact/loot → objects. Без цели (и позиционный AoE) — не гейтится;
+    -- партия всегда в наборе (refreshPerceptionSet). Повторяет TargetMissing роутера на
+    -- момент исполнения: стейл-зеркало и пути мимо стейта не протащат невидимую цель.
+    do
+        local PERCEPTION_GATE = {
+            attack_entity = "actors",
+            cast_spell = "actors",
+            move_to_target = "actors",
+            bonus_action = "actors",
+            use_item = "actors",
+            move_to_entity = "objects",
+            interact_with = "objects",
+            loot = "objects",
+        }
+        local gateTarget = resolveEntity(data.target_id or "")
+        if gateTarget ~= nil then
+            local setKind = PERCEPTION_GATE[name]
+            if setKind ~= nil then
+                local map = setKind == "actors" and perceptionActors or perceptionObjects
+                if not map[gateTarget] then
+                    return false, nil, "action_failed",
+                        "no_perception: target not in current perception set "
+                        .. "-- it may be out of view now; only act on entities the mod "
+                        .. "currently reports (party, objects, combatants)"
+                end
+            end
+        end
     end
 
     if name == "end_turn" then
@@ -5439,6 +5727,8 @@ local function stripGeneratedAt(state)
     return res
 end
 
+-- Блок удалён: дигностика CanSee/LOS завершена (6.9 v079), выводы в research/02.
+
 local function exploreLoop()
     -- v0.8.26: тик состояния вне боя. Комбат пишет TurnStarted, диалог — DialogStarted;
     -- здесь — exploration (и наблюдение за сменой режима). Запись обязательна при СМЕНЕ
@@ -5470,6 +5760,12 @@ end
 
 clearInFlight()
 writeInitialState()
+-- v0.8.59 (тикет 06): Osi — ленивый резолвер, первый доступ к имени кидает и
+-- кэширует callable-прокси. Прогреваем пре-валидационные предикаты здесь, чтобы
+-- one-shot throw не съел первый вердикт no_range/no_los (живой бенч b07f/b07h/b07i).
+pcall(function() return Osi.GetDistanceTo end)
+pcall(function() return Osi.HasLineOfSight end)
+startHeartbeatLoop()
 startHeartbeatLoop()
 pollActions()
 exploreLoop()
