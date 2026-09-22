@@ -1,4 +1,7 @@
--- BG3Neuro v0.8.66 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02 + perception 07-08)
+-- BG3Neuro v0.8.68 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02 + perception 07-08)
+-- v0.8.68: убран мёртвый fast-travel через клиентский waypoint-UI (ticket 26): BG3NEURO_TRAVEL,
+--          канал BG3NeuroTravel, ретраи click-моста — серверный TeleportPartiesWithMovie делает
+--          travel напрямую; клиентская половина тоже вычищена (BG3NeuroClient v0.8.68).
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +24,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.67"
+local MOD_VERSION = "0.8.68"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -4804,94 +4807,6 @@ end
 
 BG3NEURO_REST.init()
 
--- Тикет 26 (v0.8.65): fast-travel через клиентскую половину — канал "BG3NeuroTravel",
--- kind "bg3neuro_travel_click" (сервер→клиент, fire) / "bg3neuro_travel_click_result" (клиент→сервер).
--- Зеркало BG3NEURO_REST: ретраи пока клиент ждёт, пока waypoint-UI откроется.
-BG3NEURO_TRAVEL = {
-    channel = "BG3NeuroTravel",
-    bridge = nil,
-    pending = {},                    -- { id = <action_id>, waypoint = <target> }
-    clientAlive = true,
-    unavailable = false,
-    retries = 0,
-    maxRetries = 4,
-    retryDelayMs = 800,
-    editVersion = nil,
-}
-
-function BG3NEURO_TRAVEL.bridgeOk()
-    return Ext ~= nil and Ext.Net ~= nil and BG3NEURO_TRAVEL.bridge ~= nil
-        and BG3NEURO_TRAVEL.unavailable == false
-end
-
-function BG3NEURO_TRAVEL.init()
-    BG3NEURO_TRAVEL.editVersion = MOD_VERSION
-    local okC, channel = pcall(function()
-        return Ext.Net.CreateChannel(ModuleUUID or MOD_NAME, BG3NEURO_TRAVEL.channel)
-    end)
-    if not okC or channel == nil then
-        BG3NEURO_TRAVEL.unavailable = true
-        _P("[BG3Neuro] travel: NetChannel create failed: " .. tostring(channel))
-        return
-    end
-    BG3NEURO_TRAVEL.bridge = channel
-
-    local okH, errH = pcall(function()
-        channel:SetHandler(function(msg, user)
-            if type(msg) ~= "table" or msg.kind ~= "bg3neuro_travel_click_result" then
-                return
-            end
-            BG3NEURO_TRAVEL.clientAlive = true
-            BG3NEURO_TRAVEL.unavailable = false
-            if msg.ok == true then
-                -- fire-only: клик ушёл в waypoint-UI; финал — следующий state (region_id сменился).
-                _P("[BG3Neuro] travel: click fired (action=" .. tostring(msg.action_id or "")
-                    .. ", via=" .. tostring(msg.via or ""))
-                for i = 1, #BG3NEURO_TRAVEL.pending do
-                    if BG3NEURO_TRAVEL.pending[i].id == msg.action_id then
-                        table.remove(BG3NEURO_TRAVEL.pending, i)
-                        return
-                    end
-                end
-                return
-            end
-            local reason = tostring(msg.reason or "unknown")
-            for i = 1, #BG3NEURO_TRAVEL.pending do
-                local pd = BG3NEURO_TRAVEL.pending[i]
-                if pd.id == msg.action_id then
-                    if string.sub(reason, 1, 6) == "retry:" and BG3NEURO_TRAVEL.retries < BG3NEURO_TRAVEL.maxRetries then
-                        BG3NEURO_TRAVEL.retries = BG3NEURO_TRAVEL.retries + 1
-                        _P("[BG3Neuro] travel: click retry %d/%d (%s)", BG3NEURO_TRAVEL.retries,
-                            BG3NEURO_TRAVEL.maxRetries, reason)
-                        Ext.Timer.WaitForRealtime(BG3NEURO_TRAVEL.retryDelayMs, function()
-                            pcall(function()
-                                BG3NEURO_TRAVEL.bridge:Broadcast({
-                                    kind = "bg3neuro_travel_click",
-                                    action_id = pd.id,
-                                    waypoint = pd.waypoint,
-                                })
-                            end)
-                        end)
-                        return
-                    end
-                    table.remove(BG3NEURO_TRAVEL.pending, i)
-                    _P("[BG3Neuro] travel: click failed: " .. reason)
-                    writeResult(pd.id, false, nil, "not_supported",
-                        "TravelClickExecutor: the client could not trigger the waypoint travel: " .. reason)
-                    return
-                end
-            end
-        end)
-    end)
-    if not okH then
-        BG3NEURO_TRAVEL.unavailable = true
-        _P("[BG3Neuro] travel: SetHandler failed: " .. tostring(errH))
-    end
-    _P("[BG3Neuro] travel: NetChannel ready (module=" .. tostring(ModuleUUID or MOD_NAME)
-        .. ", channel=" .. BG3NEURO_TRAVEL.channel .. ")")
-end
-
-BG3NEURO_TRAVEL.init()
 -- диалог закрыт, спорить не с чем.
 local function finalizeAllDialogueOptions()
     for i = 1, #pendingDialogue do

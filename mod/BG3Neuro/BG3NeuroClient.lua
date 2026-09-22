@@ -1,9 +1,12 @@
--- BG3NeuroClient.lua v0.8.63 — клиентская половина мода (тикеты bg3-neuro-dialogue-click, 25, 26).
+-- BG3NeuroClient.lua v0.8.68 — клиентская половина мода (тикеты bg3-neuro-dialogue-click, 25, 26).
 -- Живёт в клиентском контексте (Ext.UI / Noesis), грузится через BootstrapClient.lua.
 -- Задачи:
 --   1) снапшот вариантов диалога (line + options) для сервера по NetChannel
 --      "BG3NeuroDialogue" (тот же module+channel, что в серверном BG3Neuro.lua);
 --   2) реальный клик по выбранному варианту через Noesis (ICommand:Execute()).
+--   v0.8.68: убран мёртвый fast-travel через waypoint-UI (ticket 26, серверный
+--      TeleportPartiesWithMovie теперь делает travel напрямую): executeTravelViaUi,
+--      performTravelClick, канал BG3NeuroTravel.
 --   v0.8.61 (тикет 25): честный ShortRest напрямую — команда на DataContext виджета
 --      HotBar/ScreenFade (ui::DCWidget) с полями ShortRest/CampTravel, executeShortRestViaDc();
 --      рест-панель вне MainCanvas (слой PopupPanels), GetStateMachine()==nil.
@@ -21,7 +24,7 @@
 
 local DIALOGUE_CHANNEL = "BG3NeuroDialogue"
 local OPTION_DEPTH_CAP = 12
-_G["BG3Neuro_VERSION"] = "0.8.63" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
+_G["BG3Neuro_VERSION"] = "0.8.68" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
 local MAX_VISITED = 3000
 local DIALOGUE_HINTS = { "dialog", "dialogue", "conversation" }
 local NON_DIALOGUE_HINTS = { "hotbar", "actionbar", "toolbar", "minimap", "tooltip",
@@ -789,173 +792,6 @@ local function performRestClick(msg)
     return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = true }
 end
 
--- Тикет 26 (v0.8.65): fast-travel через клиентский waypoint-UI. Сервер открыл
--- экран быстрого перемещения (Osi.OpenWaypointUI → JournalMap/Map overlay), здесь
--- ищем команду GotoWaypoint на кнопках waypoint-панели и кликаем целевую точку.
--- target — имя/region_id из travel-запроса; сопоставление по DataContext.Name
--- (текст на кнопке). Доступа к свойству VMWaypoint в Lua нет — работаем по тексту.
-local TRAVEL_SCAN_DEPTH = 14
--- Клик по точке быстрого перемещения. GotoWaypoint — команда на DataContext предка-UIWidget
--- карты (RelativeSource FindAncestor), а каждая точка — LSButton внутри ItemsControl
--- (CurrentPlayer.Waypoints → WaypointList → VMWaypoint). План:
---   1) собрать предки с dc-командой GotoWaypoint + отдельно все кнопки с VMWaypoint-DataContext;
---   2) найти кнопку, чей текст/имя DataContext совпадает с target (region_id или имя); 
---   3) выполнить GotoWaypoint с параметром = DataContext найденной кнопки (VMWaypoint).
--- Возвращает (ok, via|reason).
-local function executeTravelViaUi(target)
-    local roots = collectRoots()
-    if #roots == 0 then
-        return false, "no ui roots"
-    end
-    local visited = {}
-    local mapCmds = {}   -- {node=предок, cmd=GotoWaypoint, typ, name}
-    local buttons = {}   -- {node, typ, name, text, dc_type, dc_name}
-    local function scan(node, depth)
-        if node == nil or depth > TRAVEL_SCAN_DEPTH or visited[node] then
-            return
-        end
-        visited[node] = true
-        local typ = tostring(elType(node) or "")
-        local name = uiPropName(node)
-        local dc = safe(function() return node.DataContext end)
-        if dc ~= nil then
-            local gtw = safe(function() return dc:GetProperty("GotoWaypoint") end)
-            if gtw ~= nil then
-                mapCmds[#mapCmds + 1] = { node = node, cmd = gtw, typ = typ, name = name }
-            end
-        end
-        local cmd = elProp(node, "Command")
-        if cmd ~= nil or (dc ~= nil and (safe(function() return dc:GetProperty("Name") end) ~= nil)) then
-            local dcName = safe(function()
-                local n = dc.Name
-                if n == nil then n = dc:GetProperty("Name") end
-                if n == nil then return nil end
-                return tostring(n)
-            end)
-            local txt = elText(node) or dcName or ""
-            buttons[#buttons + 1] = {
-                node = node, cmd = cmd, typ = typ, name = name, text = txt,
-                dc_type = tostring(safe(function() return tostring(dc) end) or ""),
-                dc_name = dcName,
-            }
-        end
-        local cc = safe(function() return tonumber(node.ChildrenCount) end) or 0
-        local vc = safe(function() return tonumber(node.VisualChildrenCount) end) or 0
-        local cnt = math.max(cc, vc)
-        for j = 1, cnt do
-            local ch = safe(function() return node:Child(j) end)
-            if ch == nil and j <= vc then
-                ch = safe(function() return node:VisualChild(j) end)
-            end
-            if ch ~= nil then
-                scan(ch, depth + 1)
-            end
-        end
-        if cnt == 0 then
-            local content = safe(function() return node.Content end)
-            if content ~= nil and content ~= node then
-                scan(content, depth + 1)
-            end
-            local items = safe(function() return node.Items end)
-            local in_ = arrLen(items)
-            if in_ > 0 then
-                for i = 1, in_ do
-                    scan(arrGet(items, i), depth + 1)
-                end
-            end
-        end
-    end
-    -- v0.8.62 (тикет 26): карта открывается ОТДЕЛЬНЫМ root'ом; сканируем все корни.
-    for _, root in ipairs(roots) do
-        local top = uiTreeTop(root)
-        if top ~= nil then
-            scan(top, 0)
-        end
-    end
-
-    log("travel: dc goto-waypoint candidates: %d, buttons: %d", #mapCmds, #buttons)
-    for _, c in ipairs(mapCmds) do
-        log("travel:    map-cmd %s:%s (%s)", tostring(c.typ), tostring(c.name),
-            tostring(safe(function() return tostring(c.cmd) end) or ""))
-    end
-    for i, b in ipairs(buttons) do
-        if i <= 40 then
-            log("travel:    btn %s:%s text=%q dc=%s", tostring(b.typ), tostring(b.name),
-                tostring(b.text), tostring(b.dc_name or ""))
-        end
-    end
-
-    local tlower = string.lower(tostring(target or ""))
-    local matched = nil
-    -- 1) точное совпадение target по тексту/имени кнопки
-    for _, b in ipairs(buttons) do
-        local text = string.lower(b.text or "")
-        if tlower ~= "" and (string.find(text, tlower) ~= nil or string.find(string.lower(tostring(b.dc_name or "")), tlower) ~= nil) then
-            matched = b
-            break
-        end
-    end
-    -- 2) точное совпадение имени виджета
-    if matched == nil and tlower ~= "" then
-        for _, b in ipairs(buttons) do
-            if string.lower(tostring(b.name or "")) == tlower then
-                matched = b
-                break
-            end
-        end
-    end
-    if matched == nil then
-        return false, "retry:no_waypoint_match (target=" .. tostring(target) .. ")"
-    end
-
-    -- параметр для GotoWaypoint = VMWaypoint (DataContext кнопки или CommandParameter)
-    local param = elProp(matched.node, "CommandParameter")
-    if param == nil then
-        param = safe(function() return matched.node.DataContext end)
-    end
-    if param == nil then
-        param = matched.node
-    end
-    -- команда: берём с кнопки (resolved binding), иначе ищем GotoWaypoint у предка-карты
-    local cmd = matched.cmd
-    local viaDc = false
-    if cmd == nil and #mapCmds > 0 then
-        cmd = mapCmds[1].cmd
-        viaDc = true
-    end
-    if cmd == nil then
-        return false, "retry:no goto-waypoint command on " .. tostring(matched.name)
-    end
-    local can = safe(function() return cmd:CanExecute(param) end)
-    if can == false then
-        return false, "retry:CanExecute=false on " .. tostring(matched.name)
-    end
-    local okC = pcall(function() cmd:Execute(param) end)
-    if not okC then
-        return false, "retry:GotoWaypoint execute threw"
-    end
-    log("travel: waypoint clicked %s (text=%q dc=%s)", viaDc and "via map-dc" or "via button",
-        tostring(matched.text), tostring(matched.dc_name or ""))
-    return true, (viaDc and "dc:" or "btn:") .. tostring(matched.name)
-end
-
-local function performTravelClick(msg)
-    local actionId = msg.action_id
-    local target = tostring(msg.waypoint or "")
-    local ok, where = executeTravelViaUi(target)
-    if ok then
-        log("travel: waypoint clicked (action=%s): %s", tostring(actionId), tostring(where))
-        return { kind = "bg3neuro_travel_click_result", action_id = actionId, ok = true, via = where }
-    end
-    -- retry:* — панель открывается или точное имя ещё не видно, сервер переспросит.
-    if string.sub(tostring(where or ""), 1, 6) == "retry:" then
-        log("travel: retry (action=%s): %s", tostring(actionId), tostring(where))
-        return { kind = "bg3neuro_travel_click_result", action_id = actionId, ok = false, reason = tostring(where) }
-    end
-    log("travel: click failed (action=%s): %s", tostring(actionId), tostring(where))
-    return { kind = "bg3neuro_travel_click_result", action_id = actionId, ok = false, reason = "fatal:" .. tostring(where) }
-end
-
 local MAX_ANCESTORS = 12
 local FIND_NAMES = { "RestOptionsList", "ShortRestItem", "CampItem", "LongRestItem",
     "AcceptButton", "ShortRest", "CampTravel", "RestPanel", "RestControl",
@@ -1363,33 +1199,3 @@ local function initRestBridge()
 end
 
 initRestBridge()
-
--- Тикет 26 (v0.8.65): fast-travel мост — тот же module, канал "BG3NeuroTravel".
-local TRAVEL_CHANNEL = "BG3NeuroTravel"
-local travelBridge = nil
-local function initTravelBridge()
-    local okC, channel = pcall(function()
-        return Ext.Net.CreateChannel((ModuleUUID or "BG3Neuro"), TRAVEL_CHANNEL)
-    end)
-    if not okC or channel == nil then
-        log("travel: NetChannel create failed: %s", tostring(channel))
-        return
-    end
-    travelBridge = channel
-    local okMsg = pcall(function()
-        travelBridge:SetHandler(function(msg, user)
-            if type(msg) ~= "table" or msg.kind ~= "bg3neuro_travel_click" then
-                return
-            end
-            log("travel: click (action=%s, waypoint=%s)", tostring(msg.action_id or ""), tostring(msg.waypoint or ""))
-            travelBridge:SendToServer(performTravelClick(msg))
-        end)
-    end)
-    if okMsg then
-        log("travel: bridge ready (channel=%s)", TRAVEL_CHANNEL)
-    else
-        log("travel: bridge handler failed okMsg=false")
-    end
-end
-
-initTravelBridge()
