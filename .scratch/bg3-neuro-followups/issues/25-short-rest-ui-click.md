@@ -1,8 +1,8 @@
 # 25 — Short Rest (`rest_type != "full"`) is a hollow ack — needs a real rest path
 
 Type: feature
-Status: in-progress (implementation done, awaiting live bench)
-Blocked by: game restart for PAK v096 install
+Status: done (bench passed, v0.8.61 / PAK v099)
+Blocked by: PAK install requires a graceful game close (process rule); v099+ installed
 
 ## Finding
 

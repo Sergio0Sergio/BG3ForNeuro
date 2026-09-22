@@ -1,0 +1,144 @@
+{
+    "allies": [
+        {
+            "alias": "poc_player_wizard",
+            "distance": 1.1,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 222.8,
+            "position_y": 16.4,
+            "position_z": 325.8
+        },
+        {
+            "alias": "origin_astarion",
+            "distance": 1.6,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 225.3,
+            "position_y": 16.7,
+            "position_z": 325.8
+        },
+        {
+            "alias": "tav",
+            "distance": 0.0,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 223.8,
+            "position_y": 16.5,
+            "position_z": 326.3
+        },
+        {
+            "alias": "poc_player_cleric",
+            "distance": 1.1,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 222.8,
+            "position_y": 16.5,
+            "position_z": 326.8
+        }
+    ],
+    "available_actions": [],
+    "can_rest": true,
+    "distance_reference": "tav",
+    "enemies": [],
+    "events": [],
+    "generated_at": "2026-09-22T09:11:55.1821805Z",
+    "inventory": [],
+    "mode": "exploration",
+    "objects": [
+        {
+            "alias": "magma_mephit_1",
+            "distance": 5.2,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Magma Mephit",
+            "position_x": 220.1,
+            "position_y": 15.7,
+            "position_z": 322.7,
+            "type": "character"
+        },
+        {
+            "alias": "spectral_voice_1",
+            "distance": 5.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Spectral Voice",
+            "position_x": 223.5,
+            "position_y": 16.4,
+            "position_z": 320.4,
+            "type": "character"
+        },
+        {
+            "alias": "dead_goblin_1",
+            "distance": 19.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Dead Goblin",
+            "position_x": 205.5,
+            "position_y": 13.7,
+            "position_z": 331.7,
+            "type": "character"
+        },
+        {
+            "alias": "dead_goblin_2",
+            "distance": 21.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Dead Goblin",
+            "position_x": 202.8,
+            "position_y": 13.5,
+            "position_z": 330.8,
+            "type": "character"
+        },
+        {
+            "alias": "dead_goblin_3",
+            "distance": 18.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Dead Goblin",
+            "position_x": 205.9,
+            "position_y": 13.4,
+            "position_z": 328.9,
+            "type": "character"
+        }
+    ],
+    "regions": [
+        {
+            "distance": 0,
+            "level": "WLD_Main_A",
+            "name": "WAYP_CHA_Chapel",
+            "region_id": "wp_1",
+            "waypoint_guid": "5e857e93-203a-4d4a-bd29-8e97eb34dec6"
+        },
+        {
+            "distance": 0,
+            "level": "WLD_Main_A",
+            "name": "WAYP_CHA_Top",
+            "region_id": "wp_2",
+            "waypoint_guid": "4141c0a2-5ba9-42c0-ab18-082426df45e7"
+        }
+    ],
+    "screen": "exploration",
+    "trigger": "free_roam",
+    "turn_actor": "",
+    "version": 2
+}

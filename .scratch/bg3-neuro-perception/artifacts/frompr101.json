@@ -1,0 +1,311 @@
+{
+    "allies": [
+        {
+            "alias": "tav",
+            "distance": 0.0,
+            "hp": 20,
+            "max_hp": 20,
+            "name": "Tav",
+            "position_x": 219.1,
+            "position_y": 31.4,
+            "position_z": 409.6
+        },
+        {
+            "alias": "origin_astarion",
+            "distance": 2.3,
+            "hp": 17,
+            "max_hp": 17,
+            "name": "Астарион",
+            "position_x": 221.3,
+            "position_y": 30.9,
+            "position_z": 409.4
+        },
+        {
+            "alias": "poc_player_cleric",
+            "distance": 3.7,
+            "hp": 9,
+            "max_hp": 17,
+            "name": "Шэдоухарт",
+            "position_x": 220.3,
+            "position_y": 30.6,
+            "position_z": 406.3
+        },
+        {
+            "alias": "poc_player_wizard",
+            "distance": 1.1,
+            "hp": 14,
+            "max_hp": 14,
+            "name": "Гейл",
+            "position_x": 219.8,
+            "position_y": 31.2,
+            "position_z": 408.8
+        }
+    ],
+    "available_actions": [],
+    "can_rest": true,
+    "distance_reference": "tav",
+    "enemies": [],
+    "events": [],
+    "generated_at": "2026-09-21T16:51:59.3751957Z",
+    "inventory": [],
+    "mode": "exploration",
+    "objects": [
+        {
+            "alias": "aradin_1",
+            "distance": 29.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Aradin",
+            "position_x": 209.1,
+            "position_y": 24.7,
+            "position_z": 436.3,
+            "type": "character"
+        },
+        {
+            "alias": "goblin_tracker_1",
+            "distance": 25.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Tracker",
+            "position_x": 196.5,
+            "position_y": 24.7,
+            "position_z": 419.6,
+            "type": "character"
+        },
+        {
+            "alias": "goblin_brawler_1",
+            "distance": 25.1,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Brawler",
+            "position_x": 201.4,
+            "position_y": 25.0,
+            "position_z": 426.3,
+            "type": "character"
+        },
+        {
+            "alias": "arka_1",
+            "distance": 53.4,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Arka",
+            "position_x": 188.2,
+            "position_y": 36.9,
+            "position_z": 452.8,
+            "type": "character"
+        },
+        {
+            "alias": "elegis_1",
+            "distance": 49.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Elegis",
+            "position_x": 192.6,
+            "position_y": 36.8,
+            "position_z": 451.6,
+            "type": "character"
+        },
+        {
+            "alias": "zevlor_1",
+            "distance": 48.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Zevlor",
+            "position_x": 190.4,
+            "position_y": 36.3,
+            "position_z": 448.7,
+            "type": "character"
+        },
+        {
+            "alias": "goblin_warrior_1",
+            "distance": 26.2,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Warrior",
+            "position_x": 194.1,
+            "position_y": 24.9,
+            "position_z": 405.3,
+            "type": "character"
+        },
+        {
+            "alias": "goblin_warlock_1",
+            "distance": 20.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Warlock",
+            "position_x": 199.4,
+            "position_y": 26.1,
+            "position_z": 405.3,
+            "type": "character"
+        },
+        {
+            "alias": "bugbear_1",
+            "distance": 21.3,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Bugbear",
+            "position_x": 198.8,
+            "position_y": 25.2,
+            "position_z": 407.9,
+            "type": "character"
+        },
+        {
+            "alias": "goblin_booyahg_1",
+            "distance": 23.9,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Goblin Booyahg",
+            "position_x": 196.5,
+            "position_y": 24.9,
+            "position_z": 405.3,
+            "type": "character"
+        },
+        {
+            "alias": "ogre_brute_1",
+            "distance": 18.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Ogre Brute",
+            "position_x": 204.2,
+            "position_y": 25.0,
+            "position_z": 419.1,
+            "type": "character"
+        },
+        {
+            "alias": "sword_spider_1",
+            "distance": 11.0,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sword Spider",
+            "position_x": 226.5,
+            "position_y": 27.1,
+            "position_z": 416.5,
+            "type": "character"
+        },
+        {
+            "alias": "sword_spider_2",
+            "distance": 28.5,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sword Spider",
+            "position_x": 194.9,
+            "position_y": 27.3,
+            "position_z": 424.0,
+            "type": "character"
+        },
+        {
+            "alias": "memnos_1",
+            "distance": 54.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Memnos",
+            "position_x": 187.8,
+            "position_y": 36.8,
+            "position_z": 454.2,
+            "type": "character"
+        },
+        {
+            "alias": "sapper_gald_1",
+            "distance": 21.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Sapper Gald",
+            "position_x": 198.3,
+            "position_y": 25.7,
+            "position_z": 406.7,
+            "type": "character"
+        },
+        {
+            "alias": "barth_1",
+            "distance": 28.6,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Barth",
+            "position_x": 206.9,
+            "position_y": 24.7,
+            "position_z": 434.7,
+            "type": "character"
+        },
+        {
+            "alias": "kanon_1",
+            "distance": 35.7,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Kanon",
+            "position_x": 203.6,
+            "position_y": 36.6,
+            "position_z": 441.3,
+            "type": "character"
+        },
+        {
+            "alias": "remira_1",
+            "distance": 26.8,
+            "interactions": [
+                "talk",
+                "loot"
+            ],
+            "lootable": true,
+            "name": "Remira",
+            "position_x": 211.3,
+            "position_y": 24.8,
+            "position_z": 434.4,
+            "type": "character"
+        }
+    ],
+    "regions": [],
+    "screen": "exploration",
+    "trigger": "free_roam",
+    "turn_actor": "",
+    "version": 2
+}

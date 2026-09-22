@@ -1,4 +1,4 @@
--- BG3Neuro v0.8.63 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02 + perception 07-08)
+-- BG3Neuro v0.8.66 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02 + perception 07-08)
 -- Задача: heartbeat 2s + стартовый state-файл + исполнение действий из action_*.json.
 -- Действия: end_turn (03), move_to_target / attack_entity (04), cast_spell (05),
 --           select_dialogue_option (07), exploration (08:
@@ -21,7 +21,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.64"
+local MOD_VERSION = "0.8.67"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -2930,25 +2930,62 @@ local function scanNearbyObjects(ax, ay, az, partySet, ownedAliases)
     return out
 end
 
+-- v0.8.65 (тикет 26): регионы = открытые waypoints из ECS-компонента PartyWaypoints.
+-- Поле Waypoints — HashSet<Waypoint> (struct: Name, field_8=Guid, Level); извлекаем
+-- все поля и складываем в out как таблицу записей { name, guid, level }.
+-- Итерация сета в SE-прокси толерантна: пробуем #/pairs, каждое поле через pcall.
+-- Менеджер вынесен на глобальную таблицу (главный chunk на лимите 200 активных локалов).
+BG3NEURO_WAYPOINTS = {}
+function BG3NEURO_WAYPOINTS.collect()
+    local out = {}
+    local okAll, handles = pcall(function()
+        return Ext.Entity.GetAllEntitiesWithComponent("PartyWaypoints")
+    end)
+    if not okAll or handles == nil then
+        return out
+    end
+    for i = 1, #handles do
+        local okC, comp = pcall(function() return handles[i]:GetComponent("PartyWaypoints") end)
+        if okC and comp ~= nil then
+            local okW, wps = pcall(function() return comp.Waypoints end)
+            if okW and wps ~= nil then
+                -- HashSet-прокси: элементы только через pairs (индекс по числу невозможен),
+                -- поля структуры читаются прямым dot-доступом (wp.Name/wp.field_8/wp.Level).
+                for _, wp2 in pairs(wps) do
+                    local rec = {}
+                    for _, fld in ipairs({ "Name", "field_8", "Level" }) do
+                        local okV, v = pcall(function() return wp2[fld] end)
+                        rec[fld] = okV and tostring(v) or nil
+                    end
+                    if rec.Name ~= nil then
+                        out[#out + 1] = rec
+                    end
+                end
+                if #out > 0 then
+                    break
+                end
+            end
+        end
+    end
+    return out
+end
+
 local function scanRegions(ax, ay, az)
     local out = {}
     local region = currentRegionName()
-    local guids = allEntityGuids("Waypoint")
-    for i, g in ipairs(guids) do
-        local d = nil
-        local px, py, pz = positionOf(g)
-        if px ~= nil and ax ~= nil then
-            d = distance3(ax, ay, az, px, py, pz)
-        end
-        local name = displayName(g)
-        if name == g or name == "" then
+    local wps = BG3NEURO_WAYPOINTS.collect()
+    for i, wp in ipairs(wps) do
+        local name = wp.Name
+        if name == nil or name == "" then
             name = "Waypoint_" .. tostring(i)
         end
         out[#out + 1] = {
             name = name,
             region_id = "wp_" .. tostring(i),
-            distance = round1(d or 0) or 0,
+            distance = 0, -- waypoint — точка назначения, а не объект вокруг актёра
             region = region,
+            level = wp.Level,
+            waypoint_guid = wp.field_8,
         }
     end
     return out
@@ -4766,6 +4803,95 @@ function BG3NEURO_REST.init()
 end
 
 BG3NEURO_REST.init()
+
+-- Тикет 26 (v0.8.65): fast-travel через клиентскую половину — канал "BG3NeuroTravel",
+-- kind "bg3neuro_travel_click" (сервер→клиент, fire) / "bg3neuro_travel_click_result" (клиент→сервер).
+-- Зеркало BG3NEURO_REST: ретраи пока клиент ждёт, пока waypoint-UI откроется.
+BG3NEURO_TRAVEL = {
+    channel = "BG3NeuroTravel",
+    bridge = nil,
+    pending = {},                    -- { id = <action_id>, waypoint = <target> }
+    clientAlive = true,
+    unavailable = false,
+    retries = 0,
+    maxRetries = 4,
+    retryDelayMs = 800,
+    editVersion = nil,
+}
+
+function BG3NEURO_TRAVEL.bridgeOk()
+    return Ext ~= nil and Ext.Net ~= nil and BG3NEURO_TRAVEL.bridge ~= nil
+        and BG3NEURO_TRAVEL.unavailable == false
+end
+
+function BG3NEURO_TRAVEL.init()
+    BG3NEURO_TRAVEL.editVersion = MOD_VERSION
+    local okC, channel = pcall(function()
+        return Ext.Net.CreateChannel(ModuleUUID or MOD_NAME, BG3NEURO_TRAVEL.channel)
+    end)
+    if not okC or channel == nil then
+        BG3NEURO_TRAVEL.unavailable = true
+        _P("[BG3Neuro] travel: NetChannel create failed: " .. tostring(channel))
+        return
+    end
+    BG3NEURO_TRAVEL.bridge = channel
+
+    local okH, errH = pcall(function()
+        channel:SetHandler(function(msg, user)
+            if type(msg) ~= "table" or msg.kind ~= "bg3neuro_travel_click_result" then
+                return
+            end
+            BG3NEURO_TRAVEL.clientAlive = true
+            BG3NEURO_TRAVEL.unavailable = false
+            if msg.ok == true then
+                -- fire-only: клик ушёл в waypoint-UI; финал — следующий state (region_id сменился).
+                _P("[BG3Neuro] travel: click fired (action=" .. tostring(msg.action_id or "")
+                    .. ", via=" .. tostring(msg.via or ""))
+                for i = 1, #BG3NEURO_TRAVEL.pending do
+                    if BG3NEURO_TRAVEL.pending[i].id == msg.action_id then
+                        table.remove(BG3NEURO_TRAVEL.pending, i)
+                        return
+                    end
+                end
+                return
+            end
+            local reason = tostring(msg.reason or "unknown")
+            for i = 1, #BG3NEURO_TRAVEL.pending do
+                local pd = BG3NEURO_TRAVEL.pending[i]
+                if pd.id == msg.action_id then
+                    if string.sub(reason, 1, 6) == "retry:" and BG3NEURO_TRAVEL.retries < BG3NEURO_TRAVEL.maxRetries then
+                        BG3NEURO_TRAVEL.retries = BG3NEURO_TRAVEL.retries + 1
+                        _P("[BG3Neuro] travel: click retry %d/%d (%s)", BG3NEURO_TRAVEL.retries,
+                            BG3NEURO_TRAVEL.maxRetries, reason)
+                        Ext.Timer.WaitForRealtime(BG3NEURO_TRAVEL.retryDelayMs, function()
+                            pcall(function()
+                                BG3NEURO_TRAVEL.bridge:Broadcast({
+                                    kind = "bg3neuro_travel_click",
+                                    action_id = pd.id,
+                                    waypoint = pd.waypoint,
+                                })
+                            end)
+                        end)
+                        return
+                    end
+                    table.remove(BG3NEURO_TRAVEL.pending, i)
+                    _P("[BG3Neuro] travel: click failed: " .. reason)
+                    writeResult(pd.id, false, nil, "not_supported",
+                        "TravelClickExecutor: the client could not trigger the waypoint travel: " .. reason)
+                    return
+                end
+            end
+        end)
+    end)
+    if not okH then
+        BG3NEURO_TRAVEL.unavailable = true
+        _P("[BG3Neuro] travel: SetHandler failed: " .. tostring(errH))
+    end
+    _P("[BG3Neuro] travel: NetChannel ready (module=" .. tostring(ModuleUUID or MOD_NAME)
+        .. ", channel=" .. BG3NEURO_TRAVEL.channel .. ")")
+end
+
+BG3NEURO_TRAVEL.init()
 -- диалог закрыт, спорить не с чем.
 local function finalizeAllDialogueOptions()
     for i = 1, #pendingDialogue do
@@ -5385,10 +5511,54 @@ local function executeTravel(action)
         return false, nil, "action_failed", "Could not resolve the traveler"
     end
 
-    -- РџСѓР±Р»РёС‡РЅРѕРіРѕ fast-travel Osiris-РІС‹Р·РѕРІР° РІ research РЅРµС‚ (§0/§15): СЃС‚СЂСѓРєС‚СѓСЂРЅС‹Р№ ack.
-    -- TODO(game): кандидат — телепорт к waypoint-маркеру региона (Osi.TeleportTo/Position);
-    -- фактический переезд области придёт отдельным state от mod-генератора (Канал B).
-    return true, true, nil, nil -- success, running (перенос региона — следующий state)
+    -- v0.8.67 (тикет 26): честный fast-travel, движковый серверный переезд.
+    -- Бенч v108 показал: waypoint-карта — нативный Scaleform-виджет (ls.JournalMap
+    -- пуст в Noesis-дереве, GotoWaypoint в DataContext отсутствует), клиентский клик
+    -- по точкам невозможен; NETMSG_TELEPORT_WAYPOINT недостижим из Ext.Net (только
+    -- кастомные каналы). Живой путь нашёлся в саму игру: GLO_LevelSwap делает переезд
+    -- вызовом TeleportPartiesWithMovie(_StartTrigger, "", _Movie), где trigger — GUID
+    -- позиции (field_8/waypoint_guid из PartyWaypoints == S_*_WaypointTrigger_*).
+    -- Полный путь: найти waypoint по имени/region_id в PartyWaypoints → взять его
+    -- waypoint_guid (триггер) → Osi.TeleportPartiesWithMovie(guid, "", "") для
+    -- cross-region (движок сам загрузит нужный уровень и поставит партию). Финал —
+    -- следующий state: region_id/позиция партии сменились.
+    local target = (data.destination ~= nil and tostring(data.destination) or "")
+    if target == "" and data.region_id ~= nil then
+        target = tostring(data.region_id)
+    end
+    if target == "" then
+        return false, nil, "invalid_parameters", "Waypoint name (destination) is required"
+    end
+
+    -- резолв waypoint: либо по имени, либо по region_id ("wp_N") из state-генератора.
+    local wp = nil
+    local wps = BG3NEURO_WAYPOINTS.collect()
+    local tlower = string.lower(target)
+    for i, w in ipairs(wps) do
+        local n = tostring(w.Name or "")
+        local rid = "wp_" .. tostring(i)
+        if string.lower(n) == tlower or string.lower(rid) == tlower then
+            wp = w
+            break
+        end
+    end
+    if wp == nil then
+        return false, nil, "not_found", "Waypoint '" .. target .. "' is not unlocked"
+    end
+    local wg = tostring(wp.field_8 or "")
+    if wg == "" then
+        return false, nil, "action_failed", "Waypoint '" .. target .. "' has no position trigger"
+    end
+
+    -- warm resolver один раз (lazy Osi-таблица: первый доступ к имени кидает).
+    pcall(function() return Osi.TeleportPartiesWithMovie end)
+    local okT, errT = pcall(function() return Osi.TeleportPartiesWithMovie(wg, "", "") end)
+    if not okT then
+        _P("[BG3Neuro] travel: TeleportPartiesWithMovie threw (" .. target .. "): " .. tostring(errT))
+        return false, nil, "action_failed", "TeleportPartiesWithMovie failed: " .. tostring(errT)
+    end
+    _P("[BG3Neuro] travel: TeleportPartiesWithMovie (server) -> " .. target .. " (" .. wg .. ")")
+    return true, true, nil, nil -- success, running (финал — регион сменился)
 end
 
 local function executeOpenScreen(action)
