@@ -1,4 +1,4 @@
--- BG3NeuroClient.lua v0.8.68 — клиентская половина мода (тикеты bg3-neuro-dialogue-click, 25, 26).
+-- BG3NeuroClient.lua v0.8.69 — клиентская половина мода (тикеты bg3-neuro-dialogue-click, 25, 26, 27).
 -- Живёт в клиентском контексте (Ext.UI / Noesis), грузится через BootstrapClient.lua.
 -- Задачи:
 --   1) снапшот вариантов диалога (line + options) для сервера по NetChannel
@@ -24,7 +24,7 @@
 
 local DIALOGUE_CHANNEL = "BG3NeuroDialogue"
 local OPTION_DEPTH_CAP = 12
-_G["BG3Neuro_VERSION"] = "0.8.68" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
+_G["BG3Neuro_VERSION"] = "0.8.69" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
 local MAX_VISITED = 3000
 local DIALOGUE_HINTS = { "dialog", "dialogue", "conversation" }
 local NON_DIALOGUE_HINTS = { "hotbar", "actionbar", "toolbar", "minimap", "tooltip",

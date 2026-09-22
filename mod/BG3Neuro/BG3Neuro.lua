@@ -1,4 +1,6 @@
--- BG3Neuro v0.8.68 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02 + perception 07-08)
+-- BG3Neuro v0.8.69 — файловой IPC-мост (тикеты 01 + 03-12 + bg3-neuro-dialogue-click + followup 01-02 + perception 07-08)
+-- v0.8.69 (тикет 27): partial rest теперь финализируется (HP-дельта + таймаут), а не висит
+--                     в running:true навсегда; failfast по HP-дельте каждого state-emit.
 -- v0.8.68: убран мёртвый fast-travel через клиентский waypoint-UI (ticket 26): BG3NEURO_TRAVEL,
 --          канал BG3NeuroTravel, ретраи click-моста — серверный TeleportPartiesWithMovie делает
 --          travel напрямую; клиентская половина тоже вычищена (BG3NeuroClient v0.8.68).
@@ -24,7 +26,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.68"
+local MOD_VERSION = "0.8.69"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -1871,6 +1873,8 @@ local function requestEngineEndTurn(acting)
 end
 
 local function writeStateFile(payload)
+    -- v0.8.69 (тикет 27): каждый state-emit — шанс финализации partial rest по HP-дельте.
+    pcall(function() return BG3NEURO_REST.settlePending() end)
     local ok, err = pcall(Ext.IO.SaveFile, STATE_FILE, Ext.Json.Stringify(payload))
     if not ok then
         _P("[BG3Neuro] state: " .. tostring(err))
@@ -4720,13 +4724,14 @@ initDialogueBridge()
 BG3NEURO_REST = {
     channel = "BG3NeuroRest",
     bridge = nil,
-    pending = {},                    -- { id = <action_id> } — клики в полёте
+    pending = {},                    -- { id, clicked, snapHp, snapMax, snapFull, ts } — rest в полёте
     clientAlive = true,              -- оптимизм: обе половины в одном PAK; первый провал честно флёт
     unavailable = false,
     retries = 0,
     maxRetries = 4,                  -- сколько раз переспрашиваем клиента, пока UI открывается
     retryDelayMs = 700,
     probeTimeoutMs = 5000,
+    settleTimeoutS = 30,              -- v0.8.69 (тикет 27): реалтайм-фолбэк settlePending (сек)
     editVersion = nil,               -- актуальная версия проставляется в init()
 }
 
@@ -4756,13 +4761,13 @@ function BG3NEURO_REST.init()
             BG3NEURO_REST.clientAlive = true
             BG3NEURO_REST.unavailable = false
             if msg.ok == true then
-                -- fire-only: клик ушёл в UI; финал — следующий state (ShortRestPoint/HP),
-                -- как у long rest (LongRestFinished/Cancelled). Ничего не пишем.
+                -- v0.8.69 (тикет 27): финал идёт из settlePending() на HP-дельте
+                -- следующего state — раньше running:true висел вечно (не только до LongRest*).
                 _P("[BG3Neuro] rest: click fired (action=" .. tostring(msg.action_id or "")
                     .. ", ver=" .. tostring(msg.client_ver or ""))
                 for i = 1, #BG3NEURO_REST.pending do
                     if BG3NEURO_REST.pending[i].id == msg.action_id then
-                        table.remove(BG3NEURO_REST.pending, i)
+                        BG3NEURO_REST.pending[i].clicked = true
                         return
                     end
                 end
@@ -4806,6 +4811,63 @@ function BG3NEURO_REST.init()
 end
 
 BG3NEURO_REST.init()
+
+-- v0.8.69 (тикет 27): суммарное HP партии (действующий состав) для HP-дельты.
+-- settlePending финализирует partial rest по следующему state: HP выросла — success;
+-- таймаут без heal на раненом составе — честный action_failed (v110-симптом).
+function BG3NEURO_REST.partyHpSnapshot()
+    local sumHp, sumMax = 0, 0
+    local party = partySetOf()
+    for g in pairs(party) do
+        local okE, ent = pcall(Ext.Entity.Get, g)
+        if okE and ent ~= nil then
+            local hp, mx = healthOf(ent)
+            sumHp = sumHp + (hp or 0)
+            sumMax = sumMax + (mx or 0)
+        end
+    end
+    return sumHp, sumMax
+end
+
+function BG3NEURO_REST.settlePending()
+    -- вызывается на каждом state-emit (writeStateFile); финализирует partial rest.
+    if #BG3NEURO_REST.pending == 0 then
+        return
+    end
+    local curHp, curMax = BG3NEURO_REST.partyHpSnapshot()
+    local now = os and os.time and os.time() or 0
+    for i = #BG3NEURO_REST.pending, 1, -1 do
+        local pd = BG3NEURO_REST.pending[i]
+        if pd.clicked ~= true then
+            -- клиент ещё не ответил ok=true (клик не ушёл в UI) — не наш финал
+            if pd.ts ~= nil and pd.ts > 0 and now - pd.ts >= BG3NEURO_REST.settleTimeoutS then
+                _P("[BG3Neuro] rest: settle timeout without client click (action=" .. tostring(pd.id) .. ")")
+                writeResult(pd.id, false, nil, "action_failed",
+                    "The rest click never reached the client UI (timeout); retry with the game in focus")
+                table.remove(BG3NEURO_REST.pending, i)
+            end
+        elseif curHp > (pd.snapHp or 0) then
+            -- HP-дельта по следующему state: реальное исцеление — успех.
+            _P("[BG3Neuro] rest: healed (hp %d -> %d, action=%s)", pd.snapHp or 0, curHp, tostring(pd.id))
+            writeResult(pd.id, true, false, nil, nil)
+            table.remove(BG3NEURO_REST.pending, i)
+        elseif pd.clicked == true and pd.snapFull == true then
+            -- v0.8.69: партия уже была на полном HP (клик подтверждён) — rest нечего лечить → success.
+            _P("[BG3Neuro] rest: full party, no heal needed (action=%s)", tostring(pd.id))
+            writeResult(pd.id, true, false, nil, nil)
+            table.remove(BG3NEURO_REST.pending, i)
+        elseif pd.clicked == true and pd.ts ~= nil and pd.ts > 0
+            and now - pd.ts >= BG3NEURO_REST.settleTimeoutS then
+            -- раненый состав без heal после таймаута: клик ушёл, но отдых не применился
+            -- (v110: overlay поверх HotBar блокировал команду) — честный отказ.
+            _P("[BG3Neuro] rest: timeout without heal (action=%s, hp %d -> %d)", tostring(pd.id), pd.snapHp or 0, curHp)
+            writeResult(pd.id, false, nil, "action_failed",
+                "The short rest click did not restore HP within the timeout — a UI overlay may have "
+                .. "blocked the rest panel (close combat log / dialog and retry)")
+            table.remove(BG3NEURO_REST.pending, i)
+        end
+    end
+end
 
 -- диалог закрыт, спорить не с чем.
 local function finalizeAllDialogueOptions()
@@ -5406,8 +5468,17 @@ local function executeRest(action)
         if not okB then
             return false, nil, "not_supported", "RestClickExecutor send failed: " .. tostring(errB)
         end
-        BG3NEURO_REST.pending[#BG3NEURO_REST.pending + 1] = { id = action.id }
-        return true, true, nil, nil -- success, running (финал — следующий state)
+        -- v0.8.69 (тикет 27): snapshot HP партии как baseline для settlePending (финал).
+        local restHp, restMax = BG3NEURO_REST.partyHpSnapshot()
+        BG3NEURO_REST.pending[#BG3NEURO_REST.pending + 1] = {
+            id = action.id,
+            ts = os and os.time and os.time() or 0,
+            snapHp = restHp,
+            snapMax = restMax,
+            snapFull = (restMax or 0) > 0 and (restHp or 0) >= (restMax or 0),
+            clicked = false, -- true после ok=true от клиента (тикет 27)
+        }
+        return true, true, nil, nil -- success, running (финал — следующий state/HP-дельта)
     end
 
     local ok, err = pcall(Osi.RequestLongRest, actor, 0)
