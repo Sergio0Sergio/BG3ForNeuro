@@ -1,8 +1,8 @@
 # 27 — `rest` click fires but HP never recovers on a beaten party (stale client v0.8.63 on v110)
 
 Type: bug
-Status: needs-triage
-Blocked by: needs a live stand with a beaten party + a fresh client; may depend on daily short-rest cap
+Status: resolved (fixed + regression-passed, v0.8.69 / PAK v112, 2026-09-22)
+Blocked by: —
 
 ## Finding
 
