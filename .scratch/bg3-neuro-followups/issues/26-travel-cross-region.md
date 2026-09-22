@@ -105,11 +105,27 @@ target level and places the party itself (this is exactly the game's fast travel
   (mephits/goblins instead of beach devourers). No `retry:no_waypoint_match`, both injects accepted,
   no error dialogs, `region_id` in `regions` list reflects the new area state.
 
+## Cross-region bench PROVEN (2026-09-22, v0.8.67 / PAK v109, live Underdark)
+
+- Opened a real second region: solved the Defiled Temple moon puzzle → Selunite Outpost → **Underdark**
+  (`WLD_Underdark`). `WAYP_UND_Fort` (`dddb39d6-c5ac-4470-98c5-395ce81af017`) auto-registered in
+  `PartyWaypoints`.
+- `travel_to WAYP_CHA_Chapel` **from Underdark**: party teleported out — positions changed from
+  `~140,49,-125` (Selunite Outpost) to `276,2.5,297` (Overgrown Ruins beach). `TeleportPartiesWithMovie`
+  with a waypoint trigger performs the **level swap itself**, exactly like the engine's fast travel —
+  no `TeleportPartiesToLevelWithMovie` needed for open waypoints.
+- Note: the waypoint `Level` field reads back as `WLD_Main_A` even for `WAYP_UND_*` — the trigger GUID
+  (`field_8`) is the reliable key, level field is informational only.
+- Bench-side hazard hit along the way: a stuck empty combat flag (`TurnBasedComponent` with no roster,
+  `allies=0 enemies=0`, caused by a mid-combat teleport) suppresses the `regions` emitter → travel looked
+  broken. Cleared by a plain Load Game (no game restart needed). Worth a note in CONTEXT.md Diagnostic
+  traps if it recurs.
+
 ## Acceptance
 
 - `travel_to` with a `region_id` in another region either REALLY travels (next state shows the new
   region with the party there) or fails honestly — never ack-without-travel. **DONE (v0.8.67): measured
-  party-position change across two waypoints.**
+  party-position change twice: Chapel→Top (same level) and **Underdark→Chapel (cross-region level swap)**.
 - Same-region travel keeps working (regression box from the checklist). **Same code path — the engine
   teleports the party within/into the requested level.**
 
