@@ -1,9 +1,16 @@
--- BG3NeuroClient.lua v0.8.58 — клиентская половина мода (тикеты bg3-neuro-dialogue-click, 25).
+-- BG3NeuroClient.lua v0.8.61 — клиентская половина мода (тикеты bg3-neuro-dialogue-click, 25).
 -- Живёт в клиентском контексте (Ext.UI / Noesis), грузится через BootstrapClient.lua.
 -- Задачи:
 --   1) снапшот вариантов диалога (line + options) для сервера по NetChannel
 --      "BG3NeuroDialogue" (тот же module+channel, что в серверном BG3Neuro.lua);
 --   2) реальный клик по выбранному варианту через Noesis (ICommand:Execute()).
+--   v0.8.61 (тикет 25): честный ShortRest напрямую — команда на DataContext виджета
+--      HotBar/ScreenFade (ui::DCWidget) с полями ShortRest/CampTravel, executeShortRestViaDc();
+--      рест-панель вне MainCanvas (слой PopupPanels), GetStateMachine()==nil.
+--   v0.8.60 (тикет 25): полный dump дерева от RootVisual — виджеты (ls.UIWidget:HotBar
+--      и др.) с DataContext DCWidget держат ShortRest/CampTravel на глубине d5.
+--   v0.8.59 (тикет 25): диагностика rest-меню — ancestors-цепочки, sm.States,
+--      Find по именам рест-панели, DataContext (команда ShortRest — VM-команда, не кнопка).
 --   v0.8.58 (тикет 25): лёгкий отдых — канал "BG3NeuroRest": скан UI (rest_probe)
 --      и клик по кнопке Take Short Rest (меню лагеря открываем программно).
 -- Клик-механика (research 01 + UI.inl): вариант — Button-подобный элемент с Command
@@ -14,7 +21,7 @@
 
 local DIALOGUE_CHANNEL = "BG3NeuroDialogue"
 local OPTION_DEPTH_CAP = 12
-_G["BG3Neuro_VERSION"] = "0.8.58" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
+_G["BG3Neuro_VERSION"] = "0.8.61" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
 local MAX_VISITED = 3000
 local DIALOGUE_HINTS = { "dialog", "dialogue", "conversation" }
 local NON_DIALOGUE_HINTS = { "hotbar", "actionbar", "toolbar", "minimap", "tooltip",
@@ -614,6 +621,115 @@ local function clickButton(el)
     return true, nil
 end
 
+-- Общие UI-хелперы, используемые executeShortRestViaDc (должны стоять до него).
+local SHORTREST_SCAN_DEPTH = 14
+local function uiPropName(el)
+    return tostring(elProp(el, "Name") or "")
+end
+local function uiTreeTop(el)
+    local top = el
+    for _ = 1, SHORTREST_SCAN_DEPTH do
+        local p = safe(function() return top:TreeParent() end)
+        if p == nil then
+            break
+        end
+        top = p
+    end
+    return top
+end
+
+-- Выполнение короткого отдыха напрямую: команда ShortRest живёт на DataContext
+-- (ui::DCWidget) виджетов HUD-слоя (HotBar, ScreenFade, TargetInfo, ...), которые НЕ
+-- являются детьми MainCanvas и не имеют CLI без UIWidget. Берём верхушку Noesis-дерева,
+-- спускаемся по слоям, находим виджет с DC-командой ShortRest и вызываем Execute —
+-- это эквивалент клика по MenuItem "ShortRest"/горячей клавише (bench-proven v0.8.61).
+local function executeShortRestViaDc()
+    local roots = collectRoots()
+    if #roots == 0 then
+        return false, "no ui roots"
+    end
+    local top = uiTreeTop(roots[1])
+    if top == nil then
+        return false, "no tree top"
+    end
+    local candidates = {}
+    local visited = {}
+    local function scan(node, depth)
+        if node == nil or depth > SHORTREST_SCAN_DEPTH or visited[node] then
+            return
+        end
+        visited[node] = true
+        local typ = tostring(elType(node) or "")
+        local name = uiPropName(node)
+        local dc = safe(function() return node.DataContext end)
+        if dc ~= nil then
+            local cmd = safe(function() return dc:GetProperty("ShortRest") end)
+            if cmd ~= nil then
+                candidates[#candidates + 1] = {
+                    node = node, cmd = cmd, typ = typ, name = name,
+                    dc_type = tostring(safe(function() return tostring(dc) end) or ""),
+                    priority = (string.find(string.lower(name), "hotbar") ~= nil or
+                        string.find(string.lower(typ), "hotbar") ~= nil or
+                        string.find(string.lower(name), "rest") ~= nil) and 0 or 1,
+                }
+            end
+        end
+        local cc = safe(function() return tonumber(node.ChildrenCount) end) or 0
+        local vc = safe(function() return tonumber(node.VisualChildrenCount) end) or 0
+        local cnt = math.max(cc, vc)
+        for j = 1, cnt do
+            local ch = safe(function() return node:Child(j) end)
+            if ch == nil and j <= vc then
+                ch = safe(function() return node:VisualChild(j) end)
+            end
+            if ch ~= nil then
+                scan(ch, depth + 1)
+            end
+        end
+        if cnt == 0 then
+            local content = safe(function() return node.Content end)
+            if content ~= nil and content ~= node then
+                scan(content, depth + 1)
+            end
+        end
+    end
+    scan(top, 0)
+
+    if #candidates == 0 then
+        return false, "no ShortRest DC command found in ui tree"
+    end
+    table.sort(candidates, function(a, b)
+        if a.priority ~= b.priority then
+            return a.priority < b.priority
+        end
+        return a.dc_type < b.dc_type
+    end)
+
+    for _, c in ipairs(candidates) do
+        local can = safe(function() return c.cmd:CanExecute(nil) end)
+        log("rest: cmd candidate %s:%s (%s) can=%s", tostring(c.typ), tostring(c.name),
+            tostring(c.dc_type), tostring(can))
+    end
+
+    local lastErr = nil
+    for _, c in ipairs(candidates) do
+        local can = safe(function() return c.cmd:CanExecute(nil) end)
+        if can == false then
+            lastErr = "CanExecute=false on " .. c.typ .. ":" .. c.name
+            -- ищем следующий кандидат (другой виджет может быть готов к отдыху)
+        else
+            local ok = pcall(function() c.cmd:Execute(nil) end)
+            if ok then
+                log("rest: ShortRest executed via DC %s:%s (%s)",
+                    tostring(c.typ), tostring(c.name), tostring(c.dc_type))
+                return true, c.typ .. ":" .. c.name
+            end
+            lastErr = "Execute threw on " .. c.typ .. ":" .. c.name
+        end
+    end
+    return false, "ShortRest DC execute failed: " .. tostring(lastErr)
+end
+
 -- Открыть меню отдыха: если кнопка Take Short Rest уже видна — уже открыто.
 -- Иначе ищем кнопку-«открывалку» (имя/файл/тип по REST_OPEN_HINTS) и кликаем.
 local function openCampMenu()
@@ -636,6 +752,16 @@ end
 
 local function performRestClick(msg)
     local actionId = msg.action_id
+
+    -- v0.8.61: прямой путь — команда ShortRest на DataContext виджета HotBar (DCWidget).
+    -- Рест-панель вне MainCanvas и через scanUiButtons недостижима; этот вызов —
+    -- эквивалент клика по MenuItem/HotKey (работает даже без открытой панели).
+    local ok, where = executeShortRestViaDc()
+    if ok then
+        log("rest: ShortRest clicked via DC (action=%s): %s", tostring(actionId or ""), tostring(where))
+        return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = true, via = where }
+    end
+    log("rest: direct DC ShortRest unavailable (%s), fallback to UI click", tostring(where))
 
     if not restMenuOpen() then
         local opened, reason = openCampMenu()
@@ -663,6 +789,332 @@ local function performRestClick(msg)
     return { kind = "bg3neuro_rest_click_result", action_id = actionId, ok = true }
 end
 
+local MAX_ANCESTORS = 12
+local FIND_NAMES = { "RestOptionsList", "ShortRestItem", "CampItem", "LongRestItem",
+    "AcceptButton", "ShortRest", "CampTravel", "RestPanel", "RestControl",
+    "HotBar", "RestMenu", "ShortRestShortcut", "ShortRestItem" }
+local function propName(el)
+    return tostring(elProp(el, "Name") or "")
+end
+
+-- Диагностика ancestors: от корня вверх до верхушки Noesis-дерева.
+local function ancestorsChain(roots)
+    local out = {}
+    local seen = {}
+    for _, start in ipairs(roots) do
+        local chain = {}
+        local el = start
+        for _ = 1, MAX_ANCESTORS do
+            if el == nil or seen[el] then
+                break
+            end
+            seen[el] = true
+            chain[#chain + 1] = {
+                type = tostring(elType(el) or ""),
+                name = propName(el),
+                file = tostring(fileName(el) or ""),
+                cc = safe(function() return tonumber(el.ChildrenCount) end) or 0,
+                vc = safe(function() return tonumber(el.VisualChildrenCount) end) or 0,
+            }
+            local p = safe(function() return el:TreeParent() end)
+            if p == nil then
+                p = safe(function() return el.Parent end)
+            end
+            if p == nil then
+                p = safe(function() return el.VisualParent end)
+            end
+            el = p
+        end
+        out[#out + 1] = chain
+    end
+    return out
+end
+
+-- Поиск узла по имени в поддереве (FrameworkElement:Find = FindNodeName).
+local function findNodeInSubtree(root, name)
+    local hit = safe(function() return root:Find(name) end)
+    if hit == nil then
+        return nil
+    end
+    return {
+        type = tostring(elType(hit) or ""),
+        name = propName(hit),
+        file = tostring(fileName(hit) or ""),
+    }
+end
+
+-- Данные state machine: активное состояние, корень, коллекция состояний.
+local function stateMachineInfo()
+    local sm = safe(function() return Ext.UI.GetStateMachine() end)
+    if sm == nil then
+        return nil, "no GetStateMachine"
+    end
+    local info = {
+        root_state = tostring(safe(function() return sm.RootState end) or ""),
+        state = tostring(safe(function() return sm.State end) or ""),
+        states_count = arrLen(safe(function() return sm.States end)),
+        states = {},
+    }
+    local sts = safe(function() return sm.States end)
+    local n = arrLen(sts)
+    for i = 1, math.min(n, 40) do
+        local inst = arrGet(sts, i)
+        if inst ~= nil then
+            local st = safe(function() return inst.State end)
+            local sw = safe(function() return inst.StateWidgets end)
+            info.states[#info.states + 1] = {
+                tostring = tostring(safe(function() return tostring(inst) end) or ""),
+                state_name = tostring(safe(function() return tostring(st) end) or ""),
+                widgets = arrLen(safe(function() return inst.Widgets end)),
+                statewidgets = arrLen(sw),
+            }
+        end
+    end
+    return info, nil
+end
+
+-- Поиск рест/лагерных узлов по имени среди активных корней и их ancestors.
+local function findRestNodes(roots)
+    local scanned = {}
+    local hits = {}
+    local nodes = {}
+    for _, root in ipairs(roots) do
+        local pool = { root }
+        -- добавляем ancestors корня — там может жить слой с рест-панелью/HotBar
+        local el = root
+        for _ = 1, MAX_ANCESTORS do
+            local p = safe(function() return el:TreeParent() end)
+            if p == nil then
+                p = safe(function() return el.Parent end)
+            end
+            if p == nil or p == el or scanned[p] then
+                break
+            end
+            scanned[p] = true
+            pool[#pool + 1] = p
+            el = p
+        end
+        for _, cand in ipairs(pool) do
+            if cand ~= nil then
+                for _, name in ipairs(FIND_NAMES) do
+                    if not hits[name] then
+                        local hit = findNodeInSubtree(cand, name)
+                        if hit ~= nil then
+                            hit.via = tostring(elType(cand) or "") .. ":" .. propName(cand)
+                            hits[name] = hit
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return hits
+end
+
+-- DataContext активных корней и их ближайших ancestors: есть ли команда ShortRest.
+local function dataContextInfo(roots)
+    local out = {}
+    local seen = {}
+    for _, root in ipairs(roots) do
+        local el = root
+        for _ = 1, 6 do
+            if el == nil or el == false or seen[el] then
+                break
+            end
+            seen[el] = true
+            local dc = safe(function() return el.DataContext end)
+            if dc ~= nil then
+                local hasShortRest = safe(function() return dc:GetProperty("ShortRest") end) ~= nil
+                local hasCamp = safe(function() return dc:GetProperty("CampTravel") end) ~= nil
+                if hasShortRest or hasCamp or true then
+                    out[#out + 1] = {
+                        node = tostring(elType(el) or "") .. ":" .. propName(el),
+                        dc_type = tostring(safe(function() return tostring(dc) end) or ""),
+                        has_shortrest_prop = hasShortRest,
+                        has_camp_prop = hasCamp,
+                    }
+                end
+                break
+            end
+            local p = safe(function() return el:TreeParent() end)
+            if p == nil then
+                p = safe(function() return el.Parent end)
+            end
+            if p == nil then
+                p = safe(function() return el.VisualParent end)
+            end
+            el = p
+        end
+    end
+    return out
+end
+
+-- Поднимаемся от el до самого верхнего предка (RootVisual) и возвращаем его.
+local function topOfTree(el)
+    local cur = el
+    for _ = 1, MAX_ANCESTORS do
+        local p = safe(function() return cur:TreeParent() end)
+        if p == nil then
+            p = safe(function() return cur.Parent end)
+        end
+        if p == nil then
+            p = safe(function() return cur.VisualParent end)
+        end
+        if p == nil or p == cur then
+            return cur
+        end
+        cur = p
+    end
+    return cur
+end
+
+-- Описание одного узла для дампа.
+local function describeNode(el, depth)
+    return {
+        d = depth,
+        type = tostring(elType(el) or ""),
+        name = propName(el),
+        file = tostring(fileName(el) or ""),
+        cc = safe(function() return tonumber(el.ChildrenCount) end) or 0,
+        vc = safe(function() return tonumber(el.VisualChildrenCount) end) or 0,
+        action = tostring(safe(function() return tostring(elProp(el, "Action")) end) or ""),
+    }
+end
+
+-- Полный дамп дерева от RootVisual вниз: все слои (HUD, PopupPanels, оверлеи),
+-- которые не видны из MainCanvas. Лимит узлов/глубины защищает от циклов.
+local FULL_DUMP_MAX = 600
+local FULL_DUMP_DEPTH = 14
+
+local function collectLayerChildren(el, layerDump, visited)
+    local nodes = {}
+    local function walkNode(node, depth)
+        if node == nil or depth > FULL_DUMP_DEPTH or visited[node] or #nodes >= FULL_DUMP_MAX then
+            return
+        end
+        visited[node] = true
+        nodes[#nodes + 1] = describeNode(node, depth)
+        local cc = safe(function() return tonumber(node.ChildrenCount) end) or 0
+        local vc = safe(function() return tonumber(node.VisualChildrenCount) end) or 0
+        local cnt = math.max(cc, vc)
+        for j = 1, cnt do
+            local ch = safe(function() return node:Child(j) end)
+            if ch == nil and j <= vc then
+                ch = safe(function() return node:VisualChild(j) end)
+            end
+            if ch ~= nil then
+                walkNode(ch, depth + 1)
+            end
+        end
+        if cnt == 0 then
+            local content = safe(function() return node.Content end)
+            if content ~= nil and content ~= node then
+                walkNode(content, depth + 1)
+            end
+        end
+    end
+    walkNode(el, 0)
+    return nodes
+end
+
+local function fullTreeDump()
+    local out = {}
+    local visited = {}
+    local roots = collectRoots()
+    for _, root in ipairs(roots) do
+        local top = topOfTree(root)
+        if not visited[top] then
+            visited[top] = true
+            local children = collectLayerChildren(top, out, visited)
+            out[#out + 1] = {
+                top_type = tostring(elType(top) or ""),
+                top_name = propName(top),
+                nodes = children,
+            }
+        end
+    end
+    return out
+end
+
+-- Find по всем FIND_NAMES по ВЕРХУШКЕ дерева (каждый слой отдельно) — рест-панель
+-- и HotBar лежат в оверлейном слое, недоступном из MainCanvas.
+local function fullFindRestNodes()
+    local hits = {}
+    local seenTops = {}
+    local roots = collectRoots()
+    for _, root in ipairs(roots) do
+        local top = topOfTree(root)
+        if not seenTops[top] then
+            seenTops[top] = true
+            for _, name in ipairs(FIND_NAMES) do
+                if not hits[name] then
+                    local hit = findNodeInSubtree(top, name)
+                    if hit ~= nil then
+                        hit.via = "top:" .. tostring(elType(top) or "") .. ":" .. propName(top)
+                        hits[name] = hit
+                    end
+                end
+            end
+        end
+    end
+    return hits
+end
+
+-- DataContext с командой ShortRest/CampTravel по всему дереву от верхушки каждого слоя.
+local function fullDataContextInfo()
+    local out = {}
+    local rootTop = nil
+    local roots = collectRoots()
+    for _, root in ipairs(roots) do
+        rootTop = topOfTree(root)
+        break
+    end
+    if rootTop ~= nil then
+        local seen = {}
+        local function probe(node, depth)
+            if node == nil or seen[node] or #out >= 40 then
+                return
+            end
+            seen[node] = true
+            local dc = safe(function() return node.DataContext end)
+            if dc ~= nil then
+                local sr = safe(function() return dc:GetProperty("ShortRest") end)
+                local camp = safe(function() return dc:GetProperty("CampTravel") end)
+                local entry = {
+                    path = tostring(elType(node) or "") .. ":" .. propName(node) .. " @d" .. tostring(depth),
+                    dc_type = tostring(safe(function() return tostring(dc) end) or ""),
+                    has_shortrest = sr ~= nil,
+                    has_camp = camp ~= nil,
+                }
+                local dupe = false
+                for _, e in ipairs(out) do
+                    if e.path == entry.path and e.dc_type == entry.dc_type then
+                        dupe = true
+                        break
+                    end
+                end
+                if not dupe then
+                    out[#out + 1] = entry
+                end
+            end
+            local cc = safe(function() return tonumber(node.ChildrenCount) end) or 0
+            local vc = safe(function() return tonumber(node.VisualChildrenCount) end) or 0
+            local cnt = math.max(cc, vc)
+            for j = 1, cnt do
+                local ch = safe(function() return node:Child(j) end)
+                if ch == nil and j <= vc then
+                    ch = safe(function() return node:VisualChild(j) end)
+                end
+                if ch ~= nil then
+                    probe(ch, depth + 1)
+                end
+            end
+        end
+        probe(rootTop, 0)
+    end
+    return out
+end
+
 local function buildRestProbeReply()
     local state = uiStateName()
     local roots = collectRoots()
@@ -688,10 +1140,20 @@ local function buildRestProbeReply()
             child = tostring(b.child or ""),
         }
     end
+    local smInfo, smErr = stateMachineInfo()
     return {
         kind = "bg3neuro_rest_probe_reply",
         state = state,
+        sm = smInfo,
+        sm_err = smErr,
         roots = rootsInfo,
+        ancestors = ancestorsChain(roots),
+        -- полный дамп дерева от верхушки Noesis (все слои, включая оверлеи)
+        full_dump = fullTreeDump(),
+        find_hits = findRestNodes(roots),
+        full_find_hits = fullFindRestNodes(),
+        data_contexts = dataContextInfo(roots),
+        full_dc = fullDataContextInfo(),
         ui_buttons = btnInfo,
         rest_menu_open = restMenuOpen(),
     }

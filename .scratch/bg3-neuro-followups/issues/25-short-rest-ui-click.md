@@ -48,11 +48,27 @@ was: the action is only reachable through the **client UI** ("Take Short Rest" b
 4. **Contract:** `rest` documents the short-rest outcome; C# validator `CanAllPartiesLongRest`
    stays for full rest.
 
+## Bench result (2026-09-22, v0.8.61 / PAK v099, passed)
+
+- `rest {"actor":"tav","rest_type":"partial"}` → client `executeShortRestViaDc()` finds the HUD widget
+  `ls.UIWidget:HotBar` (DataContext `ui::DCWidget`, property `ShortRest`) and calls `cmd:Execute(nil)`.
+  Server-side the rest-panel lives in `PopupPanels`/`WindowManager.Widgets` (outside MainCanvas),
+  `Ext.UI.GetStateMachine()` is nil there, so click-by-button was impossible; the DC command is the
+  real path (≡ `ShortRestItem` MenuItem / `ShortRestShortcut` hotkey in `HotBar.xaml:3633/3755`).
+- Verified HP restore: wounded ally 9/17 → **17/17** after the action; client log
+  `rest: ShortRest executed via DC ls.UIWidget:HotBar`.
+- Earlier pitfall fixed during bench: `executeShortRestViaDc` referenced `topOfTree`/`propName` before
+  their declaration → `attempt to call a nil value`; moved shared helpers (`uiTreeTop`, `uiPropName`)
+  ahead of the function. Also `CrossplayOverlay` DC carries a ShortRest stub (CanExecute=true) selected
+  before HotBar; priority now prefers node named/typed hotbar/rest → HotBar wins.
+- PAK v099 MD5 installed: `9ef3baa8cc18aae8ace85679dbe22b38` (both ModuleShortDesc nodes).
+
 ## Acceptance
 
-- `rest {"rest_type":"partial"}` (enums: `["full","partial"]`) actually starts a short rest; the next
-  state reflects it (rest in progress → finished), not just an ack.
-- No resting UI / not at camp → actionable error code, no phantom success.
+- [x] `rest {"rest_type":"partial"}` actually starts a short rest; the next state reflects it
+  (HP restored), not just an ack.
+- [x] No resting UI / not at camp → actionable error code, no phantom success (fallback keeps
+  `openCampMenu`/`clickButton` for the resting-screen path).
 
 ## Cost
 
