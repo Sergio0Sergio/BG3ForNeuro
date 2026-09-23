@@ -258,6 +258,122 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task MultiAgent_ForceGate_OwnedCannotAct_NoForce_ThenCanAct_SendsForce()
+    {
+        try
+        {
+            if (_randy is null)
+            {
+                return;
+            }
+
+            // Ход Shadowheart, владелец агента — Karlach, у Karlach availability="cannot act"
+            // (spec §12.2): force НЕ должен уходить, пока его персонаж не может действовать.
+            WriteStateContent("""
+                {
+                  "mode": "combat",
+                  "turn_actor": "shadowheart",
+                  "turn_initiative_index": 1,
+                  "turn_initiative_total": 2,
+                  "allies": [
+                    { "alias": "karlach", "name": "Karlach", "hp": 45, "max_hp": 60, "distance": 6, "availability": "cannot act" },
+                    { "alias": "shadowheart", "name": "Shadowheart", "hp": 30, "max_hp": 40, "distance": 4, "availability": "acting now, can act" }
+                  ],
+                  "enemies": [
+                    { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 6 }
+                  ],
+                  "available_actions": ["end_turn"]
+                }
+                """);
+            WriteFreshHeartbeat();
+
+            var (sent, client, ipc) = await StartStackWithAliasAsync("karlach");
+            using (client)
+            using (ipc)
+            {
+                // Small settle: allow the stack to spin; force must NOT appear while Karlach can't act.
+                await Task.Delay(1500);
+                Assert.DoesNotContain(sent, m => m.Contains("\"actions/force\""));
+
+                // Ход перешёл к Karlach → её агент обязан зафорсить.
+                WriteStateContent("""
+                    {
+                      "mode": "combat",
+                      "turn_actor": "karlach",
+                      "turn_initiative_index": 1,
+                      "turn_initiative_total": 2,
+                      "allies": [
+                        { "alias": "karlach", "name": "Karlach", "hp": 45, "max_hp": 60, "distance": 6, "availability": "acting now, can act" },
+                        { "alias": "shadowheart", "name": "Shadowheart", "hp": 30, "max_hp": 40, "distance": 4, "availability": "can act" }
+                      ],
+                      "enemies": [
+                        { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 6 }
+                      ],
+                      "available_actions": ["end_turn"]
+                    }
+                    """);
+                ipc.ReadState();
+
+                var forceSeen = await WaitUntilAsync(() => sent.Count(m => m.Contains("\"actions/force\"")) >= 1, TimeSpan.FromSeconds(10));
+                Assert.True(forceSeen, "Force после перехода хода к owned не отправлен");
+                var force = JsonNode.Parse(sent.First(m => m.Contains("\"actions/force\"")))!;
+                // owned == turn actor → проекция byte-identical к v1 (spec §12.2)
+                Assert.Contains("## Turn: Karlach", force["data"]!["state"]!.GetValue<string>());
+            }
+        }
+        finally
+        {
+            await CleanupAsync();
+        }
+    }
+
+    [Fact]
+    public async Task MultiAgent_ForceGate_OwnedCanActInSharedWindow_SendsForce()
+    {
+        try
+        {
+            if (_randy is null)
+            {
+                return;
+            }
+
+            // Shared window (spec §12.1): на ходу Shadowheart, но Karlach (владелец) —
+            // "can act" (co-actor) → агент обязан зафорсить.
+            WriteStateContent("""
+                {
+                  "mode": "combat",
+                  "turn_actor": "shadowheart",
+                  "turn_initiative_index": 1,
+                  "turn_initiative_total": 2,
+                  "allies": [
+                    { "alias": "karlach", "name": "Karlach", "hp": 45, "max_hp": 60, "distance": 6, "availability": "can act" },
+                    { "alias": "shadowheart", "name": "Shadowheart", "hp": 30, "max_hp": 40, "distance": 4, "availability": "acting now, can act" }
+                  ],
+                  "enemies": [
+                    { "alias": "goblin_1", "name": "Goblin Raider", "hp": 12, "max_hp": 18, "distance": 6 }
+                  ],
+                  "available_actions": ["end_turn"]
+                }
+                """);
+            WriteFreshHeartbeat();
+
+            var (sent, client, ipc) = await StartStackWithAliasAsync("karlach");
+            using (client)
+            using (ipc)
+            {
+                var forceSeen = await WaitUntilAsync(() => sent.Count(m => m.Contains("\"actions/force\"")) >= 1, TimeSpan.FromSeconds(10));
+                Assert.True(forceSeen, "Force в общем окне (owned can act) не отправлен");
+                var force = JsonNode.Parse(sent.First(m => m.Contains("\"actions/force\"")))!;
+                Assert.Contains("## Turn: (your character: Karlach)", force["data"]!["state"]!.GetValue<string>());
+            }
+        }
+        finally
+        {
+            await CleanupAsync();
+        }
+    }
+
+    [Fact]
     public async Task MoveToTarget_WritesActionFile_ThenUpdatedPositionSendsForceWithEvent()
     {
         try
@@ -750,6 +866,14 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
         return stack;
     }
 
+    private async Task<(List<string> Sent, NeuroWebSocketClient Client, IpcClient Ipc)> StartStackWithAliasAsync(string ownedAlias)
+    {
+        var stack = StartStackRawAsync(IpcConfigFor(_tmpDir), ownedAlias: ownedAlias);
+        await WaitUntilAsync(() => stack.Ipc.Status == ModStatus.Alive && stack.Ipc.LastStateContent is not null, TimeSpan.FromSeconds(10));
+        await WaitUntilAsync(() => stack.Sent.Any(m => m.Contains("\"command\":\"startup\"")), TimeSpan.FromSeconds(10));
+        return stack;
+    }
+
     private static string ExplorationStateJson() => """
     {
       "mode": "exploration",
@@ -885,7 +1009,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
         }
     }
 
-    private (List<string> Sent, NeuroWebSocketClient Client, IpcClient Ipc) StartStackRawAsync(IpcConfig config)
+    private (List<string> Sent, NeuroWebSocketClient Client, IpcClient Ipc) StartStackRawAsync(IpcConfig config, string? ownedAlias = null, bool autopilotEnabled = true)
     {
         var sent = new List<string>();
         var ipc = new IpcClient(config);
@@ -893,7 +1017,7 @@ public class RandyDecisionLoopIntegrationTests : IDisposable
         var client = new NeuroWebSocketClient($"ws://localhost:{_wsPort}", Game, ActionRegistry.Get(), TimeSpan.FromSeconds(1));
         client.MessageSent += (_, text) => sent.Add(text);
         var router = new ActionRouter(new IpcPaths(_tmpDir), controlledPartySize: 1);
-        var loop = new DecisionLoop(client, ipc, router);
+        var loop = new DecisionLoop(client, ipc, router, autopilotEnabled: autopilotEnabled, ownedAlias: ownedAlias);
         client.Start();
         loop.Start();
         return (sent, client, ipc);
