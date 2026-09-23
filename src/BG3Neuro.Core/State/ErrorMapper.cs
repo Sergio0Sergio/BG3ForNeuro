@@ -24,6 +24,7 @@ public static class ErrorMapper
         ErrorCode.TargetNotInRange,
         ErrorCode.InvalidParameters,
         ErrorCode.WrongPhase,
+        ErrorCode.NotYourCharacter,
         ErrorCode.DialogueClosed,
         ErrorCode.ModUnavailable,
     };
@@ -68,6 +69,8 @@ public static class ErrorMapper
             "Invalid action parameters. Check the required fields and allowed values in the action schema.",
         ErrorCode.WrongPhase =>
             "It is not your turn yet. Wait for a controlled character's turn (the message will say whose turn it is).",
+        ErrorCode.NotYourCharacter =>
+            "That character belongs to another agent. You are playing your own character only - pick an actor from your own (owned) character.",
         ErrorCode.DialogueClosed =>
             "No active dialogue: the dialogue window closed. Start the dialogue again and repeat your choice.",
         ErrorCode.ModUnavailable =>

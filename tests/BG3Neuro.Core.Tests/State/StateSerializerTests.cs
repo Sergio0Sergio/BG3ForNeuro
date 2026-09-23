@@ -563,4 +563,96 @@ public class StateSerializerTests
         Assert.Contains("- cast_spell: [flourish]", md);
         Assert.DoesNotContain("slot 0", md);
     }
+
+    // --- Multi-agent per-agent framing (spec §12.2) ---
+
+    [Fact]
+    public void ToMarkdown_OwnedAliasIsTurnActor_NoMarker_IdenticalToSingleAgent()
+    {
+        // Owned character IS the turn actor — output is byte-identical to v1.
+        var state = StateSerializer.Parse(SampleJson)!;
+        var md = StateSerializer.ToMarkdown(state, ownedAlias: "karlach");
+
+        Assert.Contains("## Turn: Karlach (initiative 3/5)", md);
+        Assert.DoesNotContain("your character", md);
+    }
+
+    [Fact]
+    public void ToMarkdown_OwnedAliasNotTurnActor_AddsMarkerAndProjectsDistances()
+    {
+        var state = StateSerializer.Parse(SampleJson)!;
+        // Karlach (owned) стоит в (0,0), ход у shadowheart; goblin в (3,4) — расстояние 5 m от Karlach.
+        state.TurnActor = "shadowheart";
+        state.Allies.Add(new Combatant
+        {
+            Alias = "shadowheart", Name = "Shadowheart", Hp = 40, MaxHp = 40,
+            Distance = 0, PositionX = 0, PositionY = 0,
+            Availability = "acting now, can act",
+        });
+        state.Allies.First(a => a.Alias == "karlach").Distance = 0;
+
+        var md = StateSerializer.ToMarkdown(state, ownedAlias: "karlach");
+
+        // Маркер: чужое окно, но агент видит, за кого играет.
+        Assert.Contains("## Turn: (your character: Karlach) Shadowheart (initiative 3/5)", md);
+        // Дистанция врага пересчитана от owned Karlach (0,0) к goblin (3,4): 5m, не 6m из стейта.
+        Assert.Contains("goblin_1 (Goblin Raider): HP 12/18, distance 5m, status: —", md);
+    }
+
+    [Fact]
+    public void ToMarkdown_OwnedAlias_SingleAgentOutputUnchanged()
+    {
+        var state = StateSerializer.Parse(SampleJson)!;
+        var mdPlain = StateSerializer.ToMarkdown(state);
+        var mdOwnedSameActor = StateSerializer.ToMarkdown(state, ownedAlias: "karlach");
+
+        Assert.Equal(mdPlain, mdOwnedSameActor);
+    }
+
+    [Fact]
+    public void Parse_ExplorationObjectWithPosition_ReadsPosition()
+    {
+        var state = StateSerializer.Parse("""
+            {
+              "mode": "exploration",
+              "turn_actor": "",
+              "allies": [ { "alias": "karlach", "name": "Karlach", "hp": 60, "max_hp": 60, "distance": 0, "position_x": 0, "position_y": 0 } ],
+              "objects": [
+                { "alias": "wooden_door", "name": "Wooden Door", "distance": 6, "position_x": 3, "position_y": 4, "region": "chapter_01" }
+              ],
+              "available_actions": [],
+              "can_rest": true
+            }
+            """)!;
+
+        Assert.Single(state.Objects);
+        Assert.Equal(3, state.Objects[0].PositionX);
+        Assert.Equal(4, state.Objects[0].PositionY);
+    }
+
+    [Fact]
+    public void ToExplorationMarkdown_OwnedAlias_ProjectsObjectDistance()
+    {
+        var state = StateSerializer.Parse("""
+            {
+              "mode": "exploration",
+              "turn_actor": "",
+              "allies": [
+                { "alias": "karlach", "name": "Karlach", "hp": 60, "max_hp": 60, "distance": 0, "position_x": 0, "position_y": 0 },
+                { "alias": "astarion", "name": "Astarion", "hp": 50, "max_hp": 50, "distance": 0, "position_x": 10, "position_y": 0 }
+              ],
+              "objects": [
+                { "alias": "wooden_door", "name": "Wooden Door", "distance": 10, "position_x": 13, "position_y": 0, "region": "chapter_01" }
+              ],
+              "available_actions": [],
+              "can_rest": true
+            }
+            """)!;
+
+        // Мод измерил дистанцию от первого аватара (Karlach, 10m до двери);
+        // агент, играющий за Astarion, должен видеть 3m (Astarion на 10,0, дверь на 13,0).
+        var md = StateSerializer.ToMarkdown(state, new ExplorationStateConfig(), ownedAlias: "astarion");
+
+        Assert.Contains("wooden_door (Wooden Door) 3m", md);
+    }
 }

@@ -24,7 +24,7 @@ See `issues/`:
 
 ## Out of scope (this sprint)
 
-- Implementing multi-agent code. This sprint was research + a spec amendment (both done).
+- Game-side verification (bench/campaign run with two real Neuro instances) — needs WS endpoints and a live session; the C# logic is unit-tested on simulated state.
 - Networked BG3 multiplayer where Neuro drives both host and guest processes — local co-op/single-process model preferred unless research disproves it.
 - Voice chat, camera control, trading — never in v1 (integration map).
 
@@ -34,8 +34,9 @@ See `issues/`:
 - 2026-09-23: ticket 01 resolved — process model verdict: ONE host process holds both Neuro characters; two game processes don't add a second server world. Human/Neuro distinction is ours (ClientControl + `agent→character` map), not the engine's. Next research: 02-communication-delivery (two WS = two `characterId`; single-slot bridge).
 - 2026-09-23: ticket 02 resolved — transport verdict: N WS sockets (one per agent; agent known by which `NeuroWebSocketClient` raised the event; no multiplex possible). File bridge stays single-slot with a serialized C# writer-queue; `result_<id>.json` already per-id; mod unchanged. Force is per-agent channel. Next: 03-state-ownership.
 - 2026-09-23: ticket 03 resolved — ownership verdict: fixed owned character per agent; ONE shared state file + C# projection (per-agent `ToMarkdown` over existing `position_*`); mapping in `ActionRouter`; new `not_your_character` code; mod unchanged. All three research tickets done — the multi-agent answer is feasible with a concrete design. Next: spec amendment.
-- 2026-09-23: **spec amendment done** — `BG3_Neuro_Spec.md` §12 "Multi-Agent Reference Model (post-v1)" added (process/communication, state ownership, routing/validation, changes-vs-v1); single-agent v1 = `|agent→ownedAlias| = 1` special case, marked in §1.5/§10; `not_your_character` added to §6.5 Channel A. v1 contract untouched (additive). Sprint goal met: research + spec amendment.
+- 2026-09-23: **spec amendment done** — `BG3_Neuro_Spec.md` §12 "Multi-Agent Reference Model (post-v1)" added (process/communication, state ownership, routing/validation, changes-vs-v1); single-agent v1 = `|agent→ownedAlias| = 1` special case, marked in §1.5/§10; `not_your_character` added to §6.5 Channel A. v1 contract untouched (additive).
+- 2026-09-23: **implementation done** (C# only): `AppConfig.Agents`+`AgentConfig`; `ErrorCode.NotYourCharacter`; `ActionRouter.ValidateAndDispatch(..., ownedAlias?)` (criss-cross `not_your_character`, actor defaults to owned); `StateSerializer.ToMarkdown(state, exploration?, ownedAlias?)` (Turn-marker + per-agent distance projection from `position_*`, byte-identical to v1 at owned==turn / single-agent); `DecisionLoop(..., ownedAlias?)` owned-aware force gate; `IpcPaths.WriteCommandFile` static lock (single-slot serialization); `Program.cs` N agent pairs (empty `agents` = v1). 183 tests green. Spec §12.4 annotated as implemented.
 
 ## Sprint outcome
 
-Feasible. Multi-agent is additive over the existing single-agent stack: N WS channels + one shared state file + C#-side ownership map and per-agent framing projection; the mod and the IPC file set remain unchanged. Full detail in the three issue answers and spec §12.
+Feasible and implemented (C# side). Multi-agent is additive over the existing single-agent stack: N WS channels + one shared state file + C#-side ownership map and per-agent framing projection; the mod and the IPC file set remain unchanged. Full detail in the three issue answers and spec §12. v1 behavior preserved when `agents` is absent (default).

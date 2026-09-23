@@ -25,7 +25,7 @@ public sealed class ActionRouter
         _dialogue = dialogue ?? new DialogueConfig();
     }
 
-    public ValidationResult ValidateAndDispatch(string actionId, string actionName, string? dataJson, CombatState? combatState, ModStatus modStatus)
+    public ValidationResult ValidateAndDispatch(string actionId, string actionName, string? dataJson, CombatState? combatState, ModStatus modStatus, string? ownedAlias = null)
     {
         if (modStatus == ModStatus.Stale)
         {
@@ -60,6 +60,12 @@ public sealed class ActionRouter
             return ValidationResult.Fail(ErrorCode.InvalidParameters, "Action parameters must be a JSON object");
         }
 
+        var ownershipResult = ValidateOwnership(dataObj, ownedAlias, actionName);
+        if (ownershipResult is not null)
+        {
+            return ownershipResult;
+        }
+
         var schemaResult = ValidateSchema(definition, dataObj);
         if (schemaResult is not null)
         {
@@ -88,6 +94,32 @@ public sealed class ActionRouter
         _paths.WriteCommandFile(actionId, actionName, dataObj.ToJsonString());
 
         return ValidationResult.Ok();
+    }
+
+    private ValidationResult? ValidateOwnership(JsonObject data, string? ownedAlias, string actionName)
+    {
+        // v1 (spec §1–§10): no ownership — the single agent may act for any controlled member.
+        if (ownedAlias is null)
+        {
+            return null;
+        }
+
+        var requestedActor = data["actor"]?.GetValue<string>();
+        if (!string.IsNullOrWhiteSpace(requestedActor) &&
+            !string.Equals(requestedActor, ownedAlias, StringComparison.Ordinal))
+        {
+            // Multi-agent criss-cross (spec §12.3): a second agent is acting on someone else's character.
+            return ValidationResult.Fail(ErrorCode.NotYourCharacter,
+                $"You are playing {ownedAlias}, not {requestedActor} — only act for your own character.");
+        }
+
+        // In multi-agent the executor defaults to the owned character, not to the turn actor (v1 default).
+        if (string.IsNullOrWhiteSpace(requestedActor))
+        {
+            data["actor"] = ownedAlias;
+        }
+
+        return null;
     }
 
     private ValidationResult? ValidateSchema(ActionDefinition definition, JsonObject data)

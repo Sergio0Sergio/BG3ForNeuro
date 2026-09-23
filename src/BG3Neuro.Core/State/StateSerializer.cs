@@ -48,7 +48,7 @@ public static class StateSerializer
         }
     }
 
-    public static string ToMarkdown(CombatState state, ExplorationStateConfig? exploration = null)
+    public static string ToMarkdown(CombatState state, ExplorationStateConfig? exploration = null, string? ownedAlias = null)
     {
         if (state.Mode == "dialogue" && state.Dialogue is not null)
         {
@@ -57,14 +57,26 @@ public static class StateSerializer
 
         if (IsExplorationMode(state.Mode))
         {
-            return ToExplorationMarkdown(state, exploration ?? new ExplorationStateConfig());
+            return ToExplorationMarkdown(state, exploration ?? new ExplorationStateConfig(), ownedAlias);
         }
 
         var sb = new StringBuilder();
 
         var active = state.Allies.FirstOrDefault(c => c.Alias == state.TurnActor);
         var activeName = active?.Name ?? state.TurnActor;
-        sb.Append("## Turn: ").Append(activeName);
+        // Multi-agent (spec §12.2): проекция нужна только когда ход вне owned-персонажа.
+        // Если owned — сам turn actor, состояния уже от него: вывод байт-идентичен v1.
+        var owned = ownedAlias is null || string.Equals(state.TurnActor, ownedAlias, StringComparison.Ordinal)
+            ? null
+            : state.Allies.FirstOrDefault(a => a.Alias == ownedAlias);
+        sb.Append("## Turn: ");
+        if (owned is not null)
+        {
+            // Multi-agent (spec §12.2): the window belongs to someone else — say which character this agent owns.
+            sb.Append("(your character: ").Append(owned.Name).Append(") ");
+        }
+
+        sb.Append(activeName);
         if (state.TurnInitiativeTotal > 0)
         {
             sb.Append(" (initiative ").Append(state.TurnInitiativeIndex).Append('/').Append(state.TurnInitiativeTotal).Append(')');
@@ -77,7 +89,7 @@ public static class StateSerializer
         {
             sb.Append("- ").Append(ally.Name)
               .Append(": HP ").Append(ally.Hp).Append('/').Append(ally.MaxHp)
-              .Append(", distance ").Append(FormatDistance(ally.Distance)).Append('m');
+              .Append(", distance ").Append(FormatDistance(DistanceToOwned(owned, ally.PositionX, ally.PositionY) ?? ally.Distance)).Append('m');
             if (!string.IsNullOrWhiteSpace(ally.Availability))
             {
                 sb.Append(", availability: ").Append(ally.Availability);
@@ -93,7 +105,7 @@ public static class StateSerializer
         {
             sb.Append("- ").Append(enemy.Alias).Append(" (").Append(enemy.Name).Append(')')
               .Append(": HP ").Append(enemy.Hp).Append('/').Append(enemy.MaxHp)
-              .Append(", distance ").Append(FormatDistance(enemy.Distance)).Append('m')
+              .Append(", distance ").Append(FormatDistance(DistanceToOwned(owned, enemy.PositionX, enemy.PositionY) ?? enemy.Distance)).Append('m')
               .Append(", status: ").Append(string.IsNullOrWhiteSpace(enemy.Status) ? "—" : enemy.Status);
             AppendConditions(sb, enemy.Conditions);
             sb.AppendLine();
@@ -208,9 +220,11 @@ public static class StateSerializer
     private static bool IsExplorationMode(string mode) =>
         mode is "exploration" or "map" or "inventory";
 
-    private static string ToExplorationMarkdown(CombatState state, ExplorationStateConfig exploration)
+    private static string ToExplorationMarkdown(CombatState state, ExplorationStateConfig exploration, string? ownedAlias = null)
     {
         var sb = new StringBuilder();
+
+        var owned = ownedAlias is null ? null : state.Allies.FirstOrDefault(a => a.Alias == ownedAlias);
 
         sb.AppendLine(state.Mode == "map"
             ? "## Screen: map"
@@ -236,7 +250,8 @@ public static class StateSerializer
 
                 if (state.Mode == "exploration")
                 {
-                    sb.Append(' ').Append(FormatExplorationDistance(obj.Distance, obj.Region, exploration.DistanceFormat));
+                    var distance = DistanceToOwned(owned, obj.PositionX, obj.PositionY) ?? obj.Distance;
+                    sb.Append(' ').Append(FormatExplorationDistance(distance, obj.Region, exploration.DistanceFormat));
                 }
 
                 if (!string.IsNullOrWhiteSpace(obj.Status))
@@ -413,6 +428,23 @@ public static class StateSerializer
     private static string FormatDistance(double meters)
     {
         return meters.ToString("0.##").Replace(',', '.');
+    }
+
+    /// <summary>Multi-agent projection (spec §12.2): the distance from THIS agent's owned
+    /// character to a point, recomputed from the positions in the shared state. Null when
+    /// single-agent (keep the mod-measured distance) or when either side has no position.</summary>
+    private static double? DistanceToOwned(Combatant? owned, double? x, double? y)
+    {
+        if (owned is null ||
+            x is null || y is null ||
+            !owned.PositionX.HasValue || !owned.PositionY.HasValue)
+        {
+            return null;
+        }
+
+        var dx = owned.PositionX.Value - x.Value;
+        var dy = owned.PositionY.Value - y.Value;
+        return Math.Sqrt(dx * dx + dy * dy);
     }
 
     private static void AppendConditions(StringBuilder sb, List<StatusCondition> conditions)

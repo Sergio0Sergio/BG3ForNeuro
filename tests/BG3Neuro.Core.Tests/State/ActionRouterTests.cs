@@ -1033,4 +1033,75 @@ public class ActionRouterTests : IDisposable
         Assert.False(result.Success);
         Assert.Equal(ErrorCode.NotInCombat, result.ErrorCode);
     }
+
+    // --- Multi-agent ownership (spec §12.3) ---
+
+    [Fact]
+    public void MultiAgent_ActingOnOwnedCharacter_Allowed()
+    {
+        var router = CreateRouter(partySize: 2);
+        var state = CombatWithTurn("karlach", "karlach", "shadowheart");
+
+        var result = router.ValidateAndDispatch("act-1", "end_turn", """{"actor":"karlach"}""", state, ModStatus.Alive, ownedAlias: "karlach");
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public void MultiAgent_CrissCrossCharacter_NotYourCharacter()
+    {
+        // Агент владеет Karlach, но пытается действовать за Shadowheart — даже если
+        // Shadowheart "can act" в общем окне, это чужой персонаж (spec §12.3).
+        var router = CreateRouter(partySize: 2);
+        var state = CombatWithTurn("karlach", "karlach", "shadowheart");
+        state.Allies.First(a => a.Alias == "shadowheart").Availability = "can act";
+
+        var result = router.ValidateAndDispatch("act-1", "end_turn", """{"actor":"shadowheart"}""", state, ModStatus.Alive, ownedAlias: "karlach");
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.NotYourCharacter, result.ErrorCode);
+        Assert.Contains("karlach", result.ErrorDetail);
+        Assert.False(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+    }
+
+    [Fact]
+    public void MultiAgent_ExplorationCrissCross_NotYourCharacter()
+    {
+        var router = CreateRouter(partySize: 2);
+        var state = ExplorationState();
+        state.Allies.Add(new Combatant { Alias = "shadowheart", Name = "Shadowheart", PositionX = 5, PositionY = 5 });
+
+        var result = router.ValidateAndDispatch("act-1", "move_to_entity", """{"actor":"shadowheart","target_id":"campfire"}""", state, ModStatus.Alive, ownedAlias: "karlach");
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.NotYourCharacter, result.ErrorCode);
+    }
+
+    [Fact]
+    public void MultiAgent_MissingActor_DefaultsToOwnedAlias()
+    {
+        // В multi-agent исполнитель по умолчанию — свой owned персонаж, а НЕ turn actor (v1 default).
+        var router = CreateRouter(partySize: 2);
+        var state = CombatWithTurn("shadowheart", "karlach", "shadowheart");
+        state.Allies.First(a => a.Alias == "karlach").Availability = "can act";
+
+        var result = router.ValidateAndDispatch("act-1", "end_turn", "{}", state, ModStatus.Alive, ownedAlias: "karlach");
+
+        Assert.True(result.Success);
+        var actionFile = File.ReadAllText(Path.Combine(_tmpDir, "action_act-1.json"));
+        Assert.Contains("karlach", actionFile);
+    }
+
+    [Fact]
+    public void MultiAgent_OwnedAliasNull_SingleAgentBehaviorUnchanged()
+    {
+        // ownedAlias === null (v1): любой контролируемый член партии может действовать.
+        var router = CreateRouter(partySize: 2);
+        var state = CombatWithTurn("karlach", "karlach", "shadowheart");
+        state.Allies.First(a => a.Alias == "shadowheart").Availability = "can act";
+
+        var result = router.ValidateAndDispatch("act-1", "end_turn", """{"actor":"shadowheart"}""", state, ModStatus.Alive, ownedAlias: null);
+
+        Assert.True(result.Success);
+    }
 }

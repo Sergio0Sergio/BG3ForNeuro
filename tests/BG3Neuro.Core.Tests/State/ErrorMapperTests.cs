@@ -35,8 +35,8 @@ public class ErrorMapperTests
     public void Dictionary_CoversAllSpecCodes_FromSection65()
     {
         // §6.5: полный перечень кодов — target_missing, not_in_combat, no_spell, no_camp,
-        // not_supported, target_not_in_range, invalid_parameters, wrong_phase, dialogue_closed,
-        // action_failed, mod_unavailable.
+        // not_supported, target_not_in_range, invalid_parameters, wrong_phase, not_your_character,
+        // dialogue_closed, action_failed, mod_unavailable.
         var expected = new[]
         {
             ErrorCode.TargetMissing,
@@ -47,6 +47,7 @@ public class ErrorMapperTests
             ErrorCode.TargetNotInRange,
             ErrorCode.InvalidParameters,
             ErrorCode.WrongPhase,
+            ErrorCode.NotYourCharacter,
             ErrorCode.DialogueClosed,
             ErrorCode.ActionFailed,
             ErrorCode.ModUnavailable,
@@ -68,6 +69,7 @@ public class ErrorMapperTests
             ErrorCode.TargetNotInRange,
             ErrorCode.InvalidParameters,
             ErrorCode.WrongPhase,
+            ErrorCode.NotYourCharacter,
             ErrorCode.DialogueClosed,
             ErrorCode.ModUnavailable,
         };

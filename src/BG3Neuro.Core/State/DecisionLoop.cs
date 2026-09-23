@@ -27,11 +27,12 @@ public sealed class DecisionLoop : IDisposable
     private readonly ExplorationStateConfig _exploration;
     private readonly TimeSpan _executionResultTimeout;
     private readonly bool _autopilotEnabled;
+    private readonly string? _ownedAlias;
     private CombatState? _combatState;
     private string? _lastForcedContent;
     private bool _connected;
 
-    public DecisionLoop(NeuroWebSocketClient neuro, IpcClient ipc, ActionRouter router, ExplorationStateConfig? exploration = null, TimeSpan? executionResultTimeout = null, bool autopilotEnabled = true)
+    public DecisionLoop(NeuroWebSocketClient neuro, IpcClient ipc, ActionRouter router, ExplorationStateConfig? exploration = null, TimeSpan? executionResultTimeout = null, bool autopilotEnabled = true, string? ownedAlias = null)
     {
         _neuro = neuro;
         _ipc = ipc;
@@ -39,6 +40,7 @@ public sealed class DecisionLoop : IDisposable
         _exploration = exploration ?? new ExplorationStateConfig();
         _executionResultTimeout = executionResultTimeout ?? TimeSpan.FromSeconds(15);
         _autopilotEnabled = autopilotEnabled;
+        _ownedAlias = ownedAlias;
     }
 
     public event EventHandler<string>? DebugNote;
@@ -120,7 +122,7 @@ public sealed class DecisionLoop : IDisposable
 
         if (state.Mode is "exploration" or "map" or "inventory")
         {
-            var explorationMarkdown = StateSerializer.ToMarkdown(state, _exploration);
+            var explorationMarkdown = StateSerializer.ToMarkdown(state, _exploration, _ownedAlias);
             if (_lastForcedContent == explorationMarkdown)
             {
                 return;
@@ -143,22 +145,41 @@ public sealed class DecisionLoop : IDisposable
             return;
         }
 
-        var isControlledTurn = state.Allies.Any(a => a.Alias == state.TurnActor);
-        if (!isControlledTurn)
+        // Multi-agent (spec §12.2): force only when THIS agent's character may act
+        // (its own turn or a shared-window co-actor). Single-agent keeps v1 behavior.
+        var turnOwner = _ownedAlias is null
+            ? state.Allies.Any(a => a.Alias == state.TurnActor)
+                ? state.TurnActor
+                : null
+            : _ownedAlias;
+        if (turnOwner is null)
         {
             _lastForcedContent = null;
             return;
         }
 
-        var markdown = StateSerializer.ToMarkdown(state);
+        var ownedCombatant = state.Allies.FirstOrDefault(a => a.Alias == turnOwner);
+        var canAct = ownedCombatant is null ||
+            string.Equals(state.TurnActor, turnOwner, StringComparison.Ordinal)
+            || string.Equals(ownedCombatant.Availability, "can act", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ownedCombatant.Availability, "acting now, can act", StringComparison.OrdinalIgnoreCase);
+        if (!canAct)
+        {
+            _lastForcedContent = null;
+            return;
+        }
+
+        var markdown = StateSerializer.ToMarkdown(state, _exploration, _ownedAlias);
         if (_lastForcedContent == markdown)
         {
             return;
         }
 
         _lastForcedContent = markdown;
-        var controlledName = state.Allies.First(a => a.Alias == state.TurnActor).Name;
-        var query = $"It's your turn ({controlledName}). Choose an action.";
+        var controlledName = state.Allies.First(a => a.Alias == turnOwner).Name;
+        var query = _ownedAlias is null
+            ? $"It's your turn ({controlledName}). Choose an action."
+            : $"It's your turn or you can act ({controlledName}). Choose an action.";
         await _neuro.SendForceAsync(markdown, query, CombatActionNames);
         DebugNote?.Invoke(this, $"force: turn {controlledName}");
     }
@@ -214,7 +235,7 @@ public sealed class DecisionLoop : IDisposable
 
     private async Task DispatchAsync(string id, string name, string dataJson)
     {
-        var validation = _router.ValidateAndDispatch(id, name, dataJson, _combatState, _ipc.Status);
+        var validation = _router.ValidateAndDispatch(id, name, dataJson, _combatState, _ipc.Status, _ownedAlias);
         if (!validation.Success)
         {
             var message = ErrorMapper.ToMessage(validation.ErrorCode, validation.ErrorDetail);

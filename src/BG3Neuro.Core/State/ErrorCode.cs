@@ -11,6 +11,7 @@ public enum ErrorCode
     TargetNotInRange,
     InvalidParameters,
     WrongPhase,
+    NotYourCharacter,
     DialogueClosed,
     ModUnavailable,
     ActionFailed,

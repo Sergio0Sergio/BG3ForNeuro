@@ -38,6 +38,9 @@ public sealed class ExplorationObject
     public required string Alias { get; set; }
     public required string Name { get; set; }
     public double Distance { get; set; }
+    public double? PositionX { get; set; }
+    public double? PositionY { get; set; }
+    public double? PositionZ { get; set; }
     public string? Region { get; set; }
     public string? Type { get; set; }
     public string? Status { get; set; }
@@ -70,6 +73,7 @@ public sealed class Combatant
     public double Distance { get; set; }
     public double? PositionX { get; set; }
     public double? PositionY { get; set; }
+    public double? PositionZ { get; set; }
     public string? Availability { get; set; }
     public string? Status { get; set; }
     public List<StatusCondition> Conditions { get; set; } = new();

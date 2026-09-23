@@ -260,6 +260,16 @@ All runtime settings live in a single `config.json`, read at startup.
 - `distanceFormat`: `meters | region | hybrid`; hybrid — close ≤50m in meters, far "area: name"
 - `showPosition`: false — absolute position is not needed, geometry in distances
 
+`agents` (multi-agent, §12): one entry per Neuro. **Absent = single-agent v1** (one WS client, no owned character).
+```json
+"agents": [
+  { "characterId": "neuro", "ownedAlias": "Karlach", "ws_url": "ws://localhost:8000" },
+  { "characterId": "evil",  "ownedAlias": "Astarion", "ws_url": "ws://localhost:8001" }
+]
+```
+- `ws_url` empty → fall back to top-level `neuro.ws_url`.
+- `ownedAlias` empty → the agent may act for any controlled member (v1 behavior even with several agents).
+
 ---
 
 ## 5. Action Schemas
@@ -712,3 +722,5 @@ C# only (`src/BG3Neuro.Core`):
 - `Program.cs`: N agents → N `(NeuroWebSocketClient, DecisionLoop)` pairs; serialized command-file writes.
 
 The mod (`BG3Neuro.lua`) and the IPC file set (§2.2) — **unchanged** in v1.1 post-v1 work; any Lua change would re-verify the 200-local budget and `luaparse` (AGENTS.md). Sources for this section: `.scratch/bg3-neuro-multi-agent/issues/01-bg3-multiplayer-model.md`, `02-communication-delivery.md`, `03-state-ownership.md`.
+
+**Implemented** (2026-09-23, post-research): `AppConfig.Agents` + `AgentConfig` (§4); `ErrorCode.NotYourCharacter` (Channel A); `ActionRouter.ValidateAndDispatch(..., ownedAlias?)` ownership validation + actor defaulting (criss-cross → `not_your_character`, §12.3); `StateSerializer.ToMarkdown(state, exploration?, ownedAlias?)` Turn-marker + per-agent `distance` projection over `position_*` (§12.2, byte-identical to v1 when owned == turn actor / single-agent); `DecisionLoop(..., ownedAlias?)` owned-aware force gate; `IpcPaths.WriteCommandFile` serialized via static lock (§12.1); `Program.cs` N agent pairs (empty `agents` = v1).

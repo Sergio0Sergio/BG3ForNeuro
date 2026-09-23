@@ -9,6 +9,12 @@ public sealed class IpcPaths
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
     };
 
+    // Spec §12.1/§12.4: the command file is the SINGLE-SLOT bridge. With multiple agents
+    // (Program.cs N DecisionLoops) the C# writer must serialize writes to neuro_to_bg3.json
+    // so one agent's command can never be torn by another's. Writes are short (one small
+    // file) — a static lock is sufficient; the Lua poll still reads one file at a time.
+    private static readonly object CommandWriteLock = new();
+
     private readonly string _dir;
 
     public IpcPaths(string dir)
@@ -54,10 +60,21 @@ public sealed class IpcPaths
             name,
             data = dataJson,
         }, JsonOptions);
-        System.IO.File.WriteAllText(CommandFile, payload);
+        lock (CommandWriteLock)
+        {
+            System.IO.File.WriteAllText(CommandFile, payload);
+        }
     }
 
     public void CleanDeadStand()
+    {
+        lock (CommandWriteLock)
+        {
+            CleanDeadStandCore();
+        }
+    }
+
+    private void CleanDeadStandCore()
     {
         try
         {

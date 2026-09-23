@@ -45,38 +45,60 @@ internal static class Program
 
         var router = new ActionRouter(new IpcPaths(ipc.Directory), config.Game.ControlledPartySize, config.Dialogue);
 
-        using var neuro = new NeuroWebSocketClient(
-            config.Neuro.WsUrl,
-            config.Game.Name,
-            ActionRegistry.Get(),
-            TimeSpan.FromSeconds(config.Neuro.ReconnectIntervalS));
+        // Multi-agent (spec §12): one (NeuroWebSocketClient, DecisionLoop) pair per config agent.
+        // With an empty "agents" list this is exactly the v1 single-agent setup (one pair, no owned character).
+        var agents = config.Agents.Count > 0
+            ? config.Agents
+            : new List<AgentConfig> { new() };
+        var clients = new List<NeuroWebSocketClient>();
+        var loops = new List<DecisionLoop>();
 
-        using var decisionLoop = new DecisionLoop(neuro, ipc, router, config.State.Exploration, TimeSpan.FromSeconds(config.Actions.ResultTimeoutS), config.Autopilot.Enabled);
-        decisionLoop.DebugNote += (_, text) =>
+        foreach (var agent in agents)
         {
-            var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
-            Console.WriteLine($"[{stamp}] {text}");
-        };
+            var label = string.IsNullOrWhiteSpace(agent.CharacterId) ? "agent" : agent.CharacterId;
+            var ownedAlias = string.IsNullOrWhiteSpace(agent.OwnedAlias) ? null : agent.OwnedAlias;
+            var wsUrl = string.IsNullOrWhiteSpace(agent.WsUrl) ? config.Neuro.WsUrl : agent.WsUrl;
 
-        neuro.ConnectionStateChanged += (_, e) =>
-        {
-            var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
-            Console.WriteLine($"[{stamp}] [neuro] {(e.Connected ? "connected" : "disconnected")}");
-        };
-        neuro.SessionStarted += (_, e) =>
-        {
-            var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
-            Console.WriteLine($"[{stamp}] [neuro] session: {e.Session.DisplayName} ({e.Session.SessionId})");
-        };
-        neuro.ActionRequested += (_, e) =>
-        {
-            var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
-            Console.WriteLine($"[{stamp}] [neuro] action: {e.Name} id={e.Id} data={e.Data ?? "(none)"}");
-        };
+            var neuro = new NeuroWebSocketClient(
+                wsUrl,
+                config.Game.Name,
+                ActionRegistry.Get(),
+                TimeSpan.FromSeconds(config.Neuro.ReconnectIntervalS));
+            clients.Add(neuro);
 
-        neuro.Start();
-        decisionLoop.Start();
-        Console.WriteLine($"[neuro] connecting to {config.Neuro.WsUrl}, {ActionRegistry.Get().Count} actions registered (Ctrl+C to quit)");
+            var decisionLoop = new DecisionLoop(
+                neuro, ipc, router, config.State.Exploration,
+                TimeSpan.FromSeconds(config.Actions.ResultTimeoutS),
+                config.Autopilot.Enabled,
+                ownedAlias);
+            loops.Add(decisionLoop);
+
+            decisionLoop.DebugNote += (_, text) =>
+            {
+                var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
+                Console.WriteLine($"[{stamp}] [{label}] {text}");
+            };
+
+            neuro.ConnectionStateChanged += (_, e) =>
+            {
+                var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
+                Console.WriteLine($"[{stamp}] [{label}] [neuro] {(e.Connected ? "connected" : "disconnected")}");
+            };
+            neuro.SessionStarted += (_, e) =>
+            {
+                var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
+                Console.WriteLine($"[{stamp}] [{label}] [neuro] session: {e.Session.DisplayName} ({e.Session.SessionId}) char={e.Session.CharacterId}");
+            };
+            neuro.ActionRequested += (_, e) =>
+            {
+                var stamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff");
+                Console.WriteLine($"[{stamp}] [{label}] [neuro] action: {e.Name} id={e.Id} data={e.Data ?? "(none)"}");
+            };
+
+            neuro.Start();
+            decisionLoop.Start();
+            Console.WriteLine($"[{label}] connecting to {wsUrl}, owned={ownedAlias ?? "(any controlled)"}, {ActionRegistry.Get().Count} actions registered (Ctrl+C to quit)");
+        }
 
         try
         {
@@ -86,7 +108,17 @@ internal static class Program
         {
         }
 
-        await neuro.StopAsync();
+        foreach (var loop in loops)
+        {
+            loop.Dispose();
+        }
+
+        foreach (var client in clients)
+        {
+            await client.StopAsync();
+            client.Dispose();
+        }
+
         await ipc.StopAsync();
         Console.WriteLine("[bg3neuro] exiting");
         return 0;
