@@ -36,5 +36,15 @@
       "distanceFormat": "hybrid",
       "showPosition": false
     }
-  }
+  },
+  "agents": [
+    {
+      "characterId": "neuro",
+      "ownedAlias": "Karlach"
+    },
+    {
+      "characterId": "evil",
+      "ownedAlias": "Astarion"
+    }
+  ]
 }
