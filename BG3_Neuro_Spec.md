@@ -76,6 +76,7 @@ Neuro decision → `ActionRouter` (validation, alias→id) → `IpcClient` (JSON
 - **Decide-in-C#**: BG3SE is dumb. The "when to force/context" logic lives in C# (testable).
 - **Entity aliases**: the context carries an id↔name table; Neuro uses short names (`goblin_1`), `ActionRouter` translates to entity_id.
 - **`controlledPartySize` (1..4)**: configuration for the number of controlled characters. State shows all; the current actor is determined by initiative. The `actor` parameter in action schemas when >1.
+- **Single-agent = one `agent→ownedAlias` map entry**: the whole v1 spec is the single-agent case of the multi-agent model (§12) — exactly one owned character. Everything in §1–§10 stays the authoring contract; §12 only adds what appears when the map has ≥2 entries.
 - **Force + state**: every force carries a fresh markdown state (`ephemeral_context: true` — bulky state every turn); rare contexts (silent=true) for rules/tasks.
 - **Event-driven**: state updates arrive on game events, not on polling.
 
@@ -556,6 +557,7 @@ Stored in the mod's `ScriptExtender/Config.json` (`force_legacy`, `legacy_fail_l
 | `not_supported` | There is a schema slot but execution comes later (`throw`) |
 | `target_not_in_range` / `invalid_parameters` | Parameter validation failed |
 | `wrong_phase` | The action requires a controlled character's turn (`bonus_action`, `set_reaction`), but it is someone else's turn / no combat |
+| `not_your_character` | Multi-agent (§12): `actor` is a **controlled party member owned by a different agent** (criss-cross). Single-agent never emits it — every controlled character belongs to the one agent. Actionable message names your owned alias ("You are playing Karlach, not Astarion — only act for your own character.") |
 | `dialogue_closed` | `select_dialogue_option` without an active dialogue |
 | `mod_unavailable` | Mod unavailable **at validation time** (stale heartbeat) — C# answers failure without driving the game |
 
@@ -650,7 +652,7 @@ The Lua part (BG3SE mod) against mocked `Ext.*` — light smoke on the bench, **
 ## 10. Out of Scope (v1)
 
 - Voice chat (Voice Chat API)
-- Multiplayer — supporting other players in the session
+- Multiplayer — supporting other players in the session. Multi-agent (2+ Neuro, §12) is also **post-v1 — not part of this spec's contract**; the reference model is defined below so the v1 single-agent contract is explicitly a special case of it.
 - Real-time camera control — Neuro does not control the camera directly
 - Performance optimization
 - Packaging and deployment
@@ -671,3 +673,42 @@ The Lua part (BG3SE mod) against mocked `Ext.*` — light smoke on the bench, **
 - BG3SE API research: `.scratch/bg3-neuro-integration/research/bg3se-lua-action-api.md`
 - Neuro SDK: `neuro-sdk/neuro-sdk/API/SPECIFICATION.md`, `API/BEST_PRACTICES.md`, `API/README.md`, `API/PROPOSALS.md`
 - Randy: `neuro-sdk/neuro-sdk/Randy/README.md`
+
+---
+
+## 12. Multi-Agent Reference Model (post-v1)
+
+Research-backed (`.scratch/bg3-neuro-multi-agent/`, tickets 01–03, resolved 2026-09-23). **Not a v1 contract** — the definition that turns every v1 rule into a special case (`|agent→ownedAlias map| = 1`). Presenting it in the spec so single-agent semantics (§1–§10) remain the game truth for one agent, while a second Neuro changes only framing, not the engine loop.
+
+### 12.1 Process & communication
+
+- **One host process holds all Neuro characters** (ticket 01). The server-Lua sees and manages every party member; "human vs Neuro" is not a host distinction — it is our config (which `characterId` owns which alias).
+- **One WS connection per agent, no multiplexing** (ticket 02): each agent = its own `NeuroWebSocketClient` + `DecisionLoop`. Agent identity is the owning client instance; SDK `characterId` (`neuro`/`evil`) is assigned by the server per connection — no in-band agent field is added to `action`.
+- **File bridge stays single-slot** (ticket 02): one `neuro_to_bg3.json`, one in-flight action globally. The C# writer serializes command-file writes (queue/lock); `result_<id>.json` is already per-`id`, so concurrent agents never collide. The mod does not change for delivery.
+- **`actions/force` is per-agent**: each agent's `DecisionLoop` keeps its own `_lastForcedContent` and its own `SendForceAsync` — one forced action per channel, per SDK force policy. Two agents force independently; replacement is per-agent.
+
+### 12.2 State ownership — fixed owned character, projected frames
+
+- **Ownership is fixed, not turn-floating** (ticket 03). Config carries `agent → ownedAlias` (e.g. agent-`neuro` → `Karlach`, agent-`evil` → `Astarion`). An agent acts for its owned alias only; it does not ride the shared-turn window as "whoever's turn it is".
+- **Per-agent frame is a C# projection over the one shared state** (ticket 03), not additional Lua emission:
+  - The mod emits **one** `bg3_to_neuro.json` (v1 §2.2) with `position_x/y/z` per entity (present since v0.8.58) and `distance_reference` saying whose frame it is (`BG3Neuro.lua:2585`, `:3397`).
+  - Each agent's `StateSerializer.ToMarkdown(state, ownedAlias)` recomputes `distance` lines from `position_*` **against its owned character**, so "nearest" is honest per agent (AGENTS.md:24 — never reuse a distance measured for another actor).
+  - The `Turn:` header (§3.2) becomes `Turn: Karlach (initiative 3/5)` when the agent owns the current actor, else `Turn: (your character: Astarion) Karlach (initiative 3/5)` — every agent knows whose window it is and who acts. Single-agent output is byte-identical to §3.2.
+- **Spells stay turn-actor-scoped** (§3.2 `## Spells (turn actor)`), and co-actor honesty is already in the mod: action validation gates per-caster via `canAct`/spellbook (`BG3Neuro.lua:4611-4620`; router skips spell checks for co-actors, v0.8.56). A non-turn-owner's own book is produced when its `actor` is the current `turn_actor`; otherwise the Mod's per-caster gate answers honestly. No per-agent spell buckets are needed in v1.1.
+- **Exploration** (§3.5): the mod still frames free-roam from the first party avatar (`BG3Neuro.lua:3341-3361`, `:3397`); the C# projection re-frames `objects`/`allies` distances against each owned `position_*`. Same single file.
+
+### 12.3 Routing and ownership validation
+
+- **Mapping lives in C#, not the mod** (ticket 03). `ActionRouter` gains an `agent → ownedAlias` table (or the router becomes per-agent). The mod stays a dumb executor — it never learns about agents; `actor` remains party-scoped (v1 §5.1).
+- **Allowed set narrows**: validation in `ValidateAndDispatch` (`ActionRouter.cs:28`, `:199-208`, `:337-363`) first requires `actor == ownedAlias` of the calling agent, then the existing turn/`canAct` phase checks. With one agent the narrowing is empty — v1 behavior unchanged.
+- **Criss-cross** (`actor` = another agent's owned member) → validation error `not_your_character` (Channel A, §6.5): "You are playing Karlach, not Astarion — only act for your own character."
+
+### 12.4 Changes vs v1
+
+C# only (`src/BG3Neuro.Core`):
+- `agent → ownedAlias` map in configuration (§4) and `ActionRouter`.
+- `StateSerializer.ToMarkdown(state, ownedAlias?)` + exploration framing (§3.2/§3.5) projected from `position_*`.
+- `ErrorCode.NotYourCharacter` (`ErrorCode.cs`, `ErrorMapper.cs` Channel A, §6.5).
+- `Program.cs`: N agents → N `(NeuroWebSocketClient, DecisionLoop)` pairs; serialized command-file writes.
+
+The mod (`BG3Neuro.lua`) and the IPC file set (§2.2) — **unchanged** in v1.1 post-v1 work; any Lua change would re-verify the 200-local budget and `luaparse` (AGENTS.md). Sources for this section: `.scratch/bg3-neuro-multi-agent/issues/01-bg3-multiplayer-model.md`, `02-communication-delivery.md`, `03-state-ownership.md`.
