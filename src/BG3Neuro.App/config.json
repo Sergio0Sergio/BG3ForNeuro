@@ -37,14 +37,17 @@
       "showPosition": false
     }
   },
+  "autopilot": {
+    "enabled": false
+  },
   "agents": [
     {
-      "characterId": "neuro",
-      "ownedAlias": "Karlach"
+      "character_id": "neuro",
+      "owned_alias": "tav"
     },
     {
-      "characterId": "evil",
-      "ownedAlias": "Astarion"
+      "character_id": "evil",
+      "owned_alias": "origin_astarion"
     }
   ]
 }

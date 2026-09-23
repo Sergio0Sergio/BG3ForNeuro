@@ -134,6 +134,46 @@ public class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Load_Agents_SnakeCaseKeys_BindOwnedAlias()
+    {
+        var path = WriteConfig("""
+        {
+          "agents": [
+            { "character_id": "neuro", "owned_alias": "tav" },
+            { "character_id": "evil",  "owned_alias": "origin_astarion" }
+          ]
+        }
+        """);
+
+        var config = ConfigLoader.Load(path);
+
+        Assert.Equal(2, config.Agents.Count);
+        Assert.Equal("neuro", config.Agents[0].CharacterId);
+        Assert.Equal("tav", config.Agents[0].OwnedAlias);
+        Assert.Equal("", config.Agents[0].WsUrl);
+        Assert.Equal("evil", config.Agents[1].CharacterId);
+        Assert.Equal("origin_astarion", config.Agents[1].OwnedAlias);
+    }
+
+    [Fact]
+    public void Load_Agents_CamelCaseKeys_NormalizedToSnakeCase()
+    {
+        var path = WriteConfig("""
+        {
+          "agents": [
+            { "characterId": "neuro", "ownedAlias": "tav" }
+          ]
+        }
+        """);
+
+        var config = ConfigLoader.Load(path);
+
+        Assert.Single(config.Agents);
+        Assert.Equal("neuro", config.Agents[0].CharacterId);
+        Assert.Equal("tav", config.Agents[0].OwnedAlias);
+    }
+
+    [Fact]
     public void Load_InvalidJson_ThrowsConfigException()
     {
         var path = WriteConfig("{ not json ]");

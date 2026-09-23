@@ -72,17 +72,29 @@ public static class ConfigLoader
 
     private static void NormalizeKeys(JsonNode? node)
     {
-        if (node is not JsonObject obj)
+        switch (node)
         {
-            return;
-        }
+            case JsonObject obj:
+            {
+                var entries = obj.ToList();
+                obj.Clear();
+                foreach (var (key, value) in entries)
+                {
+                    obj[ToSnakeCase(key)] = value;
+                    NormalizeKeys(value);
+                }
 
-        var entries = obj.ToList();
-        obj.Clear();
-        foreach (var (key, value) in entries)
-        {
-            obj[ToSnakeCase(key)] = value;
-            NormalizeKeys(value);
+                break;
+            }
+            case JsonArray arr:
+            {
+                foreach (var item in arr)
+                {
+                    NormalizeKeys(item);
+                }
+
+                break;
+            }
         }
     }
 

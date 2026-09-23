@@ -263,11 +263,11 @@ All runtime settings live in a single `config.json`, read at startup.
 `agents` (multi-agent, §12): one entry per Neuro. **Absent = single-agent v1** (one WS client, no owned character).
 ```json
 "agents": [
-  { "characterId": "neuro", "ownedAlias": "Karlach", "ws_url": "ws://localhost:8000" },
-  { "characterId": "evil",  "ownedAlias": "Astarion", "ws_url": "ws://localhost:8001" }
+  { "character_id": "neuro", "owned_alias": "tav" },
+  { "character_id": "evil",  "owned_alias": "origin_astarion" }
 ]
 ```
-- `ws_url` empty → fall back to top-level `neuro.ws_url`.
+- `ws_url` empty → fall back to top-level `neuro.ws_url` (typical: both agents share one server that assigns `characterId` per connection); per-agent `ws_url` only needed for distinct servers.
 - `ownedAlias` empty → the agent may act for any controlled member (v1 behavior even with several agents).
 
 ---
