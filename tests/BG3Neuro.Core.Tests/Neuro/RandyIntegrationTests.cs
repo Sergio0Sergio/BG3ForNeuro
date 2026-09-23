@@ -151,8 +151,8 @@ public class RandyIntegrationTests
             {
                 var node = JsonNode.Parse(msg);
                 var names = node!["data"]!["actions"]!.AsArray().Select(a => a!["name"]!.GetValue<string>()).ToArray();
-                Assert.Equal(17, names.Length);
-                Assert.Equal(17, names.Distinct().Count());
+                Assert.Equal(18, names.Length);
+                Assert.Equal(18, names.Distinct().Count());
             }
 
             using var http = new HttpClient(new HttpClientHandler { UseProxy = false, Proxy = null });

@@ -13,7 +13,7 @@ Feeds: issues/07-action-execution.md · complements: research/ipc-named-pipes.md
 | `cast_spell` | `Ext.System.ServerCastRequest.OsirisCastRequests` (queue push) | ✔ reliable (modern path) |
 | `cast_spell` fallback | `Osi.UseSpell` / `Osi.UseSpellAtPosition` | ⚠ ok for scripted casts |
 | `use_item` | `Osi.Use(character, item, useItem, isInteraction, event)`; equip: `Osi.Equip` | ✔ reliable |
-| `throw` | no public Osiris call — client input / Anubis `AnubisMoveItem` only | ✘ not automatable reliably |
+| `throw` | no public Osiris call — client input / Anubis `AnubisMoveItem` only | ✘ not automatable reliably (bench-proven, ticket 28) |
 | dialogue start | `Osi.CharacterMoveToAndTalk` / automated: `Osi.StartDialog_Internal` | ✔ |
 | dialogue option pick | **no public function exists** (see §7.6) | ✘ → client UI, experimental |
 | `rest` | `Osi.RequestLongRest(initiator, isForced)` (+ `RequestLongRestConfirmed`) | ✔ reliable |
@@ -198,6 +198,7 @@ Osi.SetCanInteract(item, bool); Osi.GetCanInteract(item)
 - `useItem=1` = consumable/activatable use; `isInteraction=1` = world interaction (levers, doors, alchemy tables). Equip via `Equip` (and events `Equipped`/`EquipFailed`).
 - For "interact with X where X is a scenery/container", combination of `Osi.Use` (interaction) + `Osi.OpenCharacterLootUI(looter, target)` for containers; perception/traps via `IsTrap*`/`SetTrapDiscovered` only as utilities.
 - `throw`: **no** public call. Closest internals: `AnubisMoveItem` / `AnubisPickUpItem` operations on `AnubisRuntimeComponent` (needs setup, essentially scripted-cutscene machinery), or client input mapping the Throw action button. Do not schedule `throw` in v1 (mark as unsupported; the executor can fail with a clear "implemented later" code).
+- **Bench-proven (2026-09-23, ticket 28, live combat v0.8.78–79 — 6/6 rejections):** even the modern cast-queue path (`Ext.System.ServerCastRequest.ItemStartRequests`/`OsirisCastRequests`/`NetworkStartRequests`/`AnubisCastRequests` with `Spell="Throw_Throw"`, `Item`, and forced OR honest `FromClient` cast options) is rejected by the engine with `CastSpellFailed(caster, "Throw_Throw", "throw", "", storyActionID=0)` — `UsingSpell` never fires, storyActionID stays 0. The request structure is byte-identical to successful honest player attack casts (`OsirisCastRequests`, opts `[ShowPrepareAnimation,FromClient,NoMovement,AvoidDangerousAuras]`, `field_A8=1`, storyActionId=0 in queue); the engine rejects specifically the entry carrying `Item`. A live manual throw (05-24 logs) additionally shows `QRY_GetMoveForbiddenItemInfo` and `AddedTo(item, caster, "Regular")` right before `UsingSpell` — the engine picks the item up into the caster's hand as part of a client-input flow; that "item-in-hand" stage appears to be exactly what a synthetic `ItemStartRequests` entry lacks. Conclusions: the earlier "throw is not automatable" claim is **confirmed, not outdated** (contrary to the ticket-28 draft); future paths are client-initiated flow / `AnubisPickUpItem` before the cast / live queue-snapshot capture of a manual throw / explicit `ActionOriginator`+`StoryActionId` initialization. Details: `.scratch/bg3-neuro-followups/issues/28-throw-hide-combat-actions.md`.
 
 ## 9. Rest (`rest`)
 

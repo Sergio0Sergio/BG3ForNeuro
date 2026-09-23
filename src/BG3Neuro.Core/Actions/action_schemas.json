@@ -74,6 +74,17 @@
     }
   },
   {
+    "name": "hide",
+    "description": "Hide the current character as a bonus action (Shout_Hide).",
+    "schema": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "actor": { "type": "string" }
+      }
+    }
+  },
+  {
     "name": "bonus_action",
     "description": "Perform a bonus action (offhand_attack, drink_potion, help, shove, disengage, dash, dodge).",
     "schema": {

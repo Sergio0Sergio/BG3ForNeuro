@@ -26,7 +26,7 @@
 -- Директория IPC: <BG3ScriptExtender appdata>/BG3Neuro (Ext.IO пишет относительно Script Extender).
 
 local MOD_NAME = "BG3Neuro"
-local MOD_VERSION = "0.8.69"
+local MOD_VERSION = "0.8.79"
 _G["BG3Neuro_VERSION"] = MOD_VERSION -- экспорт для Bootstrapr*.lua (правдивый лог загрузки)
 local IPC_DIR = "BG3Neuro"
 local HEARTBEAT_INTERVAL_MS = 2000 -- config.ipc.heartbeat_interval_s * 1000
@@ -2362,6 +2362,7 @@ function captureCombatState(event, force)
         turn_initiative_total = 0,
         allies = {},
         enemies = {},
+        inventory = {},
         available_actions = {},
         events = {},
     }
@@ -2627,6 +2628,22 @@ function captureCombatState(event, force)
 
     -- 04b: перцепт-набор из полного combat-билда (партия ∪ враги ∪ видимые объекты).
     refreshPerceptionSet(state)
+
+    -- v0.8.70 (тикет 28): инвентарь партии в combat-стейте — Neuro должен видеть
+    -- item_id (alias inv_N) для throw. В бою предметы не пересканируются часто;
+    -- scanPartyInventory(partyFlag) обходит Стат-миры — объём ~партия-инвентарь.
+    state.inventory = scanPartyInventory(partyFlag)
+    if BG3NEURO_INV_DIAG ~= nil then
+        state.inv_diag = BG3NEURO_INV_DIAG
+    end
+    if #state.inventory > 0 then
+        local itemAliases = {}
+        for _, it in ipairs(state.inventory) do
+            itemAliases[#itemAliases + 1] = it.alias
+        end
+        state.available_actions[#state.available_actions + 1] =
+            "throw: [" .. table.concat(itemAliases, ", ") .. "]"
+    end
 
     writeStateFile(state)
     diag.stage = "done"
@@ -3022,6 +3039,7 @@ local function itemStatsId(comp)
         return nil
     end
     local v = firstAttempt({
+        function() return comp.Stats end,
         function() return comp.ItemData.StatsId end,
         function() return comp.ItemData.Stats end,
         function() return comp.StatsId end,
@@ -3065,31 +3083,213 @@ local function itemCategory(statsId)
     return "item"
 end
 
-local function scanPartyInventory(partySet)
-    local out = {}
-    local guids = allEntityGuids("Item")
-    for i, itemGuid in ipairs(guids) do
-        local okE, ent = pcall(Ext.Entity.Get, itemGuid)
-        if okE and ent ~= nil then
-            local okC, comp = pcall(function() return ent:GetComponent("Item") end)
-            if okC and comp ~= nil then
-                local owner = ownerCleanOf(comp)
-                if owner ~= nil and partySet[owner] then
-                    local statsId = itemStatsId(comp)
-                    local name = displayName(itemGuid)
-                    if name == itemGuid or name == "" then
-                        name = "item_" .. tostring(i)
+function BG3NEURO_ITEM_OWNER_FROM_COMPONENTS(itemEnt, partySet)
+    -- v0.8.76 (тикет 28): владелец предмета � из компонентов владения на самом предмете.
+    -- Возвращает guid владельца из партии (верне из partySet), либо nil.
+    -- Порядок источников (по приоритету):
+    --   ServerOwneeHistory.OriginalOwner/LatestOwner  (EsvOwnershipOwneeHistoryComponent)
+    --   InventoryIsOwned.Owner                         (InventoryIsOwnedComponent)
+    --   InventoryTopOwner.TopOwner                     (InventoryTopOwnerComponent)
+    -- Каждое чтение в pcall: компонента может не быть или поле совсем пустое.
+    if itemEnt == nil then
+        return nil
+    end
+    local function guidOfHandle(handle)
+        if handle == nil then
+            return nil
+        end
+        local okU, u = pcall(function() return Ext.Entity.HandleToUuid(handle) end)
+        if okU and u ~= nil then
+            local g = tostring(u)
+            if g ~= "" then
+                return g
+            end
+        end
+        return nil
+    end
+    local function ownerInParty(guid)
+        if guid ~= nil and partySet ~= nil and partySet[guid] then
+            return guid
+        end
+        return nil
+    end
+    local candidates = {
+        function() local ok, c = pcall(function() return itemEnt:GetComponent("ServerOwneeHistory") end)
+            if ok and c ~= nil then
+                for _, f in ipairs({ "OriginalOwner", "LatestOwner" }) do
+                    local okF, h = pcall(function() return c[f] end)
+                    if okF and h ~= nil then
+                        local g = guidOfHandle(h)
+                        if g ~= nil then
+                            return g
+                        end
                     end
-                    out[#out + 1] = {
-                        alias = "inv_" .. tostring(#out + 1),
-                        name = name,
-                        quantity = itemQuantity(comp, statsId),
-                        category = itemCategory(statsId) or "item",
-                    }
+                end
+            end
+            return nil end,
+        function() local ok, c = pcall(function() return itemEnt:GetComponent("InventoryIsOwned") end)
+            if ok and c ~= nil then
+                local okF, h = pcall(function() return c.Owner end)
+                if okF and h ~= nil then
+                    return guidOfHandle(h)
+                end
+            end
+            return nil end,
+        function() local ok, c = pcall(function() return itemEnt:GetComponent("InventoryTopOwner") end)
+            if ok and c ~= nil then
+                local okF, h = pcall(function() return c.TopOwner end)
+                if okF and h ~= nil then
+                    return guidOfHandle(h)
+                end
+            end
+            return nil end,
+    }
+    local lastGuid = nil
+    for _, cand in ipairs(candidates) do
+        local okCa, g = pcall(cand)
+        if okCa and g ~= nil then
+            lastGuid = g
+            if partySet ~= nil and partySet[g] then
+                return g
+            end
+        end
+    end
+    return ownerInParty(lastGuid)
+end
+
+function scanPartyInventory(partySet)
+    -- v0.8.72 (тикет 28): глобальный маппинг alias ("inv_N") -> guid предмета.
+    -- Глобал (не local!) — main-chunk BG3Neuro.lua уже на лимите 200 активных локалов.
+    -- Глобальная функция: вызывается из captureCombatState (L2351), которая
+    -- определяется раньше этого места и не видит локалов, объявленных позже.
+    -- v0.8.71: реализован путь ServerCharacter.Inventory -> InventoryContainer.Items;
+    -- v0.8.72: добавлен резервный путь ȇерез ServerItem + InventoryMember.Inventory сверка контейнеров,
+    -- а также BG3NEURO_INV_DIAG (темповая подсказка для state.inv_diag).
+    BG3NEURO_ITEMS = BG3NEURO_ITEMS or {}
+    local out = {}
+    local seen = {}
+    local d = { party = 0, chars = 0, invs = 0, inv_ents = 0, containers = 0, slots = 0, item_guid = 0, items_ok = 0 }
+    for g in pairs(partySet) do
+        d.party = d.party + 1
+        local okE, ent = pcall(function() return Ext.Entity.Get(g) end)
+        if not (okE and ent ~= nil) then
+            goto continue_party
+        end
+        local okCh, chComp = pcall(function() return ent:GetComponent("ServerCharacter") end)
+        if not (okCh and chComp ~= nil) then
+            goto continue_party
+        end
+        d.chars = d.chars + 1
+        local okInv, invHandle = pcall(function() return chComp.Inventory end)
+        if not (okInv and invHandle ~= nil) then
+            goto continue_party
+        end
+        d.invs = d.invs + 1
+        local okInvE, invEnt = pcall(function() return Ext.Entity.Get(invHandle) end)
+        if not (okInvE and invEnt ~= nil) then
+            goto continue_party
+        end
+        d.inv_ents = d.inv_ents + 1
+        local okIc, invComp = pcall(function() return invEnt:GetComponent("InventoryContainer") end)
+        if not (okIc and invComp ~= nil) then
+            goto continue_party
+        end
+        d.containers = d.containers + 1
+        local okItems, items = pcall(function() return invComp.Items end)
+        if not (okItems and items ~= nil) then
+            goto continue_party
+        end
+        local slotN = 0
+        for _, slot in pairs(items) do
+            slotN = slotN + 1
+            local itemHandle = slot and slot.Item
+            if itemHandle ~= nil then
+                local okU, rawGuid = pcall(function() return Ext.Entity.HandleToUuid(itemHandle) end)
+                local itemGuid = okU and tostring(rawGuid) or ""
+                if itemGuid ~= "" and not seen[itemGuid] then
+                    seen[itemGuid] = true
+                    d.item_guid = d.item_guid + 1
+                    local okIE2, itemEnt2 = pcall(function() return Ext.Entity.Get(itemGuid) end)
+                    if okIE2 and itemEnt2 ~= nil then
+                        local okC2, itemComp = pcall(function() return itemEnt2:GetComponent("ServerItem") end)
+                        if okC2 and itemComp ~= nil then
+                            d.items_ok = d.items_ok + 1
+                            local statsId = itemStatsId(itemComp)
+                            local name = displayName(itemGuid)
+                            if name == itemGuid or name == "" then
+                                name = "item_" .. tostring(#out + 1)
+                            end
+                            local alias = "inv_" .. tostring(#out + 1)
+                            out[#out + 1] = {
+                                alias = alias,
+                                name = name,
+                                quantity = itemQuantity(itemComp, statsId),
+                                category = itemCategory(statsId) or "item",
+                                owner = combatAliases[g] or g,
+                                owner_guid = g,
+                            }
+                            BG3NEURO_ITEMS[alias] = itemGuid
+                        end
+                    end
+                end
+            end
+        end
+        d.slots = d.slots + slotN
+        ::continue_party::
+    end
+    d.result = #out
+    if #out == 0 then
+        -- v0.8.77 (тикет 28): атрибуция владения � �ОЛЬКО по компонентам владения на самом предмете.
+        -- v0.8.73-76 контейнерный map (InventoryOwner.PrimaryInventory/Inventories) схлопывался
+        -- в 1 ключ (containers_found=1) и весь инвентарь приписывался одному
+        -- персонажу (v0.8.76 в бою: 2079/2192 предметов через контейнер-путь — ложь).
+        -- Владелец читается только из ��������-компонентов. В подходящие только те,
+        -- для которых мы знаем владельца из партии: неизвестный owner лучше,
+        -- чем неверный.
+        local okAll, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("ServerItem") end)
+        if okAll and handles ~= nil then
+            d.server_items = #handles
+            for i = 1, #handles do
+                local okCE, citemEnt = pcall(function() return Ext.Entity.Get(handles[i]) end)
+                local okC2, itemComp = nil, nil
+                if okCE and citemEnt ~= nil then
+                    okC2, itemComp = pcall(function() return citemEnt:GetComponent("ServerItem") end)
+                end
+                if okC2 and itemComp ~= nil then
+                    local okIU, iu = pcall(function() return Ext.Entity.HandleToUuid(handles[i]) end)
+                    local itemGuid = okIU and tostring(iu) or ""
+                    if itemGuid ~= "" and not seen[itemGuid] then
+                        local ownerFromComp = BG3NEURO_ITEM_OWNER_FROM_COMPONENTS(citemEnt, partySet)
+                        if ownerFromComp ~= nil then
+                            seen[itemGuid] = true
+                            d.owner_from_component = (d.owner_from_component or 0) + 1
+                            d.fallback_items = (d.fallback_items or 0) + 1
+                            local statsId = itemStatsId(itemComp)
+                            local name = displayName(itemGuid)
+                            if name == itemGuid or name == "" then
+                                name = "item_" .. tostring(#out + 1)
+                            end
+                            local alias = "inv_" .. tostring(#out + 1)
+                            out[#out + 1] = {
+                                alias = alias,
+                                name = name,
+                                quantity = itemQuantity(itemComp, statsId),
+                                category = itemCategory(statsId) or "item",
+                                owner = combatAliases[ownerFromComp],
+                                owner_guid = ownerFromComp,
+                                owner_source = "component",
+                            }
+                            BG3NEURO_ITEMS[alias] = itemGuid
+                        else
+                            d.owner_none = (d.owner_none or 0) + 1
+                        end
+                    end
                 end
             end
         end
     end
+    d.result = #out
+    BG3NEURO_INV_DIAG = d
     return out
 end
 
@@ -3754,6 +3954,9 @@ local function enqueueCastRequest(actorUuid, opts)
     local queueName = opts.queueName
     local forceFlags = opts.forceFlags == true
     local bonusAction = opts.bonusAction == true
+    -- v0.8.70 (тикет 28): бросок предмета — в CastStartRequest есть поле Item
+    -- (EntityHandle предмета). Без него каст "Throw" бросил бы ничего/не тот предмет.
+    local itemUuid = opts.item
 
     local apiOk, serverCastRequest = pcall(function() return Ext.System.ServerCastRequest end)
     if not apiOk or serverCastRequest == nil then
@@ -3870,14 +4073,28 @@ local function enqueueCastRequest(actorUuid, opts)
 
     -- v0.8.18+: выбор очереди. "network" -> NetworkStartRequests (канал, через который
     -- игра принимает каст игрока в его ход), иначе OsirisCastRequests.
+    -- v0.8.78 (тикет 28): бросок предмета — ItemStartRequests. Касты, инициированные
+    -- предметом (Throw/dabble из инвентаря), движок обрабатывает из
+    -- ItemStartRequests (а не OsirisCastRequests/NetworkStartRequests): синтетический запрос
+    -- в обечах этих очередей отвергается CastSpellFailed(..., storyActionID=0) на стенде.
+    local QUEUE_MAP = {
+        osiris = "OsirisCastRequests",
+        network = "NetworkStartRequests",
+        item = "ItemStartRequests",
+        anubis = "AnubisCastRequests",
+    }
     local queueId = queueName or "osiris"
+    local queueName2 = QUEUE_MAP[queueId]
+    if queueName2 == nil then
+        queueName2 = "OsirisCastRequests"
+    end
     local queue
-    local qOk, qErr = pcall(function() return serverCastRequest[queueId == "network" and "NetworkStartRequests" or "OsirisCastRequests"] end)
+    local qOk, qErr = pcall(function() return serverCastRequest[queueName2] end)
     if qOk and qErr then
         queue = qErr
     end
     if queue == nil then
-        return nil, (queueId == "network" and "NetworkStartRequests" or "OsirisCastRequests") .. " unavailable"
+        return nil, queueName2 .. " unavailable"
     end
 
     local castOptions
@@ -3917,6 +4134,16 @@ local function enqueueCastRequest(actorUuid, opts)
         Targets = targets,
         field_A8 = 1,
     }
+
+    -- v0.8.70 (тикет 28): бросок предмета — прототип Throw требует Item в запросе.
+    if itemUuid ~= nil and itemUuid ~= "" then
+        local iOK, iEnt = pcall(function() return Ext.Entity.Get(itemUuid) end)
+        if iOK and iEnt ~= nil then
+            request.Item = iEnt
+        else
+            return nil, "Failed to get the item entity to throw: " .. tostring(itemUuid)
+        end
+    end
 
     -- v0.8.18: debug-дамп ДО push — что собираемся пушить (отладка "молча игнорится" стр. ниже).
     local preparedList = {}
@@ -5569,6 +5796,190 @@ local function executeToggleMode(action)
     return true, nil, nil, nil
 end
 
+-- ============================================================
+-- v0.8.70 (тикет 28): throw / hide как отдельные боевые действия.
+-- Глобальная namespace-таблица (НЕ top-level local!) — main-chunk уже на лимите
+-- 200 активных локалов; глобалы не считаются как локалы (AGENTS.md, тикет 24).
+-- ============================================================
+BG3NEURO_COMBAT = BG3NEURO_COMBAT or {}
+
+-- Может ли актор действовать сейчас (копия гейта executeCast): CanActInCombat
+-- из TurnBased-компонента, fallback — acting-матч. nil-canAct трактуем как свой ход.
+function BG3NEURO_COMBAT.actorMayAct(actor)
+    local entOk, entVal = pcall(Ext.Entity.Get, actor)
+    local canAct = nil
+    if entOk and entVal ~= nil then
+        canAct = fieldOf(turnComponent(entVal), "CanActInCombat")
+    end
+    canAct = (canAct == true) or (tostring(canAct) == "true")
+    local acting = pureGuid(actingChar)
+    if canAct then
+        return true
+    end
+    return acting ~= nil and pureGuid(actor) == acting
+end
+
+-- Финализация both-действий по событию каста (общий pendingCasts + списание
+-- экономики как у cast_spell). Возвращает success, running, errorCode, errorDetail.
+function BG3NEURO_COMBAT.enqueueAndFinalize(action, actor, sid, opts)
+    -- v0.8.74 (тикет 28): Shout/Throw ������� ������� ������� �� �����������
+    -- (CastSpellFailed storyActionID=0, �������� �� ������) � ������ forced. ������
+    -- forced-������� ������� �� ������ ��� (��. cast_spell L4703) � ������� ���������
+    -- �����: ���-���� AP/BA/����� �� enqueue + ������ �������� ����� CastedSpell.
+    local forceFlags = opts.forceFlags == true
+    local costKind, slotLevel
+    local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
+    if stOK and stRes then
+        costKind = abilityCostOf(fieldOf(stRes, "UseCosts"))
+        slotLevel = spellSlotFromUseCosts(fieldOf(stRes, "UseCosts"))
+    end
+    if forceFlags then
+        local apRes = costKind == "bonus_action" and "BonusActionPoint"
+            or costKind == "reaction" and "ReactionActionPoint"
+            or costKind == "action" and "ActionPoint" or nil
+        if apRes ~= nil then
+            local aOk, aVal = pcall(Osi.GetActionResourceValuePersonal, actor, apRes, 0)
+            if aOk and type(aVal) == "number" and aVal < 1 then
+                return false, nil, "action_failed", "no_action_point: "
+                    .. tostring(sid) .. " costs " .. tostring(costKind)
+                    .. " (" .. tostring(apRes) .. " 0)"
+            end
+        end
+    end
+    local enqOK, enqRes, enqErr = pcall(function()
+        return enqueueCastRequest(actor, opts)
+    end)
+    if not (enqOK and enqRes == true) then
+        return false, nil, "action_failed",
+            enqOK and tostring(enqErr) or tostring(enqRes)
+    end
+    -- Финал — событие CastedSpell/CastSpellFailed (как у cast_spell/attack).
+    pendingCasts[#pendingCasts + 1] = { id = action.id, spell = sid, caster = actor,
+        econDeduct = forceFlags, costKind = costKind, slotLevel = slotLevel }
+    return true, true, nil, nil
+end
+
+-- throw: каст прототипа Throw_Throw с полем Item (EntityHandle бросаемого предмета).
+-- item_id = alias из state.inventory ("inv_N"), резолвится через BG3NEURO_ITEMS.
+function BG3NEURO_COMBAT.throw(action)
+    local data = action.data
+    local actor = resolveCombatActor(data.actor)
+    if actor == nil then
+        return false, nil, "action_failed", "Could not resolve the thrower actor"
+    end
+    if not BG3NEURO_COMBAT.actorMayAct(actor) then
+        return false, nil, "action_failed",
+            "not_caster_turn: " .. tostring(actor) .. " cannot act now"
+    end
+    local itemAlias = data.item_id or ""
+    local itemGuid = BG3NEURO_ITEMS and BG3NEURO_ITEMS[itemAlias] or nil
+    if itemGuid == nil then
+        -- fallback: item_id может прийти движковым guid напрямую
+        local direct = resolveEntity(itemAlias)
+        if direct ~= nil and direct ~= "" then
+            itemGuid = direct
+        end
+    end
+    if itemGuid == nil or itemGuid == "" then
+        return false, nil, "action_failed",
+            "throw requires item_id of an inventory item (state.inventory[].alias), got: "
+            .. tostring(itemAlias)
+    end
+    local target = resolveEntity(data.target_id or "")
+    if target == nil or target == "" then
+        return false, nil, "action_failed", "throw requires target_id of the target of the thrown item"
+    end
+
+    -- Прерываем активное движение (бросок и движение не пересекаются).
+    cancelActiveMove("Movement interrupted by throw", action.id)
+    -- Снапшот ресурсов до действия (критерий честной экономики).
+    pcall(writeResourceSnapshot, action.id, actor, "before")
+
+    -- Кандидаты прототипа броска: резолв как у cast_spell (book-guard ниже).
+    local resolved = resolveAbilityStatName(actor, "throw")
+    local candidates = { "Throw_Throw", "Projectile_Throw", "Target_Throw" }
+    local usedSid = resolved
+    local lastErr
+    for _, sid in ipairs(candidates) do
+        if usedSid == nil then
+            local hOK, hRes = pcall(function() return Osi.HasSpell(actor, sid) end)
+            if hOK and tostring(hRes) == "1" then
+                usedSid = sid
+            else
+                lastErr = "no_throw: '" .. sid .. "' is not in the caster's book"
+            end
+        end
+    end
+    if usedSid == nil then
+        return false, nil, "action_failed", tostring(lastErr)
+    end
+
+    -- Пре-валидация цели (дистанция/LOS, как тикет 06).
+    local pvOk, pvCode, pvMsg = preValidateCastTarget(actor, usedSid, target)
+    if not pvOk then
+        return false, nil, "action_failed", pvCode .. ": " .. pvMsg
+    end
+
+    local stOK, stRes = pcall(function() return Ext.Stats.Get(usedSid) end)
+    local sType = "Target"
+    if stOK and stRes and stRes.SpellType then
+        sType = stRes.SpellType
+    end
+
+    -- v0.8.79 (тикет 28, bench 2026-09-23): honest=true (use) � FromClient-�������, �� ����-�����.
+    -- ��������� �� ������ bot: item � network ������� ��твегаются CastSpellFailed storyActionID=0
+    -- (��� � ��� 4 ����-��������). Throw ������ ��� unsupported; ���� �������� ��� ������� �������������
+    -- (client-initiated ����� / AnubisPickUpItem, ��. ����� 28). ������� ����: ���� ����� ItemStartRequests.
+    local honest = data.honest == true
+    return BG3NEURO_COMBAT.enqueueAndFinalize(action, actor, usedSid, {
+        spellName = usedSid,
+        target = target,
+        item = itemGuid,
+        spellType = sType,
+        forceFlags = not honest,
+        queueName = (data.queue == "network" or data.queue == "osiris"
+            or data.queue == "item" or data.queue == "anubis") and data.queue
+            or (honest and "item" or nil),
+    })
+end
+
+-- hide: каст Shout_Hide (Shout без цели, бонус-действие). BA-бюджет роутера
+-- (bonus_action) сюда не применяется: это отдельное действие типа hide.
+function BG3NEURO_COMBAT.hide(action)
+    local data = action.data
+    local actor = resolveCombatActor(data.actor)
+    if actor == nil then
+        return false, nil, "action_failed", "Could not resolve the hiding actor"
+    end
+    if not BG3NEURO_COMBAT.actorMayAct(actor) then
+        return false, nil, "action_failed",
+            "not_caster_turn: " .. tostring(actor) .. " cannot act now"
+    end
+
+    cancelActiveMove("Movement interrupted by hide", action.id)
+    pcall(writeResourceSnapshot, action.id, actor, "before")
+
+    local resolved = resolveAbilityStatName(actor, "hide")
+    local usedSid = resolved
+    if usedSid == nil then
+        local hOK, hRes = pcall(function() return Osi.HasSpell(actor, "Shout_Hide") end)
+        if hOK and tostring(hRes) == "1" then
+            usedSid = "Shout_Hide"
+        else
+            return false, nil, "action_failed",
+                "no_hide: 'Shout_Hide' is not in the caster's book (hide unavailable)"
+        end
+    end
+
+    return BG3NEURO_COMBAT.enqueueAndFinalize(action, actor, usedSid, {
+        spellName = usedSid,
+        target = actor,
+        spellType = "Shout",
+        bonusAction = true,
+        forceFlags = true,
+    })
+end
+
 local function executeAction(action)
     local name = action.name
     local data = action.data
@@ -6181,6 +6592,16 @@ local okW1, errW1 = pcall(function() comp.RequestedEndTurn = true end)
     if name == "bonus_action" then
         -- v0.8.25 (тикет 05): bonus_action → offhand_attack (v1), остальные — позже.
         return executeBonusAction(action)
+    end
+
+    if name == "throw" then
+        -- v0.8.70 (тикет 28): бросок предмета (Throw_Throw + поле Item).
+        return BG3NEURO_COMBAT.throw(action)
+    end
+
+    if name == "hide" then
+        -- v0.8.70 (тикет 28): скрытие (Shout_Hide, без цели).
+        return BG3NEURO_COMBAT.hide(action)
     end
 
     if name == "q_cast" or name == "q_sys" then

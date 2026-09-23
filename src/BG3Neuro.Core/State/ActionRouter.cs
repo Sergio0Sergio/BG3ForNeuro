@@ -324,7 +324,7 @@ public sealed class ActionRouter
 
     private ValidationResult? ValidatePhase(string actionName, JsonObject data, CombatState? combatState)
     {
-        var requiresCombatPhase = actionName is "end_turn" or "bonus_action" or "set_reaction" or
+        var requiresCombatPhase = actionName is "end_turn" or "bonus_action" or "hide" or "set_reaction" or
             "move_to_target" or "attack_entity" or "cast_spell" or "use_item" or "throw";
 
         if (requiresCombatPhase)
@@ -377,7 +377,7 @@ public sealed class ActionRouter
                 return castResult;
             }
 
-            var aoeResult = FillAoEPosition(data, combatState);
+var aoeResult = FillAoEPosition(data, combatState);
             if (aoeResult is not null)
             {
                 return aoeResult;
@@ -386,7 +386,43 @@ public sealed class ActionRouter
 
         if (actionName == "throw")
         {
-            return ValidationResult.Fail(ErrorCode.NotSupported, "Action throw is not supported in v1");
+            return ValidateThrow(data, combatState);
+        }
+
+        return null;
+    }
+
+    // v0.8.70 (тикет 28): throw — отдельное боевое действие. item_id обязателен,
+    // target_id обязателен и известен (враг или союзник). Существование/владелец
+    // предмета и сама траектория — честный вердикт Lua (no_item и т.п.): в боевом
+    // стейте нет инвентаря, роутер слабее движка не станет.
+    private ValidationResult? ValidateThrow(JsonObject data, CombatState? combatState)
+    {
+        var itemId = data["item_id"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter item_id is required");
+        }
+
+        var targetId = data["target_id"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(targetId))
+        {
+            return ValidationResult.Fail(ErrorCode.InvalidParameters, "Parameter target_id is required (throw an item at a combatant)");
+        }
+
+        var targetKnown = combatState?.Enemies.Any(e => e.Alias == targetId) == true
+            || combatState?.Allies.Any(a => a.Alias == targetId) == true;
+        if (!targetKnown)
+        {
+            var known = new List<string>();
+            if (combatState is not null)
+            {
+                known.AddRange(combatState.Enemies.Select(e => e.Alias));
+                known.AddRange(combatState.Allies.Select(a => a.Alias));
+            }
+
+            return ValidationResult.Fail(ErrorCode.TargetMissing,
+                $"Target '{targetId}' not found among combatants. Known: {string.Join(", ", known.OrderBy(x => x, StringComparer.Ordinal))}");
         }
 
         return null;

@@ -168,15 +168,101 @@ public class ActionRouterTests : IDisposable
     }
 
     [Fact]
-    public void Throw_NotSupported_EvenWhenValidPhase()
+    public void Throw_OnControlledTurn_Succeeds()
     {
         var router = CreateRouter();
         var state = CombatWithTurn("karlach", "karlach");
 
         var result = router.ValidateAndDispatch("act-1", "throw", """{"item_id":"potion","target_id":"goblin_1"}""", state, ModStatus.Alive);
 
+        Assert.True(result.Success);
+        Assert.True(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+    }
+
+    [Fact]
+    public void Throw_MissingItemId_InvalidParameters()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+
+        var result = router.ValidateAndDispatch("act-1", "throw", """{"target_id":"goblin_1"}""", state, ModStatus.Alive);
+
         Assert.False(result.Success);
-        Assert.Equal(ErrorCode.NotSupported, result.ErrorCode);
+        Assert.Equal(ErrorCode.InvalidParameters, result.ErrorCode);
+        Assert.Contains("item_id", result.ErrorDetail);
+    }
+
+    [Fact]
+    public void Throw_MissingTarget_InvalidParameters()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+
+        var result = router.ValidateAndDispatch("act-1", "throw", """{"item_id":"potion"}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.InvalidParameters, result.ErrorCode);
+        Assert.Contains("target_id", result.ErrorDetail);
+    }
+
+    [Fact]
+    public void Throw_UnknownTarget_TargetMissing()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+
+        var result = router.ValidateAndDispatch("act-1", "throw", """{"item_id":"potion","target_id":"nobody"}""", state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.TargetMissing, result.ErrorCode);
+    }
+
+    [Fact]
+    public void Throw_NotInCombat_NotInCombat()
+    {
+        var router = CreateRouter();
+
+        var result = router.ValidateAndDispatch("act-1", "throw", """{"item_id":"potion","target_id":"goblin_1"}""", null, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.NotInCombat, result.ErrorCode);
+        Assert.False(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+    }
+
+    [Fact]
+    public void Hide_OnControlledTurn_Succeeds()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("karlach", "karlach");
+
+        var result = router.ValidateAndDispatch("act-1", "hide", """{}""", state, ModStatus.Alive);
+
+        Assert.True(result.Success);
+        Assert.True(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+    }
+
+    [Fact]
+    public void Hide_NotInCombat_NotInCombat()
+    {
+        var router = CreateRouter();
+
+        var result = router.ValidateAndDispatch("act-1", "hide", null, null, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.NotInCombat, result.ErrorCode);
+        Assert.False(File.Exists(Path.Combine(_tmpDir, "action_act-1.json")));
+    }
+
+    [Fact]
+    public void Hide_EnemyTurn_WrongPhase()
+    {
+        var router = CreateRouter();
+        var state = CombatWithTurn("goblin_1", "karlach");
+
+        var result = router.ValidateAndDispatch("act-1", "hide", null, state, ModStatus.Alive);
+
+        Assert.False(result.Success);
+        Assert.Equal(ErrorCode.WrongPhase, result.ErrorCode);
     }
 
     [Fact]

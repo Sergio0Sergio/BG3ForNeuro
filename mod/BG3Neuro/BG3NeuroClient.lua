@@ -24,7 +24,7 @@
 
 local DIALOGUE_CHANNEL = "BG3NeuroDialogue"
 local OPTION_DEPTH_CAP = 12
-_G["BG3Neuro_VERSION"] = "0.8.69" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
+_G["BG3Neuro_VERSION"] = "0.8.79" -- экспорт для BootstrapClient.lua (правдивый лог загрузки)
 local MAX_VISITED = 3000
 local DIALOGUE_HINTS = { "dialog", "dialogue", "conversation" }
 local NON_DIALOGUE_HINTS = { "hotbar", "actionbar", "toolbar", "minimap", "tooltip",

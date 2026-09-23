@@ -9,7 +9,7 @@ public sealed class DecisionLoop : IDisposable
 {
     private static readonly string[] CombatActionNames =
     {
-        "move_to_target", "attack_entity", "cast_spell", "use_item", "throw",
+        "move_to_target", "attack_entity", "cast_spell", "use_item", "throw", "hide",
         "bonus_action", "set_reaction", "end_turn",
     };
 

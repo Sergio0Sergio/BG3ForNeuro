@@ -292,7 +292,7 @@ Details:
 - **`attack_entity`**: `target_id` + `actor` (main hand always, no `weapon_slot` — offhand only via `bonus_action`).
 - **`cast_spell`** (AoE): `actor` + `spell_name` — from state (source of truth); `coverage` (optional) — desired victim list, the plugin centers the blast on the coverage optimum, failure with a list if not everything is reachable; `position` (optional) — raw center coordinates `{x, y, z}` (BG3SE API 3D), fallback (enabled via config, disabled by default). AoE coverage and range are computed by the plugin — a single code path with StateSerializer. **v0.8.35:** this is also the path for weapon actions / bonus-action abilities (e.g. Flourish). `spell_name` accepts **either** the engine stat id (`Target_OpeningAttack`) **or** the friendly `name` from the state (`flourish`); the plugin resolves the friendly name to the engine id before dispatch. The plugin spends the ability's own resource cost (a bonus-action ability spends BA) natively — `bonus_action` stays `offhand_attack`-only.
 - **`use_item`**: `actor` + item + target. Drinking a potion as an action — here (both paths: `use_item` and `bonus_action.drink_potion`).
-- **`throw`**: `actor` + `item_id` + `target_id`. Present in the schema, but in v1 the validator returns `not_supported` (no public Osiris call) — an honest "implemented later" failure, not silence.
+- **`throw`**: `actor` + `item_id` + `target_id`. Present in the schema, but execution returns `not_supported` — **bench-proven** (see §11 note): the engine rejects synthetic `Throw_Throw` casts in every variant (4 force queues + 2 honest `FromClient`), always `CastSpellFailed(..., storyActionID=0)`, `UsingSpell` never fires. Honest "implemented later" failure, not silence.
 - **`bonus_action.action_type`** (full, fixed enum):
   - `offhand_attack` — attack with the second hand (needs an offhand weapon)
   - `drink_potion` — drink a potion (as a second tempo/bonus)
@@ -655,7 +655,7 @@ The Lua part (BG3SE mod) against mocked `Ext.*` — light smoke on the bench, **
 - Performance optimization
 - Packaging and deployment
 - Trading (buy/sell) — a separate UI screen outside dialogue options
-- `throw` (item throwing) — `not_supported` in v1 (no public API)
+- `throw` (item throwing) — `not_supported` (bench-proven 2026-09-23, ticket 28: engine rejects the synthetic cast in all queues — forced `osiris/network/item/anubis` and honest `FromClient` `item/network` — with `CastSpellFailed(..., storyActionID=0)`; a live manual throw shows the engine itself picking the item into the caster's hand first, a stage the synthetic request lacks).
 - Stealth mode `"stealth"` for `toggle_mode` — no public API
 
 **Post-v1 experiments** (not part of the current spec): stealth-status experiment (for `"stealth"` in `toggle_mode`).
@@ -667,6 +667,7 @@ The Lua part (BG3SE mod) against mocked `Ext.*` — light smoke on the bench, **
 - Wayfinder map: `.scratch/bg3-neuro-integration/map.md`
 - Tickets: `.scratch/bg3-neuro-integration/issues/01..09`
 - IPC research: `.scratch/bg3-neuro-integration/research/ipc-named-pipes.md`
+- `throw` bench verdict 2026-09-23 (6/6 rejections, all queues/flags): `.scratch/bg3-neuro-followups/issues/28-throw-hide-combat-actions.md`
 - BG3SE API research: `.scratch/bg3-neuro-integration/research/bg3se-lua-action-api.md`
 - Neuro SDK: `neuro-sdk/neuro-sdk/API/SPECIFICATION.md`, `API/BEST_PRACTICES.md`, `API/README.md`, `API/PROPOSALS.md`
 - Randy: `neuro-sdk/neuro-sdk/Randy/README.md`
