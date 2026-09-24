@@ -9,10 +9,10 @@ Blocked by: each new PAK requires a graceful game close before install (process 
 `executeTravel` (`BG3Neuro.lua:5381-5392`) returns `true, true` — ack only:
 
 ```lua
--- Публичного fast-travel Osiris-вызова в research нет (§0/§15): структурный ack.
--- TODO(game): кандидат — телепорт к waypoint-маркеру региона (Osi.TeleportTo/Position);
--- фактический переезд области придёт отдельным state от мод-генератора (Канал B).
-return true, true, nil, nil -- success, running (перенос региона — следующий state)
+-- No public fast-travel Osiris call exists in the research (§0/§15): structural ack.
+-- TODO(game): candidate — teleport to the region waypoint marker (Osi.TeleportTo/Position);
+-- the actual region move will arrive as a separate state from the mod generator (channel B).
+return true, true, nil, nil -- success, running (region transfer — next state)
 ```
 
 `travel_to` inside the current region is done (there is a working path — checklist

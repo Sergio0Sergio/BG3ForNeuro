@@ -34,7 +34,7 @@ was: the action is only reachable through the **client UI** ("Take Short Rest" b
 2. **Implementation (v0.8.64, PAK v096)** — done:
    - server: global `BG3NEURO_REST` module (main chunk at the 200-local limit → **no top-level locals**),
      channel `BG3NeuroRest`, click-result handler with retry on `retry:*` reasons,
-     `executeRest` short branch → `Broadcast{kind="bg3neuro_rest_click"}` (fire-only, финал — state),
+     `executeRest` short branch → `Broadcast{kind="bg3neuro_rest_click"}` (fire-only, final — state),
      bench action `rest_probe` (BroadcastMessage request → client UI scan → `result_<id>.json`);
    - client: `bg3neuro_rest_click` + `bg3neuro_rest_probe` handlers, `scanUiButtons()`
      (all Button/Cmd roots, text + first child text), `openCampMenu()` (open by hint-matched

@@ -11,15 +11,15 @@ Neuro at connect time. **All 24 `description` strings are in Russian**, so the m
 Russian-language action contract:
 
 ```
-move_to_target         [RU] Переместиться к выбранной цели.
-attack_entity          [RU] Атаковать выбранного противника …
-cast_spell             [RU] Использовать заклинание; цель AoE …
-… (24/24 Russian)
+move_to_target         [RU→EN] Move to the selected target.
+attack_entity          [RU→EN] Attack the selected enemy …
+cast_spell             [RU→EN] Cast a spell; AoE target …
+… (24/24 Russian, all translated to English in the fix)
 ```
 
 Evidence: the `actions/register` WS frame captured at `11:55:03`,
 `{"command":"actions/register", … "description":"\u041F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438…
-(\u041F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438\u0442\u044C\u0441\u044F = "Переместиться)`.
+(RU→EN: the `\u04xx` escapes are UTF-16 code points of the original Russian "move to the selected target").
 
 ## Why it matters
 

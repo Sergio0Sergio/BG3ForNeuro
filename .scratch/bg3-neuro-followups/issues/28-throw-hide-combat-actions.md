@@ -6,68 +6,68 @@ Blocked by: —
 
 ## Goal
 
-Включить `throw` и `hide` как полноценные отдельные боевые действия после триажа
-(пользователь выбрал вариант «Отдельные действия throw + hide (Recommended)»), вместо
-прежнего `throw` → NotSupported и отсутствующего hide-исполнителя.
+Enable `throw` and `hide` as full-fledged separate combat actions after triage
+(the user chose the "Separate throw + hide actions (Recommended)" option), instead of
+the previous `throw` → NotSupported and the missing hide executor.
 
-- **hide**: каст `Shout_Hide` (Shout, без цели) через каст-очередь; bonus-action по экономике.
-- **throw**: каст прототипа `Throw_Throw` с полем `Item` (EntityHandle предмета) в `EsvSpellCastCastStartRequest`
-  (`ExtIdeHelpers.lua:16770`). Без `Item` каст бросил бы ничего.
+- **hide**: cast `Shout_Hide` (Shout, no target) through the cast queue; bonus-action by economy.
+- **throw**: cast of the `Throw_Throw` prototype with an `Item` field (item EntityHandle) in `EsvSpellCastCastStartRequest`
+  (`ExtIdeHelpers.lua:16770`). Without `Item` the cast would throw nothing.
 
 ## What's done (C#, ready in repo)
 
-- `ActionRouter.cs`: блок `throw` → NotSupported убран (бывшие L387-390), добавлен `ValidateThrow`
-  (item_id/target_id обязательны, target среди enemies/allies, иначе `TargetMissing` с перечнем известных);
-  `hide` добавлен в `requiresCombatPhase`.
-- `action_schemas.json`: схема `hide` (required `[]`) добавлена после `throw`.
-- `DecisionLoop.cs`: `"hide"` в `CombatActionNames`.
-- `ActionRouterTests.cs`: `Throw_NotSupported…` заменён на 8 тестов throw/hide.
+- `ActionRouter.cs`: the `throw` → NotSupported block removed (former L387-390), `ValidateThrow` added
+  (item_id/target_id required, target among enemies/allies, otherwise `TargetMissing` with the list of known targets);
+  `hide` added to `requiresCombatPhase`.
+- `action_schemas.json`: the `hide` schema (required `[]`) added after `throw`.
+- `DecisionLoop.cs`: `"hide"` in `CombatActionNames`.
+- `ActionRouterTests.cs`: `Throw_NotSupported…` replaced with 8 throw/hide tests.
 
 ## What's left (Lua, server)
 
-- `scanPartyInventory` (L3068): заполнение глобального `BG3NEURO_ITEMS = {}` (alias `inv_N` → guid
-  предмета). **Глобал, не local** — main-chunk на лимите 200 активных локалов.
-- `enqueueCastRequest` (L3739): опция `opts.item` → `request.Item = Ext.Entity.Get(uuid)`.
-- `executeThrow` / `executeHide` через глобальную таблицу (по образцу `BG3NEURO_SIGHT`/`BG3NEURO_REST`),
-  ветки `throw` / `hide` в диспетчере `executeAction` (~L6150).
+- `scanPartyInventory` (L3068): fill the global `BG3NEURO_ITEMS = {}` (alias `inv_N` → item guid).
+  **Global, not local** — the main chunk is at the 200 active-locals limit.
+- `enqueueCastRequest` (L3739): the `opts.item` option → `request.Item = Ext.Entity.Get(uuid)`.
+- `executeThrow` / `executeHide` via a global table (following the pattern of `BG3NEURO_SIGHT`/`BG3NEURO_REST`),
+  `throw` / `hide` branches in the `executeAction` dispatcher (~L6150).
 
 ## Known gaps / risks
 
-- **Боевой стейт `buildCombatState` (L2355) инвентарь НЕ содержит** (`scanPartyInventory` вызывается
-  только в exploration, L3192). Neuro в бою не увидит `item_id` → выбор предмета невозможен. Вариант:
-  добавить `state.inventory` в боевой стейт (решение отложено сознательно — валидация C# проверяет только
-  обязательность полей, honesty-вердикт отдаёт Lua).
-- Старое research (`bg3se-lua-action-api.md`) «throw не автоматизируем» — **подтвердилось** на стенде.
+- **The combat state `buildCombatState` (L2355) does NOT contain inventory** (`scanPartyInventory` is only
+  called in exploration, L3192). Neuro will not see `item_id` in combat → item selection is impossible. Option:
+  add `state.inventory` to the combat state (the decision is deliberately deferred — C# validation only checks
+  field requiredness, the honesty verdict is given by Lua).
+- The old research (`bg3se-lua-action-api.md`) "throw cannot be automated" — **confirmed** on the bench.
 
-## Bench-вердикт по throw (2026-09-23, v0.8.79, бой у рощи, Tav vs Goblin Tracker)
+## Bench verdict on throw (2026-09-23, v0.8.79, battle at the grove, Tav vs Goblin Tracker)
 
-Движок **отклоняет синтетический бросок во всех проверенных вариантах** — `CastSpellFailed(caster, "Throw_Throw", "throw", "", storyActionID=0)`,
-событие `UsingSpell` даже не возникает:
+The engine **rejects the synthetic throw in all tested variants** — `CastSpellFailed(caster, "Throw_Throw", "throw", "", storyActionID=0)`,
+the `UsingSpell` event does not even fire:
 
-- v0.8.78 (форс-флаги): очереди `osiris`, `network`, `item`, `anubis` — 4/4 `cast_failed` (bt28_throw1–4).
-- v0.8.79 (честный каст, `FromClient`, не форс): `item` и `network` — 2/2 `cast_failed` (bt28_throw5–6).
+- v0.8.78 (force-flags): queues `osiris`, `network`, `item`, `anubis` — 4/4 `cast_failed` (bt28_throw1–4).
+- v0.8.79 (honest cast, `FromClient`, not forced): `item` and `network` — 2/2 `cast_failed` (bt28_throw5–6).
 
-При этом запрос реально попадает в очередь (`ItemStartRequests` entry: spell=Throw_Throw, opts=[ShowPrepareAnimation,FromClient,NoMovement,AvoidDangerousAuras],
-storyActionId=0, item=Entity, a8=1) — структура идентична успешным честным кастам атаки (OsirisCastRequests), но движок отвергает именно entry с Item.
-Живой ручной бросок (логи 05-24) перед кастом показывает `QRY_GetMoveForbiddenItemInfo` и `AddedTo(предмет, кастер, "Regular")` —
-движок сам поднимает предмет в руку как часть клиентского потока; синтетическому запросу этого этапа, видимо, не хватает.
+Yet the request really does reach the queue (`ItemStartRequests` entry: spell=Throw_Throw, opts=[ShowPrepareAnimation,FromClient,NoMovement,AvoidDangerousAuras],
+storyActionId=0, item=Entity, a8=1) — the structure is identical to successful honest attack casts (OsirisCastRequests), but the engine rejects exactly the entry with Item.
+A live manual throw (05-24 logs) right before the cast shows `QRY_GetMoveForbiddenItemInfo` and `AddedTo(item, caster, "Regular")` —
+the engine picks the item up into the hand itself as part of the client flow; the synthetic request apparently lacks this stage.
 
-**Закрыто как unsupported** (по решению пользователя), research-вывод подтверждён. Hide верифицирован и работает.
+**Closed as unsupported** (per the user's decision), the research conclusion confirmed. Hide verified and working.
 
 ## Acceptance
 
-- `throw {actor, item_id, target_id}` в бою: каст `Throw_Throw` + `Item`, честный status/result.
-- `hide {actor}` в бою: каст `Shout_Hide` (без цели), BA по экономике.
-- Схемы в `action_schemas.json`, C#-валидация, Lua-исполнители, PAK v113, luaparse + countlocals (200/200).
+- `throw {actor, item_id, target_id}` in combat: cast `Throw_Throw` + `Item`, honest status/result.
+- `hide {actor}` in combat: cast `Shout_Hide` (no target), BA by economy.
+- Schemas in `action_schemas.json`, C# validation, Lua executors, PAK v113, luaparse + countlocals (200/200).
 
-## Note: throw заморожен, но не списан
+## Note: throw is frozen, but not written off
 
-Можно вернуться к вопросу броска в будущем — как отдельный тикет. Перспективные направления:
+The throw question can be revisited in the future — as a separate ticket. Promising directions:
 
-- **Client-инициированный поток**: понять, как Ecl-клиент стартует Throw из инвентаря (подъём предмета в руку
-  → каст), и повторить его серверно (AnubisPickUpItem / AnubisMoveItem до ItemStartRequests).
-- **Live-захват**: при живом ручном броске игрока снять снапшот очередей/структуры запроса, чтобы сравнить
-  с синтетическим (в v0.8.78–79 снятие есть только для наших запросов).
-- **`EsvSpellCastChangeStoryActionId`**: движок сам присваивает StoryActionId живым кастам при обработке;
-  для честного Item-каста ID так и остался 0 — возможно, требуется предварительная инициализация
-  ActionOriginator/StoryActionId, а не только поле в запросе.
+- **Client-initiated flow**: understand how the Ecl client starts a Throw from the inventory (picking the item up
+  into the hand → cast), and replicate it server-side (AnubisPickUpItem / AnubisMoveItem before ItemStartRequests).
+- **Live capture**: during a live manual throw by the player, take a snapshot of the queues/request structure to compare
+  with the synthetic one (in v0.8.78–79 the capture exists only for our requests).
+- **`EsvSpellCastChangeStoryActionId`**: the engine assigns the StoryActionId to live casts itself during processing;
+  for an honest Item-cast the ID stayed 0 — maybe a preliminary initialization of
+  ActionOriginator/StoryActionId is required, not just a field in the request.

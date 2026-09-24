@@ -8,7 +8,7 @@ Blocked by: bench (live game test scene)
 
 `executeBonusAction` (BG3Neuro.lua): the honest path (`ServerCastRequest`, `bonusAction=true`) deducts `BonusActionPoint` natively — bench-confirmed (snapshot BA 1.0 → 0.0). But when that path fails (hybrid counter hit, or `force_legacy`), the fallback is plain `Osi.UseSpell`, which per the v0.8.22 finding "ignores resources" (`osiris` casts don't go through the economy).
 
-Result: under `force_legacy` / after N=3 failures, a bonus attack costs **0** BonusActionPoint, contradicting ticket 05's economy intent. The former empty `if usedWeaponSpell and not honestUsed then -- TODO(стенд)` block that was meant to hold the manual spend was removed as dead code; its intent is this ticket.
+Result: under `force_legacy` / after N=3 failures, a bonus attack costs **0** BonusActionPoint, contradicting ticket 05's economy intent. The former empty `if usedWeaponSpell and not honestUsed then -- TODO(bench)` block (RU→EN translation of an inline Lua comment; the original placeholder was a Russian word for "test bench") that was meant to hold the manual spend was removed as dead code; its intent is this ticket.
 
 Note: AP has a clean single-actor writer (`Osi.AddActionPoints(actor, -1)`, bench-proven v0.8.22); BA does **not** — `research/06` found `Osi.TransferActionResource` doesn't exist and `PartyIncreaseActionResourceValue` has party semantics (risky). So this needs a bench to pick a single-actor BonusActionPoint writer before implementing.
 

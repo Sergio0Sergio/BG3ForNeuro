@@ -8,8 +8,8 @@ Blocked by: none
 
 `cast_spell "bless"` with `target_id=tav` (Shadowheart's turn, osiris queue):
 `result: success:true`, slot + AP spent natively — but the buff landed on
-**Shadowheart herself**, not on Tav. User confirmed: «каст прошел только на
-shadowheart. необходимо выбирать каждую цель bless».
+**Shadowheart herself**, not on Tav. User confirmed: "the cast went only onto
+Shadowheart; each bless target must be picked separately."
 
 Turns out it was not (only) the ticket-06 aim issue: the action contract has a
 **single** `target_id` field (dispatcher `executeCast`, `BG3Neuro.lua`), so

@@ -87,17 +87,17 @@ completes immediately with an actionable error.
 
 ## Fix implemented — v0.8.69 / PAK v112 (server-side, aged pending → settle on state emit)
 
-- `BG3NEURO_REST.pending` теперь хранит `{ id, clicked, snapHp, snapMax, snapFull, ts }`.
-- `BG3NEURO_REST.partyHpSnapshot()` — суммарное HP партии (`partySetOf` + `healthOf`).
-- `BG3NEURO_REST.settlePending()` (новый), вызывается из `writeStateFile` (каждый state-emit):
-  1. `clicked ~= true` + таймаут `settleTimeoutS=30` → `action_failed` "The rest click never reached the client UI".
-  2. `curHp > snapHp` → `success true / running false` (реальное исцеление).
-  3. `clicked==true` + `snapFull` → `success` (партия была полная, лечить нечего).
-  4. `clicked==true` + таймаут без heal → `action_failed` (v110/H4-симптом: overlay заблокировал команду).
-  5. иначе — ждём следующий state.
-- Больше нет `running=true` без завершения на любом сценарии short-rest.
-- Verified: `luaparse OK` оба файла; `active_local_max=200/200` (server) — лимит не превышен; клиент 65/200 (версия `0.8.69` синхронизирована, логика клиента не менялась).
-- PAK `BG3Neuro.v112.pak` собран (MD5 `8a11e178675cbc1a59f916a1bd2bd8ab`), **установлен** (game closed,
+- `BG3NEURO_REST.pending` now stores `{ id, clicked, snapHp, snapMax, snapFull, ts }`.
+- `BG3NEURO_REST.partyHpSnapshot()` — total party HP (`partySetOf` + `healthOf`).
+- `BG3NEURO_REST.settlePending()` (new), called from `writeStateFile` (on each state-emit):
+  1. `clicked ~= true` + timeout `settleTimeoutS=30` → `action_failed` "The rest click never reached the client UI".
+  2. `curHp > snapHp` → `success true / running false` (real healing).
+  3. `clicked==true` + `snapFull` → `success` (the party was full, nothing to heal).
+  4. `clicked==true` + timeout without heal → `action_failed` (v110/H4 symptom: the overlay blocked the command).
+  5. otherwise — wait for the next state.
+- No more `running=true` without finalization on any short-rest scenario.
+- Verified: `luaparse OK` for both files; `active_local_max=200/200` (server) — the limit is not exceeded; client 65/200 (version `0.8.69` synchronized, client logic unchanged).
+- PAK `BG3Neuro.v112.pak` built (MD5 `8a11e178675cbc1a59f916a1bd2bd8ab`), **installed** (game closed,
   bak-v111 created, `modsettings.lsx` MD5 updated in both `ModuleShortDesc` nodes).
 
 ## Regression bench on v112 (2026-09-22, live stand) — PASS

@@ -10,10 +10,10 @@ Perception v1 accepted one known limitation — **P6**: the exploration B-gate i
 `Osi.HasLineOfSight(lead, target)` only (`BG3Neuro.lua:sightSees`), so a **stealthed or
 invisible NPC inside LOS is still emitted**. Live note (`issues/05-acceptance-and-bench.md:153`,
 checklist P6): the ambush at the gate leaked into `objects`. The suggested fix was deferred:
-"потенциальный фикс — `Osi.IsInvisible` — вне v1".
+"potential fix — `Osi.IsInvisible` — outside v1".
 
 Perception contract rev 2 §2 warns that `Osi.IsInvisible` is **not** a reliable status signal — in
-the ticket-02 probe it returned 1 for the whole non-rendered ambush ("скрыт от камеры/не открыт"),
+the ticket-02 probe it returned 1 for the whole non-rendered ambush ("hidden from camera/not revealed"),
 not for actually-invisible entities. So `IsInvisible` is **not** used as the gate; the engine's own
 visibility predicate (`brawl_Utils.lua:266 isVisible`) keys on **statuses** instead:
 

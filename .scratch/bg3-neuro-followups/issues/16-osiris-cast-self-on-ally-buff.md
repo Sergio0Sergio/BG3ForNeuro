@@ -4,12 +4,12 @@ Type: task (live bench) — **resolved: root cause + working fix found**
 Status: resolved (2026-09-18)
 Fix decision: use `force_flags` (or equivalent) for ally-targeted buff casts; see "Resolution".
 
-> **2026-09-21 (тикет 22): вывод усилен серверной истиной.** На чистом бою `stats_probe`
-> (raw StatusManager, не SE-события) подтвердил: GUIDANCE ложится на целевого союзника
-> при ВСЕХ комбинациях — мягкий набор + osiris (c16a), сетевые флаги soft (c20n) и жёсткий
-> osiris `Forced/Immediate` + `force_flags:true` (c23g2). «Иконка у кастера» — индикатор
-> концентрации, не носитель статуса (см. CONTEXT.md → Диагностические ловушки). Термин
-> «самокаст» в тикетах 16/22 окончательно закрыт.
+> **2026-09-21 (ticket 22): the finding was reinforced by server truth.** In a clean battle `stats_probe`
+> (raw StatusManager, not SE events) confirmed: GUIDANCE lands on the target ally
+> in ALL combinations — soft set + osiris (c16a), network soft flags (c20n), and hard
+> osiris `Forced/Immediate` + `force_flags:true` (c23g2). The "icon on the caster" is a concentration
+> indicator, not the status bearer (see CONTEXT.md → Diagnostic traps). The term
+> "self-cast" in tickets 16/22 is finally closed.
 
 ## Original finding (2026-09-18, v0.8.47 / PAK v053, gate scene, file bridge — no C# app)
 
