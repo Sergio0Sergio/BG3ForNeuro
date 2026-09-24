@@ -1,4 +1,4 @@
-# 04 — Гейтинг действий восприятием (честный отказ)
+# 04 — Gating actions by perception (honest refusal)
 
 Type: grilling
 Status: resolved
@@ -6,65 +6,65 @@ Blocked by: 03
 
 ## Question
 
-Определить, как восприятие гасит **действия** (решение Q6 = b), а не только эмиссию.
+Determine how perception gates **actions** (decision Q6 = b), not just emission.
 
-Подвопросы:
+Sub-questions:
 
-- **Какие действия** гейтятся: `cast_spell` (по цели), `attack_entity`, `move_to_target`/`move_to_entity`, `loot`, `interact_with`, `travel_to`? Что с действиями без цели (`end_turn`, `rest`)?
-- **Код и сообщение отказа**: имя (`no_perception`?) и текст в стиле существующих честных отказов (`no_spell_slot`, `no_action_point`, X1).
-- **Где барьер**: мод (авторитетный, ground truth) + роутер C# (зеркало по стейту для внятного сообщения до отправки). Разделение ответственности.
-- **Позиционный AoE**: точка вне восприятия, но по ней сущности — принять решение или явно отложить в «Not yet specified».
-- **Пограничье**: цель `known` (не `visible`) — действие разрешено или отказ? Партия всегда известна — не гейтится.
+- **Which actions** are gated: `cast_spell` (by target), `attack_entity`, `move_to_target`/`move_to_entity`, `loot`, `interact_with`, `travel_to`? What about targetless actions (`end_turn`, `rest`)?
+- **Refusal code and message**: the name (`no_perception`?) and the text in the style of the existing honest refusals (`no_spell_slot`, `no_action_point`, X1).
+- **Where the barrier sits**: the mod (authoritative, ground truth) + C# router (mirror over the state for a clear message before sending). Separation of responsibilities.
+- **Positional AoE**: a point outside perception but with entities on it — make a decision or explicitly defer to "Not yet specified".
+- **Borderline**: a `known` (not `visible`) target — action allowed or refused? The party is always known — not gated.
 
 ## Deliverable
 
-- Раздел контракта по гейтингу: список действий × правило; коды/сообщения; место проверки (мод/роутер).
-- Обновления/тикеты на C#-роутер, если нужны (создать дочерние тикеты, если спек уже позволяет).
+- Contract section on gating: the action × rule list; codes/messages; where the check happens (mod/router).
+- C# router updates/tickets if needed (create child tickets if the spec already allows).
 
 ## Verification
 
-- Для каждого гейтнутого действия живой сценарий отказа воспроизводим.
-- Отказ не ломает существующие успешные пути (регрессия честной экономики).
+- For every gated action a live refusal scenario is reproducible.
+- The refusal does not break existing successful paths (honest-economy regression).
 
 ## Claim (2026-09-20)
 
-Захвачен для сессии. План: 1) инвентаризация текущих гейтов в роутере C# и в моде, 2) матрица «действие × правило» под бинарную модель, 3) решение по коду отказа и разделению барьеров, 4) дочерний тикет на мод-слой.
+Captured for the session. Plan: 1) inventory of the current gates in the C# router and in the mod, 2) the "action × rule" matrix under the binary model, 3) decision on the refusal code and separation of barriers, 4) a child ticket for the mod layer.
 
 ## Answer
 
-**Решение: в бинарной модели восприятие уже гейтит действия на роутере; нужны только семантика сообщения и мод-слой.**
+**Decision: in the binary model perception already gates actions at the router; only the message semantics and the mod layer are needed.**
 
-### Что нашлось в коде
+### What was found in the code
 
-- Роутер C# **уже отклоняет** действие, ссылающееся на сущность, отсутствующую в эмитированном стейте (`TargetMissing`): `ValidateTarget` (move_to_target/attack_entity, `ActionRouter.cs:563`), `ValidateCastTarget` (cast_spell target_id, `:461`), `ValidateExplorationTarget` (move_to_entity/interact_with/loot, `:232`). В бинарной модели «в стейте ⇔ в поле зрения» — значит **перцепт-гейт на роутере уже выполнен по построению**.
-- `travel_to` использует `state.Regions` (`:286`) — кураторский disclosed-список вепоинтов, не сущности, гейтом восприятия не является.
-- Код `TargetMissing` — Channel A (мгновенный отказ до игры), сообщение переписано под правило восприятия: «…only act on entities the mod currently reports (party, objects, combatants) — they are exactly what you can see…» (стиль словаря §6.5, английский).
-- Новый `ErrorCode.NotPerceived` **не вводим** (решение юзера: переиспользовать `TargetMissing` — ноль изменения поведения, совместимость, минимум поверхности).
+- The C# router **already rejects** an action referencing an entity absent from the emitted state (`TargetMissing`): `ValidateTarget` (move_to_target/attack_entity, `ActionRouter.cs:563`), `ValidateCastTarget` (cast_spell target_id, `:461`), `ValidateExplorationTarget` (move_to_entity/interact_with/loot, `:232`). In the binary model "in state ⇔ in view" — meaning **the perception gate at the router is already done by construction**.
+- `travel_to` uses `state.Regions` (`:286`) — a curated disclosed list of waypoints, not entities, so it is not a perception gate.
+- The `TargetMissing` code — Channel A (instant refusal before the game), the message rewritten for the perception rule: "…only act on entities the mod currently reports (party, objects, combatants) — they are exactly what you can see…" (dictionary §6.5 style, English).
+- A new `ErrorCode.NotPerceived` is **not introduced** (user decision: reuse `TargetMissing` — zero behavior change, compatibility, minimal surface).
 
-### Матрица «действие × правило» (v1)
+### "Action × rule" matrix (v1)
 
-| Действие | Цель | Гейт восприятия (зеркало роутера) |
+| Action | Target | Perception gate (router mirror) |
 |---|---|---|
-| `attack_entity` | enemy | в `enemies` ростер (бой раскрывает всех) → иначе отказ |
-| `cast_spell` (+`target_id`) | enemy/ally | в `enemies` ∪ `allies` (party-баффы валидны, ловушка v0.8.56 §§16/18) → иначе отказ |
-| `move_to_target` | enemy/ally | в `enemies` ∪ `allies` → иначе отказ |
-| `move_to_entity` / `interact_with` / `loot` | object | в `objects` → иначе отказ |
-| `bonus_action` (main_target) | enemy | **мод** (роутер зеркала не имеет; в бою цель в ростере) → отказ мод-side в 04b |
-| `use_item` (цель) | enemy | **мод** (аналогично) → 04b |
-| `end_turn`, `rest`, реакция, диалог | нет | не гейтится |
-| `travel_to` | region | не гейтится — кураторский disclosed-список |
-| позиционный AoE (`position`/`coverage`) | точка | **не гейтится в v1**: ссылки на сущность нет; «слепой» AoE неудачлив, но не утечка знаний |
+| `attack_entity` | enemy | must be in the `enemies` roster (combat reveals everyone) → otherwise refusal |
+| `cast_spell` (+`target_id`) | enemy/ally | must be in `enemies` ∪ `allies` (party buffs are valid, trap v0.8.56 §§16/18) → otherwise refusal |
+| `move_to_target` | enemy/ally | must be in `enemies` ∪ `allies` → otherwise refusal |
+| `move_to_entity` / `interact_with` / `loot` | object | must be in `objects` → otherwise refusal |
+| `bonus_action` (main_target) | enemy | **mod** (the router has no mirror; in combat the target is in the roster) → mod-side refusal in 04b |
+| `use_item` (target) | enemy | **mod** (likewise) → 04b |
+| `end_turn`, `rest`, reaction, dialog | none | not gated |
+| `travel_to` | region | not gated — curated disclosed list |
+| positional AoE (`position`/`coverage`) | point | **not gated in v1**: no entity reference; a "blind" AoE is unlucky, not a knowledge leak |
 
-- **Партия (`allies`) никогда не гейтится** — всегда видна/известна. Это включает каст на своих и движение к своим.
-- **Пограничье «known (не visible)» снято по построению**: бинарная модель (тикет 03) — сущности либо в стейте (видна), либо нет; третьего состояния нет.
+- **The party (`allies`) is never gated** — always visible/known. This includes casting on allies and moving to allies.
+- **The "known (not visible)" borderline is removed by construction**: the binary model (ticket 03) — entities are either in the state (visible) or not; there is no third state.
 
-### Разделение барьеров
+### Separation of barriers
 
-1. **Роутер C# (Channel A, зеркало)** — главный UX-барьер: отказ сразу, без похода к игре, с внятным сообщением «не в поле зрения». Точность = эмитированный стейт. Уже реализован; изменения этой сессии = сообщение.
-2. **Мод (авторитетный)** — повторяет гейт на момент исполнения: цель должна быть в текущем эмиссионном наборе мода (партия ∪ emitted this tick) → иначе честный отказ. Защита от стейл-зеркала роутера и путей мимо стейта. **→ дочерний тикет 04b (Lua + стенд).**
-3. `feasible` (механика движка: дальность/LOS/статусы/AP) — как раньше, в моде, поверх перцепт-гейта.
+1. **C# router (Channel A, mirror)** — the main UX barrier: refusal immediately, without going to the game, with a clear "not in view" message. Accuracy = the emitted state. Already implemented; this session's change = the message.
+2. **Mod (authoritative)** — repeats the gate at execution time: the target must be in the mod's current emission set (party ∪ emitted this tick) → otherwise an honest refusal. Protection against a stale router mirror and paths that bypass the state. **→ child ticket 04b (Lua + bench).**
+3. `feasible` (engine mechanics: range/LOS/statuses/AP) — as before, in the mod, on top of the perception gate.
 
 ### Not yet specified
 
-- Позиционный AoE по невидимой точке: проверка «точка стоит в поле зрения» потребует B-модуль (камера/фог) — отложено; в v1 принимаем как есть.
-- `bonus_action`/`use_item` зеркало на роутере — если решим зеркалить, добавится в 04b по факту стенда мод-слоя.
+- Positional AoE on an invisible point: a "point is in view" check would require the B module (camera/fog) — deferred; in v1 we take it as is.
+- `bonus_action`/`use_item` router mirror — if we decide to mirror, it will be added to 04b based on the mod-layer bench results.

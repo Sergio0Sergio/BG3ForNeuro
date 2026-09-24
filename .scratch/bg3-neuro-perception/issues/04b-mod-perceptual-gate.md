@@ -1,63 +1,63 @@
-# 04b — Мод-side авторитетный перцепт-гейт (честный отказ на исполнении)
+# 04b — Mod-side authoritative perception gate (honest refusal at execution)
 
 Type: implementation
 Status: resolved
-Blocked by: 04, 03 (контракт)
+Blocked by: 04, 03 (contract)
 
 ## Problem
 
-Роутер C# гейтит цель по эмитированному стейту (зеркало, тикет 04). Но между валидацией
-и исполнением мир меняется (цель ушла из поля зрения, персонаж умер/скрылся) — стейл-зеркало
-может пропустить действие, которое игрок физически не видел на момент исполнения. Плюс
-`bonus_action`/`use_item` роутер вовсе не зеркалит по цели. Нужен авторитетный гейт в моде.
+The C# router gates the target against the emitted state (mirror, ticket 04). But between validation
+and execution the world changes (the target left the field of view, the character died/stealthed) — a stale mirror
+may let through an action the player physically did not see at execution time. In addition, the
+`bonus_action`/`use_item` router does not mirror by target at all. An authoritative gate in the mod is needed.
 
 ## Task
 
-- В моде вести актуальный перцепт-набор: `party_guids ∪ emitted-this-tick` (эмитированные
-  сущности уже известны — тот же набор, что пишется в стейт).
-- Перед исполнением action с целью-сущностью проверять цель по перцепт-набору; при отсутствии —
-  честный отказ `action_failed` + `no_perception` + English detail («target not in current
-  perception set — it may be out of view; only act on entities the state reports»).
-- Не гейтить: действия без цели (`end_turn`, `rest`, `travel_to`), позиционный AoE (тикет 04).
-- Партия не гейтится (всегда в наборе).
-- Не ломать `feasible`-честные отказы (no_spell_slot/no_action_point и т.п.) — порядок проверок:
-  перцепт-гейт → существующие честные отказы → исполнение.
+- Maintain a current perception set in the mod: `party_guids ∪ emitted-this-tick` (the emitted
+  entities are already known — the same set that is written into the state).
+- Before executing an action with an entity target, check the target against the perception set; when absent —
+  an honest refusal `action_failed` + `no_perception` + English detail ("target not in current
+  perception set — it may be out of view; only act on entities the state reports").
+- Do not gate: targetless actions (`end_turn`, `rest`, `travel_to`), positional AoE (ticket 04).
+- The party is not gated (always in the set).
+- Do not break `feasible` honest refusals (no_spell_slot/no_action_point and the like) — check order:
+  perception gate → existing honest refusals → execution.
 
 ## Deliverable
 
-- Lua-правки `mod/BG3Neuro/BG3Neuro.lua` (целевые хендлеры: attack, cast_spell, move,
+- Lua edits to `mod/BG3Neuro/BG3Neuro.lua` (target handlers: attack, cast_spell, move,
   interact, loot, bonus_action, use_item).
-- Живой сценарий отказа на стенде: цель в стейте исчезает с экрана → действие из кэша
-  отклонено `no_perception`.
-- Регрессия: существующие успешные пути и честные отказы `feasible` не сломаны.
+- Live refusal scenario on the bench: a target in the state disappears from screen → a cached action
+  rejected with `no_perception`.
+- Regression: existing successful paths and `feasible` honest refusals are not broken.
 
 ## Verification
 
-- Стенд: серия inject-тестов «цель видна → ок», «цель вне кадра → no_perception», «партия → ок».
-- Сверка с роутерным `TargetMissing`: оба слоя в одном сценарии отвечают согласованно.
+- Bench: a series of inject tests "target visible → ok", "target off-screen → no_perception", "party → ok".
+- Cross-check with the router `TargetMissing`: both layers answer consistently in one scenario.
 
-## Результат (v082, 2026-09-20)
+## Result (v082, 2026-09-20)
 
-**Реализовано в BG3Neuro.lua (04b):**
-- `refreshPerceptionSet(state)` (глобальные `perceptionActors`/`perceptionObjects`) — пересобирает
-  перцепт-набор из full-билда: аллеи + враги → `actors`, эмитированные object'ы → `objects`,
-  плюс `partyAvatars()` всегда в обоих (партия не гейтится). Вызывается из `buildExplorationState`
-  (каждый тик, до `return state`) и из `captureCombatState` (полный combat-билд перед записью).
-- Гейт в `executeAction` (после парсинга data, ПЕРЕД dispatch): зеркало роутерной матрицы тикета 04:
+**Implemented in BG3Neuro.lua (04b):**
+- `refreshPerceptionSet(state)` (globals `perceptionActors`/`perceptionObjects`) — rebuilds
+  the perception set from the full build: allies + enemies → `actors`, emitted objects → `objects`,
+  plus `partyAvatars()` always in both (the party is not gated). Called from `buildExplorationState`
+  (every tick, before `return state`) and from `captureCombatState` (full combat build before writing).
+- Gate in `executeAction` (after parsing data, BEFORE dispatch): mirror of the router matrix of ticket 04:
   `attack_entity/cast_spell/move_to_target/bonus_action/use_item` → `actors`;
-  `move_to_entity/interact_with/loot` → `objects`. Без цели и позиционный AoE — не гейтится.
-  Отказ: `action_failed` + `no_perception: target not in current perception set ...`.
-  Структура PERCEPTION_GATE/target — внутри `do..end` функции (не топ-локальные — бережём лимит 200).
-  Символы перцепта глобальные (как `build*`), чтобы не упираться в лимит 200 local merge.
-- Порядок: перцепт-гейт → существующие честные отказы (canAct/AP/слоты/Movement) → исполнение.
+  `move_to_entity/interact_with/loot` → `objects`. Targetless and positional AoE — not gated.
+  Refusal: `action_failed` + `no_perception: target not in current perception set ...`.
+  The PERCEPTION_GATE/target structure — inside the function's `do..end` (not top-level locals — we preserve the 200 limit).
+  Perception symbols are global (like `build*`), so as not to hit the 200-local merge limit.
+- Order: perception gate → existing honest refusals (canAct/AP/slots/Movement) → execution.
 
-**Стендовая верификация (эксплорейшн у ворот, v082, серийные inject'ы):**
-- R1 `move_to_entity sword_spider_1` (видимый object) → `running=true` (прошёл objects-гейт).
-- R2 `cast_spell firebolt` на `goblin_tracker_1` (видимый, но objects-категория; cast=actors) →
-  `no_perception` (зеркалит роутер: cast только enemies∪allies).
-- R3 `cast_spell guidance` на `tav` (член партии) → перцепт ПРОШЁЛ, далее честный
-  `not_caster_turn` (порядок «гейт → честный отказ» подтверждён).
-- R4 `move_to_entity` на guid гоблина за баррикадой (LOS=0, не эмитирован) → `no_perception`.
-- SE-лог без Lua-ошибок (FAILED/attempt отсутствуют).
+**Bench verification (exploration at the gate, v082, serial injects):**
+- R1 `move_to_entity sword_spider_1` (visible object) → `running=true` (passed the objects gate).
+- R2 `cast_spell firebolt` on `goblin_tracker_1` (visible, but objects category; cast=actors) →
+  `no_perception` (mirrors the router: cast only for enemies∪allies).
+- R3 `cast_spell guidance` on `tav` (party member) → perception PASSED, then the honest
+  `not_caster_turn` (the "gate → honest refusal" order confirmed).
+- R4 `move_to_entity` on the guid of a goblin behind the barricade (LOS=0, not emitted) → `no_perception`.
+- SE log without Lua errors (no FAILED/attempt).
 
-Локальные 199 (≤200 лимит merge), parse OK, PAK v082 установлен (MD5 1F0F921033F074BBBE24E83CD2AE0F50).
+Locals 199 (≤200 merge limit), parse OK, PAK v082 installed (MD5 1F0F921033F074BBBE24E83CD2AE0F50).

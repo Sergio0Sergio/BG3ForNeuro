@@ -1,135 +1,135 @@
-# Спек: контракт честного восприятия (draft)
+# Spec: contract of fair perception (draft)
 
-Status: draft (тикет 03, `bg3-neuro-perception`)
-Date: 2026-09-20 (rev 2 — бинарная модель, см. `issues/03-perception-contract.md`)
-Replaces: хардкод `seen_by = "player"` (`BG3Neuro.lua:2743`), бесфильтровый `scanNearbyObjects`, боевой сбор без восприятия.
+Status: draft (ticket 03, `bg3-neuro-perception`)
+Date: 2026-09-20 (rev 2 — binary model, see `issues/03-perception-contract.md`)
+Replaces: hardcoded `seen_by = "player"` (`BG3Neuro.lua:2743`), unfiltered `scanNearbyObjects`, combat collection without perception.
 
-## 0. Зачем
+## 0. Why
 
-Neuro получает состояние игры и действует по нему. Сейчас мод эмитит «всё в радиусе», включая то, что игрок не видит и ещё не должен знать (засада у ворот лежала в `objects` до кат-сцены). Контракт определяет **что эмитится** и **по какому праву**.
+Neuro receives the game state and acts on it. Currently the mod emits «everything in radius», including what the player does not see and should not know yet (the gate ambush lay in `objects` before the cutscene). The contract defines **what is emitted** and **by what right**.
 
-## 1. Два сенсора под две функции (решение тикета 02)
+## 1. Two sensors for two functions (decision of ticket 02)
 
-| | `visible` — эмиссия | `feasible` — гейты действий |
+| | `visible` — emission | `feasible` — action gates |
 |---|---|---|
-| Вопрос | «видит ли игрок на экране» | «даёт ли движок выполнить действие по этой цели» |
-| Сенсор | **B — глаза игрока**: камера/фог (фрустум + открытая зона + локальная окклюзия) | **A — механика движка**: `CanSee`/`HasLineOfSight`/статусы (скрытность, невидимость, ИИ-композиция `brawl_Utils.isVisible`) |
-| Кто потребляет | эмиттер состояния | роутер экшенов (тикеты 04–05) |
+| Question | «does the player see on the screen» | «does the engine allow the action on this target» |
+| Sensor | **B — the player's eyes**: camera/fog (frustum + open area + local occlusion) | **A — engine mechanics**: `CanSee`/`HasLineOfSight`/statuses (stealth, invisibility, AI composition `brawl_Utils.isVisible`) |
+| Who consumes | state emitter | action router (tickets 04–05) |
 
-Развилка из тикета 02: **эмиссия** судит по правде игрока (B), **экшены** — по правде движка (A). A не может заменить B (движок механически «видит» гоблинов сквозь открытую улицу), B не может заменить A (движок решает выполнимость, камера — нет).
+The fork from ticket 02: **emission** judges by the player's truth (B), **actions** — by the engine's truth (A). A cannot replace B (the engine mechanically «sees» goblins through the open street), B cannot replace A (the engine decides feasibility, the camera does not).
 
-## 2. Эмиссионный гейт — бинарный (решение: без памяти)
+## 2. Emission gate — binary (decision: without memory)
 
-**«Виден, значит виден. Не виден — значит не виден.»** Никакой памяти и никаких стейл-позиций.
+**«Visible is visible. Not visible — means not visible.»** No memory and no stale positions.
 
-- Сущность **на экране** (B-сенсор) → эмитится с **текущей истинной позицией**; поля `perception` в записи нет — видимость выражается самим фактом присутствия в `objects` (стенд `p2s4_front.json`).
-- Сущность **не на экране** → **не эмитится вообще**. Нет ни факта её существования (в эксплорейшне), ни её позиции.
-- **Определение B = «движок реально отрисовал сущность игроку»**, а не «персонаж логически виден по статам/статусам». Следствия: невидимый вне боя персонаж не отрисовывается камерой → не эмитится (даже если стоит в центре кадра); `IsInvisible` как сигнал видимости НЕ используется (ловушка тикета 02 — возвращал «скрыт от камеры», не статус). Бой — отдельный случай, см. `## 4` (силуэт невидимого рисуется). **Реализовано (v2, v0.8.63, followup `24-invisible-b-gate.md`):** маскировка режется по сырым статусам `INVISIBLE`/`SNEAKING` (искл. `TRUESIGHT`/see-invisibility ≤9 м), не по `IsInvisible`.
+- An entity **on screen** (B-sensor) → emitted with the **current true position**; there is no `perception` field in the record — visibility is expressed by the very fact of presence in `objects` (bench `p2s4_front.json`).
+- An entity **not on screen** → **not emitted at all**. Neither the fact of its existence (in exploration), nor its position.
+- **Definition of B = «the engine actually rendered the entity to the player»**, not «the character is logically visible by stats/statuses». Consequences: an invisible out-of-combat character is not rendered by the camera → not emitted (even if standing in the center of the frame); `IsInvisible` as a visibility signal is NOT used (trap of ticket 02 — it returned «hidden from the camera», not a status). Combat is a separate case, see `## 4` (an invisible silhouette is drawn). **Implemented (v2, v0.8.63, followup `24-invisible-b-gate.md`):** masking is cut by the raw `INVISIBLE`/`SNEAKING` statuses (exc. `TRUESIGHT`/see-invisibility ≤9 m), not by `IsInvisible`.
 
-Почему без `known`/`last_seen`: стейл-координата — это позиция, где сущности уже нет; она вводит в заблуждение («маркер на пустом месте»), даёт повод действовать по несуществующей цели и против тезиса «не выдавать неизвестное». Память откладывается целиком (`known` не входит в v1, см. `map.md`).
+Why without `known`/`last_seen`: a stale coordinate is a position where the entity no longer is; it misleads («a marker at an empty spot»), gives a reason to act on a nonexistent target, and contradicts the thesis «do not reveal the unknown». Memory is deferred entirely (`known` is not in v1, see `map.md`).
 
-## 3. Схема JSON
+## 3. JSON schema
 
-В каждом эмитируемом объекте/комбатанте (кроме партии):
+In every emitted object/combatant (except the party):
 
 ```jsonc
 {
-  "alias": "..."   // видимость = факт присутствия; поля perception/perception_reason НЕ эмитятся
+  "alias": "..."   // visibility = the fact of presence; fields perception/perception_reason are NOT emitted
 }
 ```
 
-- Полей `perception`/`perception_reason` **в состоянии нет** (rev2, реализация v0.8.62+): контракт **эмиссия = видимость**; значений `known`/`unknown`/`visible` в v1 не существует.
-- `seen_by` из прежней схемы **убирается** (это и была «ложь»). Продакшен-C# его не читает (проверено: только фикстура теста `StateSerializerTests.cs:241`); фикстуру обновить.
-- **Партия**: члены отряда не проходят фильтр восприятия, всегда эмитятся (текущая позиция).
-- Координаты всех эмитированных сущностей — **текущие истинные**; стейл-координат в протоколе нет по построению.
-- Диагностика «какой сигнал дал verdict» (`cansee`/`los`/`frustum`/`fog`) планировалась как `perception_reason`, но **не эмитится**; при необходимости вернётся отдельным полем вне контракта App.
+- Fields `perception`/`perception_reason` are **absent from the state** (rev2, implementation v0.8.62+): the contract **emission = visibility**; the values `known`/`unknown`/`visible` do not exist in v1.
+- `seen_by` from the old schema is **removed** (it was the «lie»). Production C# does not read it (verified: only the test fixture `StateSerializerTests.cs:241`); update the fixture.
+- **Party**: party members do not pass the perception filter, always emitted (current position).
+- Coordinates of all emitted entities — **current true**; stale coordinates are absent from the protocol by construction.
+- The diagnostics «which signal gave the verdict» (`cansee`/`los`/`frustum`/`fog`) was planned as `perception_reason`, but is **not emitted**; if needed it will return as a separate field outside the App contract.
 
-## 4. Правила эмиссии по режимам
+## 4. Emission rules by modes
 
-**Эксплорейшн (включая до кат-сцены):**
-- эмитится только сущность на экране (B-сенсор), с текущей позицией;
-- всё остальное — вообще не в состоянии (ни `objects`, ни `enemies`);
-- «партия всегда известна» — единственное исключение (allies всегда на месте).
+**Exploration (including before a cutscene):**
+- only an on-screen entity is emitted (B-sensor), with the current position;
+- everything else — not in the state at all (neither `objects` nor `enemies`);
+- «the party is always known» — the only exception (allies are always in place).
 
-**Бой:**
-- участники боя **всегда эмитятся** в `state.enemies`: игра сама раскрывает их игроку — порядок инициативы и тактическая карта показывают любого участника боя. То есть в бою B-гейт отключается по построению: «видимость» боя даёт механика UI, а не камера.
-- позиции участников — текущие истинные (на тактической карте они видимы игроку).
-- **Невидимость в бою не скрывает позицию:** BG3 отрисовывает невидимого участника мерцающим полупрозрачным силуэтом на его истинном месте (можно накрыть AoE; атака снимает невидимость). Такие участники эмитятся как все — позиция истинная (поля `perception` нет, эмиссия = факт присутствия). Статус невидимости НЕ понижает эмиссию в бою.
-- не-участники — по эксплорейшн-правилам (`## 4` эксплорейшн).
-- `feasible` (A-сенсор) в бою считает выполнимость действий независимо от B.
+**Combat:**
+- combat participants are **always emitted** in `state.enemies`: the game itself reveals them to the player — the initiative order and the tactical map show any combat participant. That is, in combat the B-gate is disabled by construction: combat «visibility» is given by the UI mechanics, not the camera.
+- positions of participants — current true (they are visible to the player on the tactical map).
+- **Invisibility in combat does not hide the position:** BG3 renders an invisible participant as a flickering semi-transparent silhouette at its true location (can be covered with AoE; an attack removes invisibility). Such participants are emitted like everyone else — position is true (there is no `perception` field, emission = the fact of presence). The invisibility status does NOT lower emission in combat.
+- non-participants — per the exploration rules (`## 4` exploration).
+- `feasible` (A-sensor) in combat computes the feasibility of actions regardless of B.
 
-Обоснование: амбиш-горнило из тикета 02 — засада вне экрана в эксплорейшне не эмитится вообще; начавшийся бой не теряет участников, потому что игрок физически видит их в порядке хода и на карте. Снимок s01→s02 подтверждает: участники появляются ровно на входе в `CombatState`.
+Rationale: the ambush crucible from ticket 02 — an offscreen ambush in exploration is not emitted at all; a started combat does not lose participants, because the player physically sees them in the turn order and on the map. Snapshot s01→s02 confirms: participants appear exactly at the entry into `CombatState`.
 
-## 5. Память
+## 5. Memory
 
-В v1 — **нет**. Никакого `known`/`last_seen`/ресета сцен. Стейт каждого тика — только то, что видно сейчас. Следствия:
+In v1 — **none**. No `known`/`last_seen`/scene reset. The state of each tick is only what is visible now. Consequences:
 
-- сущность, вышедшая с экрана, исчезает из состояния на следующем тике (если не участник боя);
-- сущность, вернувшаяся на экран, появляется снова — с актуальными данными;
-- никаких ресетов локаций/загрузок для восприятия не требуется (память — пустое множество).
+- an entity that left the screen disappears from the state on the next tick (if not a combat participant);
+- an entity that returned to the screen appears again — with actual data;
+- no location/load resets are required for perception (memory is an empty set).
 
-## 6. Охват сущностей
+## 6. Entity coverage
 
-| Тип | Эмитится? | Примечание |
+| Type | Emitted? | Note |
 |---|---|---|
-| Партия | да, всегда | исключение из гейта, текущая позиция |
-| Allies-NPC (в бою/роли) | по B-гейту / участник боя | участники боя — всегда |
-| Враги (из `state.enemies`) | по боевым правилам `## 4` | участники боя — всегда |
-| NPC вне боя (эксплорейшн-объекты) | по B-гейту | — |
-| Трупы | по B-гейту | вне экрана не эмитятся |
-| Контейнеры/ящики | по B-гейту | — |
-| Двери | по B-гейту | — |
-| Сущности без позиции/компонента | не эмитятся | существующая фильтрация типа сохраняется |
+| Party | yes, always | exception from the gate, current position |
+| Allies-NPC (in combat/roles) | by B-gate / combat participant | combat participants — always |
+| Enemies (from `state.enemies`) | per the combat rules of `## 4` | combat participants — always |
+| NPCs out of combat (exploration objects) | by B-gate | — |
+| Corpses | by B-gate | not emitted offscreen |
+| Containers/boxes | by B-gate | — |
+| Doors | by B-gate | — |
+| Entities without a position/component | not emitted | the existing per-type filtering persists |
 
-## 7. Ограничения сенсора B (что может не работать — задокументировано)
+## 7. Limitations of the B sensor (what may not work — documented)
 
-- Правду даёт B-сенсор; конкретная реализация B **не является частью контракта**:
-  - целевая: фрустум камеры + открытая туманом зона + локальная окклюзия (Client-Lua);
-  - фолбэк: фрустум + `HasLineOfSight` от камеры (документированное приближение — те же дыры, что у `HasLineOfSight`: колонны/тонкие баррикады);
-  - если и фолбэк невозможен: слепая зона фиксируется, контракт не меняется.
-- `visible` определяется раз в тик эмиссии; сущность, мелькнувшая на экране меньше тика, не гарантируется.
+- The truth is given by the B-sensor; the particular implementation of B **is not part of the contract**:
+  - target: camera frustum + fog-opened area + local occlusion (Client-Lua);
+  - fallback: frustum + `HasLineOfSight` from the camera (documented approximation — the same holes `HasLineOfSight` has: columns/thin barricades);
+  - if even the fallback is impossible: the blind zone is recorded, the contract does not change.
+- `visible` is determined once per emission tick; an entity that flashed on screen for less than a tick is not guaranteed.
 
-## 8. Открытые вопросы для стенда (research-checklist, тикет 03) — закрыто
+## 8. Open questions for the bench (research-checklist, ticket 03) — closed
 
-1. Client-Lua (`BG3NeuroClient.lua`, `Ext.Client`): камера и «открытая туманом зона» — **ЗАКРЫТО (отрицательно, по исходнику bg3se v32):** во всём экстендере нет ни одной читающей `GetCameraPosition`, либы `Client` в `Lua/Libs` нет, `Ext.World`-камеры тоже нет → камера-фрустум невозможна по построению (слепая зона «перспектива камеры»); Reveal/FogOfWar-запросов в Extender/Osi нет → слепая зона «карта раскрыта, но вне кадра». Итоговая реализация B: `HasLineOfSight(лидер, кандидат)` + статус-гейт `INVISIBLE`/`SNEAKING` (искл. `TRUESIGHT`/see-invisibility ≤9 м) — v0.8.63, followup `24-invisible-b-gate.md`. Research: `research/02-b-sensor-api-probe.md`.
-2. `Osi.StartSightEvents` (партия) в покое — **ЗАКРЫТО (зонд v076):** эффекта нет, `Osi.CanSee` корректен без событий; для A/`feasible` вне боя события не нужны.
-3. Дебаунс-мерцание на границе экрана — **СНЯТ:** экранной границы в эмиссии нет (нет фрустума камеры); единственная граница — LOS-порог `EXPLORE_MAX_DISTANCE`, флаппинг там уже под двоичной эмиссией; отдельный дебаунс в v1 не вводим.
-4. «Бой раскрывает всех участников» — **ПОДТВЕРЖДЕНО (приёмка P4, v082 + `reg0_combat`)**: участники боя всегда в `state.enemies`, включая заэкранных и невидимый-силуэт.
+1. Client-Lua (`BG3NeuroClient.lua`, `Ext.Client`): camera and the «fog-opened area» — **CLOSED (negatively, by the bg3se v32 source):** in the entire extender there is not a single `GetCameraPosition` reader, the `Client` lib is absent in `Lua/Libs`, there is no `Ext.World` camera either → the camera frustum is impossible by construction (blind zone «camera perspective»); no Reveal/FogOfWar requests in Extender/Osi → blind zone «map revealed, but offscreen». Final B implementation: `HasLineOfSight(leader, candidate)` + status gate `INVISIBLE`/`SNEAKING` (exc. `TRUESIGHT`/see-invisibility ≤9 m) — v0.8.63, followup `24-invisible-b-gate.md`. Research: `research/02-b-sensor-api-probe.md`.
+2. `Osi.StartSightEvents` (party) at rest — **CLOSED (probe v076):** no effect, `Osi.CanSee` is correct without events; events are not needed for A/`feasible` out of combat.
+3. Debounce flicker at the screen edge — **DROPPED:** there is no screen edge in emission (no camera frustum); the only boundary is the LOS threshold `EXPLORE_MAX_DISTANCE`, and flapping there is already under binary emission; no separate debounce in v1.
+4. «Combat reveals all participants» — **CONFIRMED (acceptance P4, v082 + `reg0_combat`)**: combat participants are always in `state.enemies`, including offscreen and invisible-silhouette ones.
 
-## 9. Гейтинг действий восприятием — «честный отказ» (тикет 04)
+## 9. Gating actions by perception — «honest refusal» (ticket 04)
 
-В бинарной модели **перцепт-гейт на роутере уже выполнен по построению**: роутер отклоняет действие,
-ссылающееся на сущность, отсутствующую в эмитированном стейте; «в стейте ⇔ в поле зрения».
+In the binary model, the **perception gate on the router is already done by construction**: the router rejects an action
+referring to an entity absent from the emitted state; «in the state ⇔ in the field of view».
 
-Матрица «действие × правило» (v1):
+The «action × rule» matrix (v1):
 
-| Действие | Кто гейтит | Правило |
+| Action | Who gates | Rule |
 |---|---|---|
-| `attack_entity` | роутер | цель в `enemies` (боевой ростер раскрывает всех) → иначе отказ |
-| `cast_spell` (`target_id`) | роутер | цель в `enemies` ∪ `allies` (парти-баффы валидны) → иначе отказ |
-| `move_to_target` | роутер | цель в `enemies` ∪ `allies` → иначе отказ |
-| `move_to_entity` / `interact_with` / `loot` | роутер | цель в `objects` → иначе отказ |
-| `bonus_action` / `use_item` (цель) | мод | зеркала на роутере нет; мод гейтит по своему перцепт-набору (тикет 04b) |
-| `end_turn`, `rest`, реакция, диалог | — | не гейтится (цели нет) |
-| `travel_to` | — | не гейтится: `regions` — кураторский disclosed-список вепоинтов |
-| позиционный AoE (`position`/`coverage`) | — | не гейтится в v1 (ссылки на сущность нет; «слепой» AoE неудачлив, но не утечка) |
+| `attack_entity` | router | target in `enemies` (the combat roster reveals everyone) → otherwise refusal |
+| `cast_spell` (`target_id`) | router | target in `enemies` ∪ `allies` (party buffs are valid) → otherwise refusal |
+| `move_to_target` | router | target in `enemies` ∪ `allies` → otherwise refusal |
+| `move_to_entity` / `interact_with` / `loot` | router | target in `objects` → otherwise refusal |
+| `bonus_action` / `use_item` (target) | mod | no mirror on the router; the mod gates by its own perception set (ticket 04b) |
+| `end_turn`, `rest`, reaction, dialogue | — | not gated (no target) |
+| `travel_to` | — | not gated: `regions` is a curated disclosed list of waypoints |
+| positional AoE (`position`/`coverage`) | — | not gated in v1 (no entity reference; a «blind» AoE is unlucky, but not a leak) |
 
-Правила:
-- Партия (`allies`) **никогда не гейтится** — всегда видна (включая каст/движение на своих).
-- Код отказа на роутере: `TargetMissing` (Channel A, мгновенно до игры); дефолтное сообщение объясняет
-  правило восприятия («это ровно то, что вы видите; цель может быть вне поля зрения или исчезла — сверьтесь со стейтом»).
-  Отдельного кода `no_perception` НЕ вводим (решение тикета 04): `TargetMissing` уже выполняет эту роль.
-- Разделение барьеров: **роутер** — зеркало по стейту (внятность, дешевизна, до игры);
-  **мод** — авторитетный перцепт-гейт на момент исполнения (партия ∪ emitted this tick), честный отказ поверх
-  `feasible` (дальность/LOS/статусы/AP). Мод-слой — тикет 04b (Lua + стенд), ниже по приоритету чем B/A research.
-- Not yet specified: «точка AoE в поле зрения» (понадобится B-модуль); зеркало `bonus_action`/`use_item` на роутере (если потребуется по итогам 04b).
-- `perception` в состоянии нужен: (а) App-UI для «это на экране»; (б) тестам честности; (в) диагностике.
-- Удаление `seen_by` → поправить `StateSerializerTests.cs:241`.
+Rules:
+- The party (`allies`) is **never gated** — always visible (incl. cast/move on own party members).
+- Refusal code on the router: `TargetMissing` (Channel A, instant, before the game); the default message explains
+  the perception rule («this is exactly what you see; the target may be out of sight or gone — check the state»).
+  A separate `no_perception` code is NOT introduced (decision of ticket 04): `TargetMissing` already fulfills this role.
+- Barrier split: **router** — a mirror over the state (clarity, cheapness, before the game);
+  **mod** — the authoritative perception gate at the moment of execution (party ∪ emitted this tick), honest refusal on top of
+  `feasible` (range/LOS/statuses/AP). Mod layer — ticket 04b (Lua + bench), lower priority than the B/A research.
+- Not yet specified: «an AoE point in the field of view» (a B module will be needed); a `bonus_action`/`use_item` mirror on the router (if needed per the results of 04b).
+- `perception` in the state is needed: (a) App-UI for «this is on screen»; (b) honesty tests; (c) diagnostics.
+- Removing `seen_by` → fix `StateSerializerTests.cs:241`.
 
-## 10. Связанные артефакты
+## 10. Related artifacts
 
-- Research сигналов: `research/01-perception-signal-api.md` (тикет 01).
-- Прототип/живой look: `issues/02-perception-emitter-prototype.md` + `artifacts/02-*` (тикет 02).
-- Зонд B-сенсора (план на игровой заход): `research/02-b-sensor-api-probe.md` (§8.1–3).
-- Контракт-тикет: `issues/03-perception-contract.md` (тут же зафиксировано решение о бинарной модели).
-- Гейты: `issues/04-action-gating.md` (+04b на мод-слой); приёмка: `issues/05-acceptance-and-bench.md`.
+- Signal research: `research/01-perception-signal-api.md` (ticket 01).
+- Prototype/live look: `issues/02-perception-emitter-prototype.md` + `artifacts/02-*` (ticket 02).
+- B-sensor probe (plan for the game session): `research/02-b-sensor-api-probe.md` (§8.1–3).
+- Contract ticket: `issues/03-perception-contract.md` (the binary-model decision is also fixed here).
+- Gates: `issues/04-action-gating.md` (+04b for the mod layer); acceptance: `issues/05-acceptance-and-bench.md`.

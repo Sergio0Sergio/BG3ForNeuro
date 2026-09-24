@@ -1,4 +1,4 @@
-# 03 — Контракт восприятия: семантика и схема состояния
+# 03 — Perception contract: semantics and state schema
 
 Type: grilling
 Status: resolved
@@ -6,57 +6,57 @@ Blocked by: 02
 
 ## Question
 
-Зафиксировать **контракт восприятия** — точную семантику трёхсостояния и форму, в которой оно едет в состоянии.
+Fix the **perception contract** — the exact semantics of the three-state and the form in which it travels in the state.
 
-**Согласованная основа (решение тикета 02 — развилка №1):** видимость — не один сигнал, а **два разных сенсора под две разные функции**:
+**Agreed basis (decision of ticket 02 — fork #1):** visibility is not one signal, but **two different sensors for two different functions**:
 
-- **`visible` (эмиссия) — глаза игрока (B):** камера/фог игрока. Фрустум камеры + открытая туманом зона + локальная окклюзия. Это то, что реально «на экране».
-- **`feasible` (гейты экшенов) — механика движка (A):** `CanSee`/`HasLineOfSight`/статусы — то, чем движок решает выполнимость действия (мочь прицелиться/атаковать/перейти). Окно в тикет `04-action-gating`.
+- **`visible` (emission) — the player's eyes (B):** player camera/fog. Camera frustum + fog-revealed zone + local occlusion. This is what is actually "on screen".
+- **`feasible` (action gates) — engine mechanics (A):** `CanSee`/`HasLineOfSight`/statuses — what the engine uses to decide the feasibility of an action (being able to aim/attack/move). Window into ticket `04-action-gating`.
 
-Подвопросы (решаются с опорой на прототип 02):
+Sub-questions (decided on the basis of prototype 02):
 
-- **Research-вопрос B (встроен в этот тикет, один стендовый заход):** что из камеры/фога доступно в client-Lua (`BG3NeuroClient.lua`, `Ext.Client`)? Есть ли позиция/матрица камеры и «открытая зона» (туман войны)? **Фолбэк:** недоступен фог → `visible` = фрустум + `HasLineOfSight` от камеры (документированное приближение); если и это невозможно — слепая зона фиксируется в контракте как известная.
-- **Research-вопрос A (тот же заход):** `Osi.StartSightEvents` на партию — оживляет ли `CanSee` в эксплорейшне-покое? (Нужно не для `visible`, а как подтверждение, что `feasible`-гейты A можно честно реализовать вне боя.)
-- **Семантика переходов**: `visible → known`; что фиксирует `last_seen` (позиция на последнем воспринятом тике); `known` в бою и в эксплорейшне — одинаковые правила или разные (в бою движок знает больше, чем видит игрок); кто что из B/A обслуживает.
-- **Схема JSON**: поле (`perception`), перечисление, форма `last_seen` (`{x,y}`/`{x,y,z}`), где лежит (в каждой сущности), как кодируется «партия всегда известна»; отдельно — поле/правило `feasible` для гейтов.
-- **Охват сущностей**: allies-NPC, трупы, контейнеры, двери — все несут `perception`?
-- **Память**: сцена как единица (решение Q10); что сбрасывает память (смена локации, загрузка, лонг-рест).
+- **Research question B (embedded in this ticket, one bench pass):** what of the camera/fog is available in client-Lua (`BG3NeuroClient.lua`, `Ext.Client`)? Is there a camera position/matrix and an "open zone" (fog of war)? **Fallback:** fog unavailable → `visible` = frustum + `HasLineOfSight` from the camera (documented approximation); if that is also impossible — the blind spot is fixed in the contract as a known one.
+- **Research question A (same pass):** `Osi.StartSightEvents` on the party — does it bring `CanSee` alive in idle exploration? (Needed not for `visible`, but as confirmation that the A `feasible` gates can be honestly implemented outside combat.)
+- **Transition semantics**: `visible → known`; what `last_seen` fixes (position on the last perceived tick); `known` in combat and in exploration — the same rules or different (in combat the engine knows more than the player sees); which of B/A serves what.
+- **JSON schema**: the field (`perception`), the enum, the form of `last_seen` (`{x,y}`/`{x,y,z}`), where it lives (in each entity), how "the party is always known" is encoded; separately — the `feasible` field/rule for gates.
+- **Entity coverage**: allies-NPCs, corpses, containers, doors — do all of them carry `perception`?
+- **Memory**: the scene as a unit (decision Q10); what resets memory (location change, load, long rest).
 
-### РЕШЕНО (2026-09-20, ревизия контракта) — бинарная модель, память вырезана
+### RESOLVED (2026-09-20, contract revision) — binary model, memory removed
 
-Юзер: «давай уберём `last_seen` позицию. Виден — значит виден. Не виден — значит не виден».
+User: "let's remove the `last_seen` position. Visible means visible. Not visible means not visible."
 
-- `known`/`last_seen` **не входят в v1**: стейл-координата — позиция, где сущности уже нет (маркер на пустом месте + повод действовать по несуществующей цели + утечка «мог бы быть рядом»).
-- Эмиссионный гейт **бинарный**: на экране (B-сенсор) → эмитить с текущей позицией (`perception="visible"`), не на экране → не эмитить вообще. Память пустое множество → ресетов сцен не нужно.
-- Бой: участников эмитим всегда (игра раскрывает их порядком хода и тактической картой — B-гейт по построению выключен), позиции текущие.
-- Уточнить в подвопросах: оставшиеся пункты переходов/`last_seen`/памяти ниже — сняты (сверено: схема, охват, память обновлены в `spec.md` rev 2).
-- Прочие пункты контракта (два сенсора, `feasible`, охват, фолбэк B, research-checklist) — как в `spec.md`.
+- `known`/`last_seen` **are not in v1**: a stale coordinate — a position where the entity no longer is (a marker on an empty spot + a reason to act on a nonexistent target + a "could have been nearby" leak).
+- The emission gate is **binary**: on screen (B sensor) → emit with the current position (`perception="visible"`), not on screen → do not emit at all. Memory is an empty set → no scene resets needed.
+- Combat: we always emit participants (the game reveals them via turn order and the tactical map — the B gate is off by construction), positions current.
+- To be clarified in the sub-questions: the remaining transition/`last_seen`/memory items below — removed (verified: schema, coverage, memory updated in `spec.md` rev 2).
+- Other contract items (two sensors, `feasible`, coverage, fallback B, research checklist) — as in `spec.md`.
 
 ## Deliverable
 
-- Раздел контракта в `spec.md` (`.scratch/bg3-neuro-perception/spec.md`, rev 2, бинарная модель): семантика, схема, правила по режимам, охват, фолбэк B, слепые зоны.
-- Результат research-захода (камера-фог доступность + `StartSightEvents`) — **отложен на следующий стенд** (см. `## 8` spec): контракт не зависит от результата, меняется реализация.
-- Обновление глоссария `CONTEXT.md` — сделано (термины `эмиссия`, `восприятие`, `visible`/`known`/`unknown`, `last_seen`, `партия`); `known`/`last_seen` в v1 вырезаны — термины остаются как отложенный словарь.
-- ADR: не требуется (бинарная модель — малообратимое упрощение в сторону честности; см. Answer ниже).
+- Contract section in `spec.md` (`.scratch/bg3-neuro-perception/spec.md`, rev 2, binary model): semantics, schema, per-mode rules, coverage, fallback B, blind spots.
+- Result of the research pass (camera-fog availability + `StartSightEvents`) — **deferred to the next bench** (see `## 8` of the spec): the contract does not depend on the result, only the implementation changes.
+- `CONTEXT.md` glossary update — done (terms `emission`, `perception`, `visible`/`known`/`unknown`, `last_seen`, `party`); `known`/`last_seen` removed from v1 — the terms remain as a deferred vocabulary.
+- ADR: not required (the binary model is a barely-reversible simplification toward honesty; see the Answer below).
 
 ## Verification
 
-- Схема однозначна: по ней можно реализовать эмиттер без дополнительных вопросов. ✓ (`spec.md` rev 2)
-- Edge-кейсы проговорены: сущность появилась и ушла из LOS за один тик; невидимая сущность в бою (силуэт) и вне боя (не отрисована); «механики знают, экран нет» → `perception` (B, эмиссия) vs `feasible` (A, гейты). ✓
-- Research-факты: записаны как checklist (`spec.md` `## 8`), прогон — следующий заход.
+- The schema is unambiguous: the emitter can be implemented from it without additional questions. ✓ (`spec.md` rev 2)
+- Edge cases covered: an entity appeared in and left LOS within one tick; an invisible entity in combat (silhouette) and outside combat (not rendered); "mechanics know, the screen does not" → `perception` (B, emission) vs `feasible` (A, gates). ✓
+- Research facts: recorded as a checklist (`spec.md` `## 8`), the run — the next pass.
 
 ## Claim (2026-09-20)
 
-Захвачен для сессии. План: 1) down-level research-заход в контракт (нет игры в этой сессии — бумажная часть), 2) проговорить/докрутить подвопросы контракта и схемы до драфта `spec`, 3) список «что проверить на стенде» как задача следующего захода (камера-фог в client-Lua, `StartSightEvents` в покое).
+Captured for the session. Plan: 1) down-level the research pass into the contract (no game this session — the paper part), 2) discuss/finalize the contract and schema sub-questions up to a `spec` draft, 3) a "what to verify on the bench" list as the task of the next pass (camera-fog in client-Lua, `StartSightEvents` idle).
 
 ## Answer
 
-**Контракт зафиксирован** (`spec.md` rev 2), тикет закрыт. Итог:
+**Contract fixed** (`spec.md` rev 2), the ticket is closed. Summary:
 
-1. **Два сенсора под две функции** (решение тикета 02): `visible`-эмиссия = B (камера/фог игрока), `feasible`-гейты = A (механика движка: `CanSee`/LOS/статусы).
-2. **Бинарный эмиссионный гейт, без памяти** (ревision сессии): `known`/`last_seen` не входят в v1. Виден → эмитится с текущей позицией; не виден → нет. Стейл-координаты невозможны по построению.
-3. **Определение B = «движок реально отрисовал игроку»**: невидимый вне боя не отрисовывается → не эмитится; `IsInvisible` как сигнал видимости не используется (ловушка 02).
-4. **Бой** — B-гейт выключен по построению: участники боя всегда в `state.enemies` (игра раскрывает их порядком хода + тактической картой), позиции истинные; невидимый участник — мерцающий силуэт на истинном месте, эмитится как `visible`.
-5. **`seen_by` удалён** (это и была «ложь»). Дополнение rev 2 на стенде (v0.8.62+, followup `23-remove-seen-by.md`): поле `perception` **тоже не эмитится** — бинарная эмиссия = сам факт присутствия в `state` (проверено на живой приёмке P2); координаты всегда актуальные.
-6. **Не-визуальные каналы** (шум/запах в эксплорейшне): честного сенсора в BG3SE нет → задокументированная слепая зона; потенциальное «присутствие без позиции» — не в v1.
-7. **Осталось на стенд** (`spec.md` `## 8`): доступность камера-фог в client-Lua (реализация B), `StartSightEvents` в покое (реализация A), дебаунс мерцания, подтверждение «бой раскрывает всех участников».
+1. **Two sensors for two functions** (decision of ticket 02): `visible` emission = B (player camera/fog), `feasible` gates = A (engine mechanics: `CanSee`/LOS/statuses).
+2. **Binary emission gate, no memory** (session revision): `known`/`last_seen` are not in v1. Visible → emitted with the current position; not visible → not. Stale coordinates are impossible by construction.
+3. **Definition of B = "the engine actually rendered it to the player"**: invisible outside combat is not rendered → not emitted; `IsInvisible` is not used as a visibility signal (trap of 02).
+4. **Combat** — the B gate is off by construction: combat participants are always in `state.enemies` (the game reveals them via turn order + the tactical map), positions true; an invisible participant — a shimmering silhouette at the true location, emitted as `visible`.
+5. **`seen_by` removed** (that was the "lie"). Rev 2 addition on the bench (v0.8.62+, followup `23-remove-seen-by.md`): the `perception` field is **also not emitted** — binary emission = the very fact of presence in `state` (verified in live acceptance P2); coordinates always current.
+6. **Non-visual channels** (noise/smell in exploration): there is no honest sensor in BG3SE → documented blind spot; potential "presence without position" — not in v1.
+7. **Left for the bench** (`spec.md` `## 8`): camera-fog availability in client-Lua (B implementation), `StartSightEvents` idle (A implementation), flicker debounce, confirmation that "combat reveals all participants".

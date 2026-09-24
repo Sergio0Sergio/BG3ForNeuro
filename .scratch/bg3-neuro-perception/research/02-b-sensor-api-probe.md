@@ -1,151 +1,150 @@
-# research/02 — B-сенсор: зонд камеры/фога (spec §8.1-3, тикеты 03/05)
+# research/02 — B-sensor: camera/fog probe (spec §8.1-3, tickets 03/05)
 
-**Статус:** закрыто. Итог: камера и фог в этом SE **недоступны** (доказано исходником bg3se v32 — ни одной
-читающей `GetCameraPosition`, либы `Client` в `Lua/Libs` нет, Reveal/FogOfWar-запросов нет). Принятая реализация B —
-`Osi.HasLineOfSight` + статус-гейт `INVISIBLE`/`SNEAKING` (слепая зона «перспектива камеры» задокументирована;
-спец §8 закрыт, P6 v2 в v0.8.63, followup `24-invisible-b-gate.md`).
-**Вопрос:** что доступно в Lua для «глаз игрока» (B): камера, «открытая туманом зона», окклюзия.
-**Правила прогона:** инжекты строго серийно (`drive_action.ps1`), `autopilot.enabled=false`,
-стенд = эксплорейшн у ворот (как `02-*`), после прогона — архив результата в `artifacts/`.
+**Status:** closed. Conclusion: camera and fog are **unavailable** in this SE (proven by the bg3se v32 source — not a single
+`GetCameraPosition` reader, the `Client` lib is not in `Lua/Libs`, no Reveal/FogOfWar queries). Adopted B implementation —
+`Osi.HasLineOfSight` + status gate `INVISIBLE`/`SNEAKING` (the «camera perspective» blind zone is documented;
+spec §8 closed, P6 v2 in v0.8.63, followup `24-invisible-b-gate.md`).
+**Question:** what is available in Lua for the «player's eyes» (B): camera, «fog-revealed area», occlusion.
+**Run rules:** injects strictly serial (`drive_action.ps1`), `autopilot.enabled=false`,
+bench = exploration at the gates (as `02-*`), after the run — archive the result in `artifacts/`.
 
-## ПРОМЕЖУТОЧНЫЕ ВЫВОДЫ (пробы v1–v3 в консоли + v3–v4 в PAK + исходники SE)
+## INTERMEDIATE CONCLUSIONS (probes v1–v3 in the console + v3–v4 in the PAK + SE sources)
 
-**Камеры в этом SE нет вообще — это закрытый вопрос (подтверждено исходником).**
+**There is no camera in this SE at all — closed question (confirmed by source).**
 
-- PAK-проба в реальном серверном контексте (v068/v069, «готово» 2026-09-20): `Ext.World` = nil,
-  `Osi.GetCameraPosition()`/`Osi.GetFogOfWarState()` не существуют.
-- PAK-проба в реальном клиентском контексте (v069, BG3NeuroClient.lua): `Ext.Client` = nil на всех
-  членах namespace (namespace отсутствует), `Ext.UI.GetCursorWorldPosition()` не существует.
-- Исходник `bg3se-src` (v32): **во всём BG3Extender нет ни одной `GetCameraPosition`**; в
-  `ScriptExtender/Lua/Libs/` НЕТ либы `Client` (список: ClientAudio, ClientIMGUI, ClientInput,
+- PAK probe in the real server context (v068/v069, «ready» 2026-09-20): `Ext.World` = nil,
+  `Osi.GetCameraPosition()`/`Osi.GetFogOfWarState()` do not exist.
+- PAK probe in the real client context (v069, BG3NeuroClient.lua): `Ext.Client` = nil on all
+  namespace members (namespace absent), `Ext.UI.GetCursorWorldPosition()` does not exist.
+- Source `bg3se-src` (v32): **in the whole BG3Extender there is not a single `GetCameraPosition`**; in
+  `ScriptExtender/Lua/Libs/` there is NO `Client` lib (list: ClientAudio, ClientIMGUI, ClientInput,
   ClientNet, ClientTemplate, Debug, Entity, IO, Json, JsonBinary, Level, Localization, Log, Math,
   Mod, Net, ServerNet, ServerTemplate, Stat*, StaticData, Stats, Table, Timer, Types, Utils, Vars).
-- `ClientInput.inl` не содержит Cursor/Mouse/Position код — позиция курсора не отдаётся.
-- В `Lua/Libs` и Осiрис нет Reveal/FogOfWar-запросов → «открытая туманом зона» НЕ добывается.
-  Слепая зона «карта раскрыта, но вне кадра» подтверждена как железная (для v1) — см. §2 ниже.
+- `ClientInput.inl` contains no Cursor/Mouse/Position code — the cursor position is not exposed.
+- There are no Reveal/FogOfWar queries in `Lua/Libs` or Osiris → the «fog-revealed area» CANNOT be obtained.
+  The «map revealed but off-frame» blind zone is confirmed as rock-solid (for v1) — see §2 below.
 
-**Что ЕСТЬ у движка (osi_signatures.txt v32):**
-- `Osi.CanSee(source, target)`, `Osi.CanSeeCached(source, target)` — «движковое зрение»
-  (фрустум персонажа или NoFogOfWar-флаг, зависит от режима) — кандидат №1 на B (и A/feasible).
-- `Osi.HasLineOfSight(source, target)` — окклюзия без конуса.
-- `Osi.StartSightEvents(character)` / `Osi.StopSightEvents(character)` — Один аргумент, в BG3
-  не список с флагами (в отличие от DOS2) — включает поток событий зрения для персонажа.
+**What the engine HAS (osi_signatures.txt v32):**
+- `Osi.CanSee(source, target)`, `Osi.CanSeeCached(source, target)` — «engine vision»
+  (character frustum or NoFogOfWar flag, depends on mode) — candidate №1 for B (and A/feasible).
+- `Osi.HasLineOfSight(source, target)` — occlusion without a cone.
+- `Osi.StartSightEvents(character)` / `Osi.StopSightEvents(character)` — One argument, in BG3
+  not a flag list (unlike DOS2) — turns on the sight event stream for a character.
 - `Osi.GetDistanceTo/GetDistanceToPosition`, `Osi.GetRotation`, `Osi.IteratePlayerCharacters`.
 
-### Зонд зрения v076 (финальный, эмпирически чистый): CanSee — рабочий оракул движкового зрения
+### Sight probe v076 (final, empirically clean): CanSee — a working oracle of engine vision
 
-Прогон 2026-09-20 (PG-стенд у ворот, exploration, партия 4, кандидаты 8):
-- **`Osi.CanSee(lead, x)` РАБОТАЕТ в эксплорейшне**: члены партии рядом (2-4 м)
-  → `val="1"`; удалённые сущности (449-1614 м, вне сцены) → `val="0"`. Окклюзия+фрустум живы.
-- **`Osi.StartSightEvents` на всех членах партии НЕ изменил результат** (`saw_CanSee` после
-  1.5 c совпал с первым замером 1/1/1 и 0/0/0...). События не нужны — CanSee корректен без них.
-- `Osi.HasLineOfSight` совпадает с CanSee на всех парах (в т.ч. дальних 0/0) — CanSee уже
-  включает окклюзию; LOS отдельно не требуется.
-- Симметрия: `CanSeeRev(m->lead)` для членов партии = 1/1/1; для дальней сущности один раз `nil`
-  вместо `0` (кэш/пустое заметка — несущественно). Поправка семантики: `1`/`0`/`nil` все валидны,
-  `nil` ⩵ «не видит».
+Run 2026-09-20 (PG bench at the gates, exploration, party of 4, 8 candidates):
+- **`Osi.CanSee(lead, x)` WORKS in exploration**: party members nearby (2-4 m)
+  → `val="1"`; distant entities (449-1614 m, off-scene) → `val="0"`. Occlusion+frustum are alive.
+- **`Osi.StartSightEvents` on all party members did NOT change the result** (`saw_CanSee` after
+  1.5 s matched the first measurement 1/1/1 and 0/0/0...). Events are not needed — CanSee is correct without them.
+- `Osi.HasLineOfSight` matches CanSee on all pairs (incl. distant 0/0) — CanSee already
+  includes occlusion; LOS is not separately needed.
+- Symmetry: `CanSeeRev(m->lead)` for party members = 1/1/1; for the distant entity, once `nil`
+  instead of `0` (cache/empty note — immaterial). Semantics correction: `1`/`0`/`nil` all valid,
+  `nil` ⩵ «does not see».
 
-**РЕШЕНИЕ по B (зафиксировано):**
-- B-сенсор = `Osi.HasLineOfSight(стабильный лидер, кандидат) == 1` (мемо-лидер = первый аватар
-  из `partyAvatars()`, при пустоте — первый из `partySetOf()`); члены партии всегда видимы.
-- `Osi.CanSee` **ОТКЛОНЁН для B**: в эксплорейшне `CanSee(lead, NPC)=0` у ВСЕХ NPC (замер
-  v079: 8 NPC на 11.1-15.2 м все 0), хотя `CanSee(lead, member)=1`. CanSee различает только
-  членов партии/алли — не оракул видимости объектов.
-- `HasLineOfSight` различает (замер v079: открытый NPC 11.1 м → 1; NPC за воротами/баррикадой
-  11.6-15.2 м → 0). Occupied-окклюзия работает; расстояние лидер→NPC берёт `distance3`.
-- Выходить только «не-окклюдированное движку в пределах EXPLORE_MAX_DISTANCE»: кандидат без
-  `LOS=1` (до 60 м) — не эмитится.
-- Деградация: при ошибке/недоступности LOS (первый-доступ пустой), кандидат НЕ выпиливается
-  (fallback = видим) — исключаем повторение «всё молчит» при сбое резолвера.
-- Слепые зоны остаются прежними (камера/фог/перспектива недоступны — §2): конус камеры НЕ
-  эмулируется (угол повернутости GetRotation не калиброван — не тянем в v1); видимость =
-  окклюзия от лидера партии, задокументировано.
-- `StartSightEvents` в проде НЕ вызываем (эффекта нет).
-- НЕДОПРОВЕРЕНО: калибровка фолбэка «конус+поворот GetRotation», если когда-то понадобится
-  перспектива — не блокер v1.
-- Камеры никакой: `CameraActivate`/`StartCameraSpline` — управление, не чтение.
+**DECISION on B (recorded):**
+- B-sensor = `Osi.HasLineOfSight(stable lead, candidate) == 1` (memo-lead = first avatar
+  from `partyAvatars()`, on emptiness — first from `partySetOf()`); party members always visible.
+- `Osi.CanSee` **REJECTED for B**: in exploration `CanSee(lead, NPC)=0` for ALL NPCs (measurement
+  v079: 8 NPCs at 11.1-15.2 m all 0), although `CanSee(lead, member)=1`. CanSee distinguishes only
+  party/ally members — not an oracle of object visibility.
+- `HasLineOfSight` distinguishes (measurement v079: open NPC 11.1 m → 1; NPC behind the gates/barricade
+  11.6-15.2 m → 0). Occupied-occlusion works; leader→NPC distance comes from `distance3`.
+- Emit only what is «not occluded to the engine within EXPLORE_MAX_DISTANCE»: a candidate without
+  `LOS=1` (up to 60 m) — not emitted.
+- Degradation: on LOS error/unavailability (first-available empty), the candidate is NOT dropped
+  (fallback = visible) — we avoid repeating «everything is silent» on a resolver failure.
+- Blind zones remain the same (camera/fog/perspective unavailable — §2): the camera cone is NOT
+  emulated (GetRotation yaw angle is not calibrated — don't pull into v1); visibility =
+  occlusion from the party lead, documented.
+- `StartSightEvents` is NOT called in production (no effect).
+- NOT VERIFIED: calibration of the «cone+GetRotation yaw» fallback, if perspective is ever needed — not a v1 blocker.
+- No camera at all: `CameraActivate`/`StartCameraSpline` — control, not reading.
 
-**Решения по итогу (спец §7/§8):**
-- Целевой вариант «фрустум от реальной камеры» НЕВОЗМОЖЕН — игру нельзя спросить, куда смотрит
-  камера. Это новая задокументированная слепая зона «перспектива камеры» (формально входит в
-  слепую зону «вне кадра»); контракт §7 это позволяет (research → новая слепая зона).
-- B переориентируется на **«зону видимости движка» через `Osi.CanSee`** (требует проверки в
-  эксплорейшне — зонд v070: живёт ли CanSee вне боя, с StartSightEvents и без; замер
-  симметрии/LOS/дистанции). Фолбэк если CanSee в покое мёртв — собственный конус+LOS от
-  «ведущего» члена партии (прокси «видит персонаж», дивергенция от камеры документируется).
+**Decisions from the outcome (spec §7/§8):**
+- The «real-camera frustum» target option is IMPOSSIBLE — the game cannot be asked where the
+  camera is looking. This is a new documented blind zone «camera perspective» (formally falls within
+  the «off-frame» blind zone); contract §7 allows this (research → new blind zone).
+- B is reoriented to the **«engine visibility zone» via `Osi.CanSee`** (requires verification in
+  exploration — probe v070: does CanSee survive outside combat, with StartSightEvents and without; measurement
+  of symmetry/LOS/distance). Fallback if CanSee is dead at rest — own cone+LOS from
+  the «lead» party member (proxy «the character sees», divergence from the camera is documented).
 
-## Промежуточные находки (пробы v1–v2, консоль SE, server-VM `S >>`)
+## Intermediate findings (probes v1–v2, SE console, server-VM `S >>`)
 
-- **`Ext.Client` в server-VM отсутствует полностью**: `attempt to index a nil value (field 'Client')`
-  на всех `Ext.Client.*` (GetCameraPosition/Rotation/FocusPosition/CursorWorldPosition/ActiveCamera/
-  ZoomLevel/IsZoomedToCharacter/MapReveal/LocalMapFogOfWarVisible/HeadCamera). Консоль у нас — серверная
-  (`S >>`), и **серверный Lua мода (где живёт эмиссия) до камеры через `Ext.Client` не дотянется**.
-  Вывод: либо серверный `Ext.World.*`-камера (зонд v3), либо B живёт в клиентской половине мода
-  (`BG3NeuroClient.lua` уже имеет `Ext.UI`/`Ext.Input`/NetChannel-мост на сервер).
-- **`Ext.IO.WriteFile` в API нет — мод пишет через `Ext.IO.SaveFile`** (`attempt to call a nil value
-  (field 'WriteFile')`; в моде: `pcall(Ext.IO.SaveFile, ...)`, BG3Neuro.lua:52,71,120,338,1828).
-  Относительный путь — корень `Script Extender\` (комментарий BG3Neuro.lua:21).
-- Консоль SE выполняет одну строку Lua напрямую после Enter (без `!lua` — такой команды нет;
-  `!` только для консольных команд). В v1–v2 длинная строка однажды обрезалась вставкой
-  (`'}' expected near <eof>`); сейчас добились полного выполнения.
-- Проба v3 (2026-09-20, игра жива, сейв загружен): `Ext.World.GetCameraPosition/Rotation/
-  FocusPosition/Yaw/Pitch` **в консольной Lua тоже nil** (`attempt to index a nil value (field 'World')`),
-  а **`Ext.IO.SaveFile` сработал** — файл `probe_b_sensor.json` реально записан в корень
-  `Script Extender\` (pcall = true). Вывод: **консоль SE — изолированная Lua с урезанным `Ext`
-  (IO/Json есть, Client/World нет), это НЕ исполнительный контекст мода.** `Ext.World` мод реально
-  вызывает только внутри `firstAttempt({Osi.GetCurrentMap, Osi.GetCurrentRegion, Ext.World.GetCurrentMap})`
-  (BG3Neuro.lua:2653-2663) — факт вызова из мода сам по себе не доказывает доступность в игровом
-  контексте. Авторитетные ответы даёт только проба **внутри PAK** (реальный серверный Lua мода
-  и/или клиентская половина `BG3NeuroClient.lua`, где ожидается живой `Ext.Client`).
+- **`Ext.Client` is completely absent in the server-VM**: `attempt to index a nil value (field 'Client')`
+  on all `Ext.Client.*` (GetCameraPosition/Rotation/FocusPosition/CursorWorldPosition/ActiveCamera/
+  ZoomLevel/IsZoomedToCharacter/MapReveal/LocalMapFogOfWarVisible/HeadCamera). Our console is the server
+  (`S >>`), and **the mod's server Lua (where emission lives) cannot reach the camera via `Ext.Client`**.
+  Takeaway: either the server `Ext.World.*` camera (probe v3), or B lives in the client half of the mod
+  (`BG3NeuroClient.lua` already has `Ext.UI`/`Ext.Input`/NetChannel bridge to the server).
+- **`Ext.IO.WriteFile` is not in the API — the mod writes via `Ext.IO.SaveFile`** (`attempt to call a nil value
+  (field 'WriteFile')`; in the mod: `pcall(Ext.IO.SaveFile, ...)`, BG3Neuro.lua:52,71,120,338,1828).
+  Relative path — root of `Script Extender\` (comment BG3Neuro.lua:21).
+- The SE console executes one line of Lua directly after Enter (no `!lua` — no such command;
+  `!` is only for console commands). In v1–v2 a long line was once truncated by pasting
+  (`'}' expected near <eof>`); now full execution is achieved.
+- Probe v3 (2026-09-20, game alive, save loaded): `Ext.World.GetCameraPosition/Rotation/
+  FocusPosition/Yaw/Pitch` **also nil in the console Lua** (`attempt to index a nil value (field 'World')`),
+  while **`Ext.IO.SaveFile` worked** — the file `probe_b_sensor.json` was really written to the root
+  of `Script Extender\` (pcall = true). Takeaway: **the SE console is an isolated Lua with a reduced `Ext`
+  (IO/Json present, Client/World absent), this is NOT the mod's execution context.** The mod really calls
+  `Ext.World` only inside `firstAttempt({Osi.GetCurrentMap, Osi.GetCurrentRegion, Ext.World.GetCurrentMap})`
+  (BG3Neuro.lua:2653-2663) — the fact of calling from the mod by itself does not prove availability in the game
+  context. Authoritative answers are given only by a probe **inside the PAK** (the mod's real server Lua
+  and/or the client half `BG3NeuroClient.lua`, where a live `Ext.Client` is expected).
 
-## Что зондируем
+## What we probe
 
-Проба идёт через временный зонд в моде (или прямой вызов в консоли BG3SE `!luaf`), для каждого
-кандидата: `pcall(fn)` → `ok/value`, ошибку пишем дословно. Ни одного кандидата не считаем
-существующим до подтверждения.
+The probe goes through a temporary probe in the mod (or a direct call in the BG3SE console `!luaf`), for each
+candidate: `pcall(fn)` → `ok/value`, the error is written verbatim. No candidate is considered
+existing before confirmation.
 
-### 1. Камера (серверный Lua, откуда эмиттит мод)
+### 1. Camera (server Lua, where the mod emits from)
 
-- Серверный кандидат (v3): `Ext.World.GetCameraPosition()`, `Ext.World.GetCameraRotation()`,
+- Server candidate (v3): `Ext.World.GetCameraPosition()`, `Ext.World.GetCameraRotation()`,
   `Ext.World.GetCameraFocusPosition()`, `Ext.World.GetCameraYaw()`, `Ext.World.GetCameraPitch()`.
-  (Мод уже работает с серверным `Ext.World.GetCurrentMap()` — namespace гарантирован.)
-- Клиентский кандидат (если серверного нет): `Ext.Client.*` из клиентской половины мода через
-  NetChannel (мост «диалог» уже существует) — но это дороже, вариант последний.
-- Итог: eye + forward/up → фрустум (горизонтальный/вертикальный FOV, дальность `EXPLORE_MAX_DISTANCE`).
+  (The mod already works with the server `Ext.World.GetCurrentMap()` — the namespace is guaranteed.)
+- Client candidate (if there is no server one): `Ext.Client.*` from the mod's client half via
+  NetChannel (the «dialogue» bridge already exists) — but that is costlier, the last resort.
+- Result: eye + forward/up → frustum (horizontal/vertical FOV, range `EXPLORE_MAX_DISTANCE`).
 
-### 2. «Открытая туманом зона» / раскрытие карты
+### 2. «Fog-revealed area» / map reveal
 
-- Сервер: `Osi.GetMapReveal(?)`, `Osi.IsMapRevealed(?)`, `DB_MapReveal` — ожидаем отсутствие/неполноту.
-- Клиент: `Ext.Client.GetMapReveal()`, `Ext.Client.GetRevealState()` — **подтверждено отсутствие**
-  (Ext.Client nil в серверной VM; клиентскую часть зонда не делаем, пока не решён пункт камеры).
-- **Решение по итогу:** если зону раскрытия добыть нельзя — фиксируем слепую зону «карта раскрыта,
-  но вне кадра» и **не** тянем в v1 (мини-карта показывает врагов только в поле зрения, углубляться дорого).
-  B остаётся на фрустуме+LOS (фолбэк спека §7). Если можно — сравниваем с фрустумом на пограничных
-  сущностях (за спиной/по краю).
+- Server: `Osi.GetMapReveal(?)`, `Osi.IsMapRevealed(?)`, `DB_MapReveal` — expect absence/incompleteness.
+- Client: `Ext.Client.GetMapReveal()`, `Ext.Client.GetRevealState()` — **absence confirmed**
+  (Ext.Client nil in the server VM; the client probe part is not done until the camera item is resolved).
+- **Decision from the outcome:** if the reveal area cannot be obtained — we record the blind zone «map revealed,
+  but off-frame» and do **not** pull it into v1 (the minimap shows enemies only in the field of view, digging deeper is expensive).
+  B stays on the frustum+LOS (spec §7 fallback). If possible — compare with the frustum on boundary
+  entities (behind/at the edge).
 
-### 3. Окклюзия (локальные препятствия)
+### 3. Occlusion (local obstacles)
 
-- `Osi.HasLineOfSight(cameraPos, ent)` от точки глаза (на каждом кандидате) — коллизия чистая,
-  без конуса. Дыры известны (колонны/тонкие баррикады) — фиксируем как «документированное
-  приближение» без доп. улучшений в v1.
+- `Osi.HasLineOfSight(cameraPos, ent)` from the eye point (on each candidate) — clean collision,
+  without a cone. Known holes (columns/thin barricades) — record as a «documented
+  approximation» without additional improvements in v1.
 
-### 4. `Osi.StartSightEvents` (реализация A / feasible в эксплорейшне)
+### 4. `Osi.StartSightEvents` (implementation A / feasible in exploration)
 
-- В покое (эксплорейшн, до боя) на партию: оживает ли `Osi.CanSee` после
+- At rest (exploration, before combat) on the party: does `Osi.CanSee` come alive after
   `Osi.StartSightEvents(characterGuidList, ...)`?
-- Да → `feasible` для экшенов можно строить движком и вне боя. Нет → `feasible` вне боя остаётся
-  на дальности+статусах (как сейчас), это уже задокументировано.
+- Yes → `feasible` for actions can be built by the engine even outside combat. No → out-of-combat `feasible` stays on
+  range+statuses (as now), this is already documented.
 
-### 5. Мерцание и стоимость
+### 5. Flicker and cost
 
-- Квантиль негативных тиков: сущность на границе экрана, ~20 тиков → сколько флапов «видна/не видна»;
-  порог дебаунса (>N негативных подряд → прятать).
-- Стоимость: замер среднего тика с фрустумом+LOS по всем кандидатам (N=5, медиана) — сверять с
-  бюджетом ≤20 мс (тикет 05). Кэш LOS (по позиции/тик) если выходит за бюджет.
+- Negative-tick quantile: an entity at the screen edge, ~20 ticks → how many «visible/not visible» flips;
+  debounce threshold (>N consecutive negatives → hide).
+- Cost: measure the average tick with frustum+LOS over all candidates (N=5, median) — compare against the
+  ≤20 ms budget (ticket 05). LOS cache (by position/tick) if over budget.
 
-## Результат заносится в
+## The result is recorded in
 
-- `artifacts/08-b-sensor-probe-*.json` (сырые результаты pcalls + замеры) → краткая сводка в этом файле
-  с пометкой «что доступно/недоступно, какой вариант B принят (целевой/фолбэк/слепая зона)».
-- Контракт (spec §7/§8) обновляется только если зонд направил на НОВУЮ слепую зону; принятая
-  реализация B на контракт не влияет (тикет 03: «контракт не зависит от research»).
+- `artifacts/08-b-sensor-probe-*.json` (raw pcall results + measurements) → brief summary in this file
+  marked «what is available/unavailable, which B variant was adopted (target/fallback/blind zone)».
+- The contract (spec §7/§8) is updated only if the probe pointed to a NEW blind zone; the adopted
+  B implementation does not affect the contract (ticket 03: «the contract does not depend on research»).

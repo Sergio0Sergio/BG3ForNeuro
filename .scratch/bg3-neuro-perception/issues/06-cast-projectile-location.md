@@ -1,219 +1,219 @@
-﻿# 06 - Снаряд ranged-каста уходит «у кастера», а не у цели
+﻿# 06 — Ranged cast projectile goes «at the caster», not at the target
 
 Type: prototype
 Status: resolved
 Blocked by: -
 
-## Symptom (2× на стенде, v083, 2026-09-20)
-`cast_spell "Sneak Attack (Ranged)"` с хода **origin_astarion** на сущность в 11 м
-(цель выбрана корректно: r6 по стейту, r11 по координатам от Тава — `goblin_tracker_2`,
-2,0 м от Тава) → `result_*.json: success:true` (CastSpell-event сработал), НО визуально
-снаряд вылетает НАМЕСТО у кастера (первый раз «в свою клетку», второй «рядом с собой»),
-у цели урона нет. Пользователь: «бесконечный цикл ошибок», бой брошен.
+## Symptom (2× on the bench, v083, 2026-09-20)
+`cast_spell "Sneak Attack (Ranged)"` from the turn of **origin_astarion** on an entity 11 m away
+(target selected correctly: r6 by state, r11 by coordinates from Tav — `goblin_tracker_2`,
+2.0 m from Tav) → `result_*.json: success:true` (CastSpell-event fired), BUT visually
+the projectile flies IN PLACE at the caster (first time «into his own cell», second «next to himself»),
+no damage on the target. User: «endless error loop», the combat was abandoned.
 
-## Что уже исключено
-- Алиасы/гуиды не путаются (entity_probe по raw guid: сущность существует, cast_ok).
-- Рамка отсчёта дистанций (фикс v083): r11 цель выбиралась по координатам от Тава, верно.
-  Дистанция до цели 11 м — в диапазоне Sneak (Ranged).
-- `success:true` ≠ урон: роллы мимо возможны, НО «снаряд у ног кастера» дважды подряд — не
-  ролл, а артефакт выдачи каста.
-- Perception-гейт (04b) в бою не блокирует (actors = все участники) — не он.
+## What is already excluded
+- Aliases/guids are not mixed up (entity_probe by raw guid: the entity exists, cast_ok).
+- Distance reference frame (fix v083): r11 target was selected by coordinates from Tav, correctly.
+  Distance to the target 11 m — within the Sneak (Ranged) range.
+- `success:true` ≠ damage: missed rolls are possible, BUT «projectile at the caster's feet» twice in a row — not
+  a roll, but an artifact of cast issuing.
+- Perception gate (04b) does not block in combat (actors = all participants) — not it.
 
-## Расследование 2026-09-21 (оффлайн, без игры): запрос КОРРЕКТЕН
-Данные из `cast_debug.json` (последний энкью = r11), записывается при каждом enqueue:
+## Investigation 2026-09-21 (offline, without the game): the request is CORRECT
+Data from `cast_debug.json` (last enqueue = r11), written on each enqueue:
 - `targetUuid = 7fbfb1b0-184b-4889-935b-f916a7ad1177`, `targetPos = [211.05, 29.44, 411.94]`
-  — targetPos **по координатам совпадает с позицией текущего `goblin_tracker_2`** в стейте
-  (211.1/29.4/411.9). Запрос целил в правильную сущность в правильную точку.
+  — targetPos **by coordinates matches the current position of `goblin_tracker_2`** in the state
+  (211.1/29.4/411.9). The request aimed at the right entity at the right point.
 - `queue = osiris` (OsirisCastRequests), `castOptions = {FromClient, ShowPrepareAnimation,
   AvoidDangerousAuras, NoMovement}`, `isPlayer=true`, `forceFlags=false`.
-- `spell.Prototype = Projectile_SneakAttack`, `SourceType = ProgressionClass` (взято из
-  PreparedSpells кастера — человеческое имя разрезолвлено в прототип корректно).
-- Реестр алиасов **самовосстанавливается при смене боя**: при смене `CombatTeam`
-  (`BG3Neuro.lua:2380-2384`) чистятся `combatAliases` и `ENTITY_BY_ALIAS`. Смена ростера
-  (было tracker_2/3/4 → стало tracker_1/2/3) означает: к моменту r11 реестр был свежим,
-  а `7fbfb1b0` — это **текущий** трекер у Тава (тот же NPC, ранее пропиcанный как
-  «tracker_4» в том же бою). => ГИПОТЕЗА «стейл-алиас/путаница имён» **ОТПАДАЕТ**.
+- `spell.Prototype = Projectile_SneakAttack`, `SourceType = ProgressionClass` (taken from
+  the caster's PreparedSpells — the human name resolved to the prototype correctly).
+- The alias registry **self-heals on combat change**: on `CombatTeam` change
+  (`BG3Neuro.lua:2380-2384`) `combatAliases` and `ENTITY_BY_ALIAS` are cleaned. The roster change
+  (was tracker_2/3/4 → became tracker_1/2/3) means: by the time of r11 the registry was fresh,
+  and `7fbfb1b0` is the **current** tracker near Tav (the same NPC, previously registered as
+  «tracker_4» in the same combat). => The HYPOTHESIS «stale alias/name confusion» **FALLS**.
 
-### Вывод
-Запрос на цель корректен на всех уровнях (алиас→guid→позиция). «Снаряд у кастера» — это
-**держава выполнения ranged weapon action движком**, а не промах цели запроса.
-Ведущая гипотеза: **Sneak Attack (Ranged) требует экипированного ranged-оружия**; у Астариона
-его нет (кинжалы) → движок выполняет каст как выброс/SQL-атаку оружием с коротким/ячеестым
-разбором, снаряд реализуется у кастера, урон 0. Совпадает и с r6 (цель в упоре, 1,8 м от
-Тава — «соня у соседней клетки»: point-blank выброс не долетает).
+### Conclusion
+The target request is correct at all levels (alias→guid→position). «Projectile at the caster» is
+**how the engine executes a ranged weapon action**, not a missed target of the request.
+Leading hypothesis: **Sneak Attack (Ranged) requires an equipped ranged weapon**; Astarion
+does not have one (daggers) → the engine executes the cast as a throw/melee weapon attack with a short/melee
+resolution, the projectile resolves at the caster, damage 0. This also matches r6 (point-blank target, 1.8 m from
+Tav — «goblin in the adjacent cell»: point-blank throw does not reach).
 
-## ЖИВОЕ подтверждение 2026-09-21: осiris/network НЕ СВЯЗЫВАЮТ ЦЕЛЬ у целевых кастов игроков
-Три независимых живых случая в одном бою (все игровые касты через инжект):
-1. **sneak (osiris, r11, ход Астариона)** → снаряд «у кастера», урон 0, `success:true`.
-2. **bless (osiris, r13, ход Shadowheart, цель=tav)** → `success:true`, AP+слот сняты, НО
-   благословение легло **на саму Shadowheart**, а не на Тава (заметил реальный пользователь).
-3. **witch bolt (r14 queue=network, r15 osiris; ход Гейла, цель=worg_1, 22 м)** → оба вернули
-   `cast_failed: Cast interrupted/failed` (честно: AP=0 + вне радиуса), НО движок ВСЁ РАВНО
-   выдал визуальный луч далеко в сторону — **в труп первого трекера**, не в worg.
+## LIVE confirmation 2026-09-21: osiris/network DO NOT BIND THE TARGET for targeted player casts
+Three independent live cases in one combat (all game casts via inject):
+1. **sneak (osiris, r11, Astarion's turn)** → projectile «at the caster», damage 0, `success:true`.
+2. **bless (osiris, r13, Shadowheart's turn, target=tav)** → `success:true`, AP+slot spent, BUT
+   the blessing landed **on Shadowheart herself**, not on Tav (noticed by a real user).
+3. **witch bolt (r14 queue=network, r15 osiris; Gale's turn, target=worg_1, 22 m)** → both returned
+   `cast_failed: Cast interrupted/failed` (honestly: AP=0 + out of radius), BUT the engine STILL
+   fired a visual beam far to the side — **into the corpse of the first tracker**, not into worg.
 
-### Что это значит
-- Запрос до движка ДОХОДИТ, но **цель из request-списка НЕ привязывается**; движок сам
-  подставляет слот (self для bless, ближайший валидный/труп — для witch bolt, «у кастера» —
-  для снаряда сника). `success:true` и `cast_failed` **не отражают реальное исполнение**
-  (ложный позитив/визуал при «отказе»).
-- Ручной UI-каст ТОГО ЖЕ сника (этот бой, с луком) работает идеально (попал, убил) — то есть
-  различие = **серверный каст-запрос vs клиентская привязка цели** (manual = клиент сам выбирает
-  и связывает цель; инжект = server-пул без клиентской привязки).
-- Ожидание «нет лука» ОТПАЛО (у Астариона ranged всегда был).
+### What it means
+- The request REACHES the engine, but **the target from the request list is NOT bound**; the engine itself
+  substitutes the slot (self for bless, nearest valid/corpse — for witch bolt, «at the caster» —
+  for the sneak projectile). `success:true` and `cast_failed` **do not reflect the real execution**
+  (false positive/visual on a «refusal»).
+- A MANUAL UI cast of THE SAME sneak (this combat, with a bow) works perfectly (hit, killed) — i.e.
+  the difference = **server-side cast request vs client-side target binding** (manual = the client itself selects
+  and binds the target; inject = server pool without client binding).
+- The «no bow» expectation FELL (Astarion always had a ranged weapon).
 
-## Офлайн-разбор (2026-09-21): построение запроса — НЕ баг; баг — отсутствие pre-валидации
-### Сравнение с эталоном brawl (tinybike/Brawl, Actions.lua — queueSpellRequest)
-Наш enqueueCastRequest и brawl.queueSpellRequest **структурно идентичны**:
+## Offline analysis (2026-09-21): request construction — NOT a bug; the bug — missing pre-validation
+### Comparison to the brawl reference (tinybike/Brawl, Actions.lua — queueSpellRequest)
+Our enqueueCastRequest and brawl.queueSpellRequest are **structurally identical**:
 - `{{CastOptions={FromClient,ShowPrepareAnimation,AvoidDangerousAuras,NoMovement}, Caster=Ext.Entity.Get(uuid),
   Spell={OriginatorPrototype,ProgressionSource,Source,SourceType}, Targets={{Target=Ext.Entity.Get(target), TargetingType=Ext.Stats.Get(name).SpellType,
-  Position={...}}}, field_A8=1, RequestGuid=<uuid>}}` (brawl: Originator/NetGuid закомментированы
-  прямо в исходнике — как у нас).
-- brawl кастует **игровым товарищам** (Companion AI) через OsirisCastRequests+FromClient и это
-  **работает**. ⇒ Построение запроса НЕ является причиной рассинхрона цели.
+  Position={...}}}, field_A8=1, RequestGuid=<uuid>}}` (brawl: Originator/NetGuid commented out
+  right in the source — like ours).
+- brawl casts **to game companions** (Companion AI) through OsirisCastRequests+FromClient and that
+  **works**. ⇒ Request construction is NOT the cause of the target desync.
 
-### Ключевое отличие: brawl ПРЕ-ПРОВЕРЯЕТ дистанцию и LOS до пуша
+### Key difference: brawl PRE-CHECKS distance and LOS before the push
 `Actions.useSpell`: `if distance > spellRange then return onFailed("cast failed, out of range")`;
 `if LOS == 0 and not autoPathfinding then return onFailed("cast failed, no line of sight")`.
-Мы такую проверку НЕ делаем → пушим заведомо невалидный запрос.
+We do NOT do such a check → we push a knowingly invalid request.
 
-### Что объясняет сегодняшние промахи
-- **witch bolt r14/r15 (Гейл→worg, 22 м при радиусе 18 м)**: движок отклонил цель запроса как
-  вне досягаемости (CastSpellFailed — это и вернулось как `Cast interrupted/failed`) и **сам
-  подобрал ближайшего валидного кандидата** — визуал «луч в труп первого трекера» у Тава. Запрос
-  был корректен (0ms-снимок очереди: target=0cf3, pos=204/25/426), выборка цели — ошибка движка
-  из-за out-of-range.
-- Из этого НЕ объясняются r11 (sneak, цель в 2 м) и r13 (bless→tav, 6 м) — те в радиусе, но
-  ушли на кастера/в себя. Значит есть ДВА независимых механизма:
-  1. **out-of-range ⇒ движок сам подбирает цель** (можно хоть сейчас починить honest-отказом).
-  2. **in-range, но от FromClient в turn-based** — клиентский превьюер по какой-то причине
-     перебирает цель (sneak в упор → у кастера; bless→tav → на себе). Требует чистого
-     контролируемого бенча (см. протокол ниже).
-- Вопрос для следующего стенда: in-range-случаи — то же «самоподбор», или специфика того, что
-  каст шёл у не-контролируемого аватара, у которого сейчас ОЧЕРЕДЬ хода.
+### What explains today's misses
+- **witch bolt r14/r15 (Gale→worg, 22 m at radius 18 m)**: the engine rejected the requested target as
+  out of reach (CastSpellFailed — this is what came back as `Cast interrupted/failed`) and **itself
+  picked the nearest valid candidate** — the visual «beam into the first tracker's corpse» near Tav. The request
+  was correct (0ms-queue snapshot: target=0cf3, pos=204/25/426), the target selection was an engine error
+  caused by out-of-range.
+- From this, r11 (sneak, target 2 m) and r13 (bless→tav, 6 m) are NOT explained — those are in range, but
+  went to the caster/self. So there are TWO independent mechanisms:
+  1. **out-of-range ⇒ the engine itself picks the target** (can be fixed right now with an honest refusal).
+  2. **in-range, but FromClient in turn-based** — the client previewer for some reason
+     rerolls the target (point-blank sneak → at the caster; bless→tav → on self). Requires a clean
+     controlled bench (see the protocol below).
+- Question for the next bench: the in-range cases — the same «self-pick», or a specificity of the
+  cast coming from a non-controlled avatar whose TURN is currently active.
 
-### Пре-валидация ВСТРОЕНА (2026-09-21, офлайн, код готов; НЕ в PAK, стенд остановлен)
-Реализовано в `mod/BG3Neuro/BG3Neuro.lua` (помечено `v0.8.58 (тикет 06)`):
-- Новая `castRangeOf(sid)` — радиус из `Ext.Stats.Get(sid).Range`: числа как есть,
-  заклинания-строки (`"RangedMainWeaponRange"`→15 м, `"MeleeMainWeaponRange"`→1,5 м,
-  `"ThrownObjectRange"`→18 м, `"MainWeaponRange"`→15 м), nil → fail-open (не гейтим).
-- Новая `preValidateCastTarget(actor, sid, target)`: (a) дистанция `Osi.GetDistanceTo`
-  > range + 1 м → отказ `no_range`; (b) `Osi.HasLineOfSight == 0` → отказ `no_los`;
-  nil-target (позиционные/GroundTarget) НЕ гейтится; возвращает `(true)` или
-  `(false, код, причина)`.
-- `executeCast`: гард сразу после no_aoe_target-гейта (до enqueue И до Osi.UseSpell) →
-  честный отказ `action_failed` с кодом.
-- `honestEnqueue`: пре-валидация каждого кандидата до enqueue; не прошёл → `lastErr`,
-  следующий кандидат, движку нечего переподбирать. Покрывает attack/bonus-пути.
-- Legacy-фолбэки `executeAttack`/`executeBonusAction` (Osi.UseSpell по кандидатам) —
-  тот же гард (иначе legacy дал бы тот же переподбор).
-- Проверка: `luaparse` → `PARSE_OK` (235 top-level nodes).
-- Живой бенч при следующем заходе: witch bolt вне радиуса → должен вернуть
-  `no_range`, снаряд НЕ должен уходить «в труп»; sneak/bless в радиусе → ждём разбор
-  механизма №2 (подтверждение/опровержение «самоподборочной» гипотезы).
+### Pre-validation BUILT IN (2026-09-21, offline, code ready; NOT in the PAK, bench stopped)
+Implemented in `mod/BG3Neuro/BG3Neuro.lua` (marked `v0.8.58 (ticket 06)`):
+- New `castRangeOf(sid)` — radius from `Ext.Stats.Get(sid).Range`: numbers as-is,
+  spell strings (`"RangedMainWeaponRange"`→15 m, `"MeleeMainWeaponRange"`→1.5 m,
+  `"ThrownObjectRange"`→18 m, `"MainWeaponRange"`→15 m), nil → fail-open (we do not gate).
+- New `preValidateCastTarget(actor, sid, target)`: (a) distance `Osi.GetDistanceTo`
+  > range + 1 m → refusal `no_range`; (b) `Osi.HasLineOfSight == 0` → refusal `no_los`;
+  nil-target (positional/GroundTarget) is NOT gated; returns `(true)` or
+  `(false, code, reason)`.
+- `executeCast`: guard right after the no_aoe_target gate (before enqueue AND before Osi.UseSpell) →
+  honest refusal `action_failed` with a code.
+- `honestEnqueue`: pre-validation of every candidate before enqueue; failed → `lastErr`,
+  next candidate, nothing for the engine to re-pick. Covers attack/bonus paths.
+- Legacy fallbacks `executeAttack`/`executeBonusAction` (Osi.UseSpell by candidates) —
+  the same guard (otherwise legacy would give the same re-pick).
+- Check: `luaparse` → `PARSE_OK` (235 top-level nodes).
+- Live bench on the next entry: witch bolt out of radius → must return
+  `no_range`, the projectile must NOT go «into the corpse»; sneak/bless in range → expect analysis
+  of mechanism №2 (confirmation/refutation of the «self-pick» hypothesis).
 
-### Фоллоу-ап (API, не тикет 06): bless на нескольких целей
-Живой стенд 2026-09-21 (r13): `cast_spell` принимает ОДИН `target_id`; пользователь
-подтвердил «каст прошел только на shadowheart. необходимо выбирать каждую цель bless».
-Multi-target требует либо список `target_ids` в action, либо серию одиночных кастов —
-записать отдельным тикетом (API-фича диспетчера, не исправление промаха).
+### Follow-up (API, not ticket 06): bless on multiple targets
+Live bench 2026-09-21 (r13): `cast_spell` accepts ONE `target_id`; the user
+confirmed «the cast went only on shadowheart. each bless target must be selected».
+Multi-target requires either a list of `target_ids` in the action, or a series of single casts —
+write a separate ticket (dispatcher API feature, not a miss fix).
 
-### Решающий бенч-протокол (следующая живая сессия)
-A. Починить построение cast-request: разобраться, почему `Targets[1].Target` (Ext.Entity
-   userdata) + `Position` не связываются в OsirisCastRequests/NetworkStartRequests у игроков
-   (brawl-референс; uuid-строка вместо userdata? сетевой NetworkId кастера? `field_A8`?).
-B. Прагматичная альтернатива: **мод ведёт касты игроков через клиентский UI-мост** (как
-   диалоговый клик) — ручной каст ДОКАЗАННО работает; серверные запросы оставить для NPC.
-   Пока решение B не принято — честный отказ для целевых игровых кастов (не выдавай
-   `success`/визуал, если цель не может быть привязана).
+### Decisive bench protocol (next live session)
+A. Fix the cast-request construction: find out why `Targets[1].Target` (Ext.Entity
+   userdata) + `Position` do not bind in OsirisCastRequests/NetworkStartRequests for players
+   (brawl reference; uuid-string instead of userdata? caster's network NetworkId? `field_A8`?).
+B. Pragmatic alternative: **the mod routes player casts through the client UI bridge** (like
+   the dialogue click) — the manual cast is PROVEN to work; leave server requests for NPCs.
+   Until decision B is taken — honest refusal for targeted player casts (do not emit
+   `success`/visual if the target cannot be bound).
 
-### Решающий бенч-протокол (следующая живая сессия)
-1. Дать Астариону ranged-оружие (лук/арбалет) → тот же каст `Sneak Attack (Ranged) →
-   ближайший к Таву трекер` → жалюзи: снаряд летит К цели (гипотеза подтверждена) или
-   снова «у кастера» (движок игнорирует цель — другой уровень).
-2. Прогон в паре: тот же каст `manual UI` (идёт к цели?) vs `инжект` — разделение «игра
-   сама» от «mod-путь»; зафиксировать оба `cast_debug.json` (targetPos) и `result_<id>`.
-3. Если с оружием работает — РЕШЕНИЕ: для weapon-кастов (flourish, sneak melee/ranged)
-   нужен честный отказ `no_ranged_weapon` при отсутствии оружия ЛИБО выполнение через
-   ударное API (RequestAttack/бонус-атака), а не CastStartRequests; варианты и контекст
-   (осечка osiris/network, 16/18/11 followups) — в `bg3-neuro-followups`.
+### Decisive bench protocol (next live session)
+1. Give Astarion a ranged weapon (bow/crossbow) → the same cast `Sneak Attack (Ranged) →
+   nearest-to-Tav tracker` → the blinds: the projectile flies TO the target (hypothesis confirmed) or
+   again «at the caster» (the engine ignores the target — another level).
+2. Paired run: the same cast `manual UI` (goes to the target?) vs `inject` — separation «the game
+   itself» from «the mod path»; record both `cast_debug.json` (targetPos) and `result_<id>`.
+3. If it works with a weapon — DECISION: for weapon casts (flourish, sneak melee/ranged)
+   an honest refusal `no_ranged_weapon` is needed when the weapon is missing OR execution via
+   the strike API (RequestAttack/bonus attack), not CastStartRequests; options and context
+   (osiris/network misfires, 16/18/11 followups) — in `bg3-neuro-followups`.
 
-## Данные для воспроизведения (фиксировать парой)
-- Перед кастом: `turn_actor`, `distance_reference`, позиции кастера/цели, слот оружия кастера.
-- После: `result_<id>.json`, `cast_debug.json` (targetPos), траектория визуально.
+## Reproduction data (record as a pair)
+- Before the cast: `turn_actor`, `distance_reference`, caster/target positions, caster's weapon slot.
+- After: `result_<id>.json`, `cast_debug.json` (targetPos), trajectory visually.
 
-## ЖИВОЙ бенч 2026-09-21: механизм №1 ПОДТВЕРЖДЁН (v0.8.59+v090, бой у ворот)
-Протокол: засада (`move_to_entity → ogre_brute_1`, диалог 6 узлов option_index=1) → бой,
-дождаться `turn_actor=tav` (`end_turn` протами) → `cast_spell fire_bolt` на врага.
+## LIVE bench 2026-09-21: mechanism №1 CONFIRMED (v0.8.59+v090, combat at the gates)
+Protocol: ambush (`move_to_entity → ogre_brute_1`, dialogue 6 nodes option_index=1) → combat,
+wait for `turn_actor=tav` (`end_turn` by the turns) → `cast_spell fire_bolt` on an enemy.
 
-Диагностический путь к корню (две ложные версии, обе проверены на стенде):
-- v086/v087: ожидали `no_range`, получали движковый `cast_failed` + **nil** в
-  `prevalidate_latest.json.range`. Причина — ленивый Osi-резолвер: в свежем процессе первый
-  вызов `Osi.GetDistanceTo`/`Osi.HasLineOfSight` кидает, `pcall` глотал (`dOk=false`), гейт
-  молча пропускался. Фикс: прогрев резолверов при старте + цикл-ретря из 2 попыток в
+Diagnostic path to the root (two false versions, both checked on the bench):
+- v086/v087: expected `no_range`, got the engine's `cast_failed` + **nil** in
+  `prevalidate_latest.json.range`. Cause — the lazy Osi resolver: in a fresh process the first
+  call of `Osi.GetDistanceTo`/`Osi.HasLineOfSight` throws, `pcall` swallowed (`dOk=false`), the gate
+  silently passed. Fix: warming the resolvers at startup + a retry loop of 2 attempts in
   `preValidateCastTarget`.
-- v088 (добавлена диагностика `prevalidate_latest.json` + `caststats_latest.json`):
-  `verdict: pass` при 20.1 м цели — `castRangeOf("Projectile_FireBolt")` возвращал nil.
-  `caststats`: `Range=0` (ЧИСЛО), `TargetRadius=18`, `SpellType=Projectile`. Разгадка: моя
-  number-ветка `rng > 0 and rng or nil` на числовом 0 молча давала nil — до TargetRadius/
-  Projectile_-фолбэка не доходило → fail-open → движковый `cast_failed`.
-- v090 (фикс нормализации): Range=число 0 / строка «0» → единая числовая ветка → при ≤0
-  сначала `TargetRadius` (18 у firebolt), затем `^Projectile_`→15, иначе fail-open.
+- v088 (diagnostics `prevalidate_latest.json` + `caststats_latest.json` added):
+  `verdict: pass` at a 20.1 m target — `castRangeOf("Projectile_FireBolt")` returned nil.
+  `caststats`: `Range=0` (NUMBER), `TargetRadius=18`, `SpellType=Projectile`. The clue: my
+  number-branch `rng > 0 and rng or nil` on numeric 0 silently gave nil — it did not reach the TargetRadius/
+  Projectile_ fallback → fail-open → engine's `cast_failed`.
+- v090 (normalization fix): Range=number 0 / string «0» → unified numeric branch → at ≤0
+  first `TargetRadius` (18 for firebolt), then `^Projectile_`→15, otherwise fail-open.
 
-Результаты бенча (v090, MD5 40F45BC5470724BEDBB1A8733319D625):
-- **c05**: `fire_bolt` tav → `goblin_tracker_3`, 20.2 м (range=18) →
+Bench results (v090, MD5 40F45BC5470724BEDBB1A8733319D625):
+- **c05**: `fire_bolt` tav → `goblin_tracker_3`, 20.2 m (range=18) →
   `action_failed "no_range: Projectile_FireBolt target ... is 20.2 m away (range 18 m)"`;
-  `prevalidate_latest.json`: `range=18, dist_1=20.17812, verdict="no_range"`. Снаряд НЕ ушёл
-  (пользователь визуально подтвердил: каст отклонён до движка, никакого «луча в труп»).
-- **c06** (контроль in-range): `fire_bolt` tav → `goblin_tracker_1`, 1.9 м →
-  `verdict="pass"`, `success:true` (движок принял каст).
-- Ранее (v085, тот же бой): b07g Gale `fire_bolt` на цель ~7 м → `success` + снаряд
-  визуально летит ТОЧНО в цель (пользователь подтвердил), честный промах (урона нет).
-  Sneak без скрытности движок отклоняет сам (`cast_failed`) — непригоден как основной
-  снаряд-тест в this бою (без преимущества).
-- Пре-валидатор теперь корректно отличает out-of-range (no_range) от в-диапазоне (pass).
+  `prevalidate_latest.json`: `range=18, dist_1=20.17812, verdict="no_range"`. The projectile did NOT go out
+  (the user visually confirmed: the cast was rejected before the engine, no «beam into the corpse»).
+- **c06** (in-range control): `fire_bolt` tav → `goblin_tracker_1`, 1.9 m →
+  `verdict="pass"`, `success:true` (the engine accepted the cast).
+- Earlier (v085, same combat): b07g Gale `fire_bolt` on a ~7 m target → `success` + the projectile
+  visually flies EXACTLY at the target (user confirmed), honest miss (no damage).
+  Sneak without stealth the engine rejects itself (`cast_failed`) — unfit as the primary
+  projectile test in this combat (without advantage).
+- The pre-validator now correctly distinguishes out-of-range (no_range) from in-range (pass).
 
-## Статус
-Механизм №1 (out-of-range) **закрыт живым подтверждением**: честный `no_range` до движка,
-снаряд не переподбирается. Осталось: (2) контролируемый бенч механизма №2 в радиусе (свежий
-ход, первое действие, сравнение набора CastOptions; in-range точно НЕ похож на out-of-range —
-но blessing в себя / sneak у кастера ещё не воспроизведены после фикса); (3) фоллоу-ап тикет
-на multi-target bless; (4) продакшн-PAK на базе v090 + обновление MD5 в modsettings.lsx
-(бенч-версия останется в %TEMP%\opencode\BG3Neuro_v090.pak).
+## Status
+Mechanism №1 (out-of-range) **closed with live confirmation**: honest `no_range` before the engine,
+the projectile is not re-picked. Remaining: (2) controlled bench of mechanism №2 in range (fresh
+turn, first action, comparison of the CastOptions set; in-range is definitely NOT like out-of-range —
+but bless to self / sneak at the caster are not yet reproduced after the fix); (3) follow-up ticket
+for multi-target bless; (4) production PAK based on v090 + updating the MD5 in modsettings.lsx
+(the bench version stays in %TEMP%\opencode\BG3Neuro_v090.pak).
 
-## МЕХАНИЗМ №2 ВОСПРОИЗВЕДЁН (v090, c07b, тот же бой) — 2026-09-21
-Протокол: дождаться хода клирика, `move_to_entity → tav` (2,1 м от кастера), затем
+## MECHANISM №2 REPRODUCED (v090, c07b, same combat) — 2026-09-21
+Protocol: wait for the cleric's turn, `move_to_entity → tav` (2.1 m from the caster), then
 `cast_spell bless → tav`:
 - `prevalidate_latest.json`: `range=9 (Target_Bless), dist=2.2, los=1, verdict="pass"` —
-  пре-валидация честно пропускает (цель в радиусе, LOS есть).
-- `result_c07b.json`: `success:true`, `economy.slot: level=1 before=1.0 ok=true` — движок
-  принял запрос, слот снят.
-- `cast_debug.json`: `queue=osiris`, `targetUuid=e6090219…` (Тав), `castOptions=[IgnoreHasSpell,
+  the pre-validation honestly lets it through (target in range, LOS exists).
+- `result_c07b.json`: `success:true`, `economy.slot: level=1 before=1.0 ok=true` — the engine
+  accepted the request, the slot spent.
+- `cast_debug.json`: `queue=osiris`, `targetUuid=e6090219…` (Tav), `castOptions=[IgnoreHasSpell,
   IgnoreCastChecks, IgnoreSpellRolls, IgnoreTargetChecks, Forced, Immediate]`, `forceFlags=true`.
-- **Пользователь (визуально): Bless лёг НА КЛИРИКА-КАСТЕРА, у Тава бафа нет.**
+- **The user (visually): Bless landed ON THE CLERIC-CASTER, Tav has no buff.**
 
-### Вывод
-Механизм №2 живёт даже полностью in-range и заради LOS: движок-исполнитель для целевого
-каста игрока **сам подставляет слот, игнорируя `targetUuid` запроса** — bless на себя при
-цели-союзнике (r13), снаряд у кастера (r11 sneak). Эталонный различитель — ручной UI-каст
-того же спелла работает (клиент сам связывает цель). => Самоподбор происходит на уровне
-«серверный cast-request без клиентской привязки vs клиентский UI-каст», НЕ зависим от
-дальности/LOS (наш пре-валидатор на него влияния не имеет).
+### Conclusion
+Mechanism №2 lives even fully in-range and with LOS clear: the engine executor for a targeted
+player cast **itself substitutes the slot, ignoring the request's `targetUuid`** — bless on self with
+an ally target (r13), the projectile at the caster (r11 sneak). The reference discriminator — a manual UI cast
+of the same spell works (the client itself binds the target). => The self-pick happens at the level
+of «server cast-request without client binding vs client UI-cast», NOT dependent on
+range/LOS (our pre-validator has no influence on it).
 
-### Следствия для принятия решения
-- Честный отказ №1 (no_range/no_los) — правильная, но частичная мера: игрока от «снаряда в
-  труп» на вне-радиусе она спасает, от in-range подмены цели — нет.
-- Для полного решения нужен РАЗБОР исполняющего слоя: почему player-cast через
-  `OsirisCastRequests` с FromClient/Forced ложит target на кастера, а ручной UI — на цель
-  (клиентская привязка цели? RNG/следующий валидный слот? разный набор CastOptions?).
-  Отдельный бенч: сравнить набор CastOptions успешного ручного UI-каста (перехват через
-  `EXTVME_CLIENT_CastSpellUsingPos`/смена прототипа) vs наш `[…Forced, Immediate]`.
-- Альтернатива из протокола B: игровые касты игроков вести через клиентский UI-мост
-  (подтверждённо работает), серверные запросы оставить NPC. Пока не решено — честный
-  отказ остаётся, но для in-range он не защищает от подмены; документировать в спейке.
+### Consequences for the decision
+- Honest refusal №1 (no_range/no_los) — a correct but partial measure: it saves the player from a «projectile
+  into the corpse» on out-of-range, but not from in-range target substitution.
+- A full solution needs an ANALYSIS of the execution layer: why a player cast through
+  `OsirisCastRequests` with FromClient/Forced puts the target on the caster, while the manual UI — on the target
+  (client target binding? RNG/next valid slot? a different CastOptions set?).
+  A separate bench: compare the CastOptions set of a successful manual UI cast (intercepted via
+  `EXTVME_CLIENT_CastSpellUsingPos`/prototype change) vs our `[…Forced, Immediate]`.
+- Alternative from protocol B: route player game casts through the client UI bridge
+  (provably works), leave server requests to NPCs. Until decided — the honest
+  refusal remains, but for in-range it does not protect from substitution; document in the spec.
 
-## Статус (rev 2)
-Механизм №1 закрыт (no_range/no_los, v090). Механизм №2 **воспроизведён** in-range
-(bless→клирик-кастер вместо Тава, c07b) — передан в расследование исполняющего слоя
-(клиентская привязка vs серверный запрос). Тикет 06 остаётся `resolved` (первичный отказ
-исправлен); пункты (3) multi-target bless → тикет 20; (3b) исследование подмены in-range
-цели → новый фоллоу-ап тикет (завести в `bg3-neuro-followups`); (4) прод-PAK v090 установлен.
+## Status (rev 2)
+Mechanism №1 closed (no_range/no_los, v090). Mechanism №2 **reproduced** in-range
+(bless→cleric-caster instead of Tav, c07b) — handed over to the execution-layer investigation
+(client binding vs server request). Ticket 06 stays `resolved` (the primary refusal
+fixed); items (3) multi-target bless → ticket 20; (3b) investigation of in-range target
+substitution → a new follow-up ticket (to open in `bg3-neuro-followups`); (4) prod-PAK v090 installed.

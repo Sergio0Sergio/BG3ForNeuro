@@ -1,4 +1,4 @@
-# 05 — Приёмка и бенч-план спека восприятия
+# 05 — Acceptance and bench plan for the perception spec
 
 Type: grilling
 Status: resolved
@@ -6,221 +6,221 @@ Blocked by: 03
 
 ## Question
 
-Чем докажем спек живьём и как это встроить в регрессию.
+How we prove the spec live and how to wire it into regression.
 
-Подвопросы (выровнены под бинарную модель, тикет 03: `known`/`last_seen` вырезаны — сценариев «известен, но не виден» не существует):
+Sub-questions (aligned with the binary model, ticket 03: `known`/`last_seen` cut out — there is no «known but not seen» scenario):
 
-- **Сценарии приёмки** на воротах: засада до кат-сцены (враги вне кадра — НЕ эмитятся); вход в LOS (появился в `state` с актуальной позицией; поля `perception` нет); уход из вида (исчез из `state` — нечего «донашивать»); бой (все участники в `enemies`, включая заэкранных и невидимых-силуэт); отказ по невидимой цели (цель не в `state` → `TargetMissing` роутер / `no_perception` мод); невидимый вне боя в кадре (не эмитится); партия (всегда в `state`, действия по ней не гейтятся).
-- **Что считаем доказательством**: строки состояния (snapshot JSON), SE-лог, ид-ы инжектов, `drive_action.ps1` (стиль тикетов 18/19, серийные инжекты строго по одному).
-- **Место в чеклисте**: новый бокс(ы) в `docs/manual-regression-checklist.md` (§9.5 и общий).
-- **Регрессия**: существующие сценарии боя/лечения/честной экономики (§9.5) не сломаться — восприятие не должно прятать уже видимых врагов от легитимного таргетинга.
-- **Стоимость**: порог производительности на тик, при котором фильтр признаётся непригодным.
+- **Acceptance scenarios** at the gates: ambush before the cutscene (enemies offscreen — NOT emitted); entering LOS (appears in `state` with an actual position; no `perception` field); leaving sight (disappears from `state` — nothing to «carry over»); combat (all participants in `enemies`, including offscreen and invisible-silhouette ones); refusal on an invisible target (target not in `state` → `TargetMissing` router / `no_perception` mod); invisible out-of-combat on frame (not emitted); party (always in `state`, actions against it are not gated).
+- **What counts as proof**: state lines (snapshot JSON), SE log, inject ids, `drive_action.ps1` (style of tickets 18/19, serial injects strictly one at a time).
+- **Place in the checklist**: new box(es) in `docs/manual-regression-checklist.md` (§9.5 and the general one).
+- **Regression**: existing combat/heal/fair-economy scenarios (§9.5) must not break — perception must not hide already-visible enemies from legitimate targeting.
+- **Cost**: the per-tick performance threshold at which the filter is deemed unfit.
 
 ## Deliverable
 
-- Список приёмочных сценариев с ожидаемыми исходами (бинарная модель).
-- Правки в `docs/manual-regression-checklist.md` (черновик строк).
-- Явные критерии «спек готов к реализации».
+- List of acceptance scenarios with expected outcomes (binary model).
+- Edits in `docs/manual-regression-checklist.md` (draft of lines).
+- Explicit criteria of «spec ready for implementation».
 
 ## Verification
 
-- Каждый сценарий однозначен (вход → ожидаемый стейт/отказ), воспроизводим вручную.
+- Each scenario is unambiguous (input → expected state/refusal), reproducible manually.
 
-## Исполнение (v082, 2026-09-20, стенд у ворот, PAK MD5 1F0F921033F074BBBE24E83CD2AE0F50)
+## Execution (v082, 2026-09-20, bench at the gates, PAK MD5 1F0F921033F074BBBE24E83CD2AE0F50)
 
-Снапшоты: `artifacts/05-p4-combat-roster.json`. Серийные инжекты (single-slot), autopilot off.
+Snapshots: `artifacts/05-p4-combat-roster.json`. Serial injects (single-slot), autopilot off.
 
-### P4 — Бой: полный ростер ✓ (жизнь)
-Вход: движение `move_to_entity sword_spider_1` (R1, эксплорейшн) спровоцировало бой у ворот.
-Исход: `mode=combat`, `turn_actor=tav`, инициатива 1/18;
-`enemies=8`: goblin_tracker_2/3/4 (1.8–19.8 м, включая заэкранного 19.8 м), goblin_brawler_2,
-goblin_booyahg_2, za_krug_1, bugbear_2, worg_1 — т.е. те, кого в exploration НЕ эмитил B-гейт.
-`allies=9`: партия + wyll/zevlor/remira/aradin/barth (все в ростере).
+### P4 — Combat: full roster ✓ (live)
+Input: moving `move_to_entity sword_spider_1` (R1, exploration) provoked combat at the gates.
+Result: `mode=combat`, `turn_actor=tav`, initiative 1/18;
+`enemies=8`: goblin_tracker_2/3/4 (1.8–19.8 m, including offscreen 19.8 m), goblin_brawler_2,
+goblin_booyahg_2, za_krug_1, bugbear_2, worg_1 — i.e. those the B-gate did NOT emit in exploration.
+`allies=9`: party + wyll/zevlor/remira/aradin/barth (all in the roster).
 
-### P7 — Партия / видимый таргет в бою ✓ (жизнь)
-- R3 (exploration) `cast_spell guidance → tav`: перцепт-гейт ПРОШЁЛ → честный `not_caster_turn`.
-- R5 (combat, ход Тава) `cast_spell fire_bolt → bugbear_2`: перцепт-гейт прошёл (враг в actors),
-  честный каст выполнен — `result_r5.json: success:true`.
-- R6 (combat, групповой ход; кастер origin_astarion) `cast_spell "Sneak Attack (Ranged)" →
-  goblin_tracker_4` (ближайший, 1,8 м): резолв человеческого имени прошёл, каст выполнен
-  (success:true) — НО урон 0: выстрел в упор идёт с disadvantages, снайк-бонус не срабатывает
-  (9/9 HP). Финализация = событие CastSpell, а не урон — успех каста ≠ успех попадания.
-- R7 (тот же кастер, тот же ход) `Sneak Attack (Ranged) → goblin_tracker_3` (19,8 м) →
-  `cast_failed: Cast interrupted/failed` — Астарион уже израсходовал action на r6, движок
-  честно отверг каст (экономика работает). Выстрел в упор на дальнюю цель отложен до
-  следующего хода (или явный move назад перед кастом).
+### P7 — Party / visible target in combat ✓ (live)
+- R3 (exploration) `cast_spell guidance → tav`: perception gate PASSED → honest `not_caster_turn`.
+- R5 (combat, Tav's turn) `cast_spell fire_bolt → bugbear_2`: perception gate passed (enemy in actors),
+  honest cast executed — `result_r5.json: success:true`.
+- R6 (combat, group turn; caster origin_astarion) `cast_spell "Sneak Attack (Ranged)" →
+  goblin_tracker_4` (nearest, 1.8 m): human-name resolution went through, cast executed
+  (success:true) — BUT damage 0: point-blank shot suffers disadvantages, sneak bonus does not trigger
+  (9/9 HP). Finalization = the CastSpell event, not damage — a successful cast ≠ a successful hit.
+- R7 (same caster, same turn) `Sneak Attack (Ranged) → goblin_tracker_3` (19.8 m) →
+  `cast_failed: Cast interrupted/failed` — Astarion already spent his action on r6, the engine
+  honestly rejected the cast (economy works). The point-blank shot at the far target is deferred to
+  the next turn (or an explicit move back before the cast).
 
-### P5 — Отказ по невидимой цели ✓ (мод-слой уже в 04b; роутер — юнит-тесты)
-- R4 (exploration) `move_to_entity` guid гоблина за баррикадой (LOS=0, не эмитирован) → `no_perception`.
-- R2 `cast_spell → goblin_tracker_1` (видимый objects-категории; cast=actors) → `no_perception`
-  (согласованно с роутерной матрицей).
-- Роутерный слой: `TargetMissing` отUnit-тесты 163/163 зелёные.
+### P5 — Refusal on an invisible target ✓ (mod layer already in 04b; router — unit tests)
+- R4 (exploration) `move_to_entity` guid of a goblin behind the barricade (LOS=0, not emitted) → `no_perception`.
+- R2 `cast_spell → goblin_tracker_1` (visible in objects-category; cast=actors) → `no_perception`
+  (consistent with the router matrix).
+- Router layer: `TargetMissing` by unit tests 163/163 green.
 
-### P1 — Засада не видна ✓ (по эмиссии B)
-Exploration-эмиссия v082 у ворот = 18 сущностей, ВСЕ с `HasLineOfSight(lead, *)==1`
-(напр. sword_spider_1 11 м, aradin_1 29 м, memnos_1 54 м). Гоблины за баррикадой
-(ebe03162..., LOS=0 по диагу v079) НЕ эмитились в exploration (но в бою попали в enemies —
-это и есть P4). Список эмиссии зафиксирован текстом (снапшот exploration перезаписан боем).
+### P1 — Ambush not visible ✓ (by B emission)
+Exploration emission v082 at the gates = 18 entities, ALL with `HasLineOfSight(lead, *)==1`
+(e.g. sword_spider_1 11 m, aradin_1 29 m, memnos_1 54 m). Goblins behind the barricade
+(ebe03162..., LOS=0 by the v079 diag) were NOT emitted in exploration (but in combat made it into enemies —
+this is P4). The emission list is fixed as text (the exploration snapshot was overwritten by combat).
 
-### Стоимость (замер из `Dispatching ... took N ms`, эта сессия)
-- Эксплорейшн-тик (WaitForRealtime-колбэк): v081 10.8–13.8 мс (под порогом 20 мс)
-  → **чистый эксплорейшн-замер финализируем после выхода из боя**.
-- Комбат: TurnStarted-хендлер (`captureCombatState`) = **23.4 / 38.5 мс — выше порога 20 мс**.
-  Событийный (на смену хода), не по 500 мс-тику, но формально превышает порог → открыт
-  вопрос оптимизации (условия/здоровье по участникам, spells-block) ИЛИ пересмотра порога
-  для событийного пути. → Занесено в `docs/manual-regression-checklist.md` +
-  фоллоу-ап-тикет `bg3-neuro-followups/issues/21-combat-capture-cost.md` (2026-09-21).
+### Cost (measurement from `Dispatching ... took N ms`, this session)
+- Exploration tick (WaitForRealtime callback): v081 10.8–13.8 ms (under the 20 ms threshold)
+  → **the clean exploration measurement is finalized after combat ends**.
+- Combat: TurnStarted handler (`captureCombatState`) = **23.4 / 38.5 ms — above the 20 ms threshold**.
+  Event-driven (on turn change), not on the 500 ms tick, but formally exceeding the threshold → the
+  optimization question is open (conditions/health per participant, spells-block) OR reconsidering the
+  threshold for the event-driven path. → Recorded in `docs/manual-regression-checklist.md` +
+  follow-up ticket `bg3-neuro-followups/issues/21-combat-capture-cost.md` (2026-09-21).
 
-### P2 / P3 / P6 / P8 — остаются
-- P2 (вход в LOS) и P3 (уход из вида): стендом с пошаговой прогулкой после боя (или
-  эмиссионный аналог уже показан P1↔P4: одна и та же сущность вне LOS не эмитится,
-  в бою — в ростере).
-- P6 (невидимый NPC вне боя в кадре): **закрыто в P6 v2** (2026-09-21, v0.8.63, PAK v095,
-  followup `24-invisible-b-gate.md`) — B-гейт режет `INVISIBLE`/`SNEAKING` (сырой `StatusMachine`,
-  исключения `TRUESIGHT`/see-invisibility ≤9 м); живо проверено `perception_probe`: `masked=["Ogre Brute"]`,
-  `objects` 18→17, remove → 18, `TRUESIGHT` → исключение. `Osi.IsInvisible` в гейте не используется (spec §2).
-- P8 (позиционный AoE): проверить после боя — каст с `position` (без target) должен НЕ
-  гейтиться `no_perception` (по логике гейт пропускает только целевой каст).
+### P2 / P3 / P6 / P8 — remain
+- P2 (entering LOS) and P3 (leaving sight): by bench with a step-by-step walk after the combat (or
+  the emission analogue already shown by P1↔P4: the same entity outside LOS is not emitted,
+  in combat — in the roster).
+- P6 (invisible NPC out of combat on frame): **closed in P6 v2** (2026-09-21, v0.8.63, PAK v095,
+  followup `24-invisible-b-gate.md`) — the B-gate cuts `INVISIBLE`/`SNEAKING` (raw `StatusMachine`,
+  exceptions `TRUESIGHT`/see-invisibility ≤9 m); verified live with `perception_probe`: `masked=["Ogre Brute"]`,
+  `objects` 18→17, remove → 18, `TRUESIGHT` → exception. `Osi.IsInvisible` is not used in the gate (spec §2).
+- P8 (positional AoE): to verify after combat — a cast with `position` (without target) must NOT
+  be gated by `no_perception` (by the logic the gate skips only targeted casts).
 
-## Доп. стенд (v083, 2026-09-20, повторный заход)
+## Additional bench (v083, 2026-09-20, re-entry)
 
-### v083 — рамка отсчёта дистанций ✓ (см. фикс ниже)
-`distance_reference=tav` в exploration (первый аватар партии), у allies/бoйцов `position_z`,
-у objects — `position_x/y/z` (ogre_brute_1 на 204/25/419). Стейт: 18 объектов у ворот,
-дистанции — от Тава. Дальнейшие выборы «ближайшего» должны считаться ПО координатам.
+### v083 — distance reference frame ✓ (see the fix below)
+`distance_reference=tav` in exploration (first party avatar), allies/combatants have `position_z`,
+objects have `position_x/y/z` (ogre_brute_1 at 204/25/419). State: 18 objects at the gates,
+distances — from Tav. Any further «nearest» picks must be computed BY coordinates.
 
-### P8 — позиционный каст без цели ✓ (жизнь)
-r9: `cast_spell actor=tav spell_name=fire_bolt position={x:205,y:29,z:400}` (пустая точка за
-партией, без target_id) → НЕ `no_perception`, НЕ `no_aoe_target`, каст выполнен (`success:true`).
-Вывод: перцепт-гейт 04b пропускает position-only касты, как задумано.
+### P8 — positional cast without a target ✓ (live)
+r9: `cast_spell actor=tav spell_name=fire_bolt position={x:205,y:29,z:400}` (empty spot behind
+the party, no target_id) → NOT `no_perception`, NOT `no_aoe_target`, cast executed (`success:true`).
+Conclusion: the perception gate 04b skips position-only casts, as designed.
 
-### r8 — вход в баррикадный спот снова поднял засаду (4-й раз, P4 плюс)
-`move_to_entity → ogre_brute_1` привёл к диалогу (открывающая сцена засады) → выбор
-`Continue.` через `select_dialogue_option` (мост диалога, success) → засада: `mode=combat`,
-enemies=8 (включая скрытых), allies=9, `turn_actor=tav`. Eщё одно подтверждение P4
-(«невоспринимаемых в exploration → комбатанты в cycle»).
+### r8 — entering the barricade spot raised the ambush again (4th time, P4 plus)
+`move_to_entity → ogre_brute_1` led to a dialogue (the ambush opening scene) → selecting
+`Continue.` via `select_dialogue_option` (dialogue bridge, success) → ambush: `mode=combat`,
+enemies=8 (including hidden ones), allies=9, `turn_actor=tav`. One more confirmation of P4
+(«not perceived in exploration → combatants in cycle»).
 
-### r10 / ручной flourish — промах + расхождение честного пути
-r10 (`flourish → goblin_tracker_3`, свой ход Тава) → `cast_failed: Cast interrupted/failed`, при
-этом `bench_snapshot` Тава читает `ActionPoint=0` (action потрачен на r9). Пользователь вручную
-скастовал flourish в том же ходу — игра позволила. Итог: урон 0 у всех врагов = **маневр
-промахнулся** (CastSpellDefinitive ≠ урон, согласно правилу). Открытый вопрос эмуляции каста маневр:
-- почему честная osiris-очередь отказала в своём ходу игрока, а игра разрешила вручную —
-  читается ли `ActionPoint` неверно (книга бюджета маневров/WeaponActionPoint), или дело в
-  канале очереди (osiris vs `network` для player-кастов в свой ход);
-- дата: r9 (позиционный fire_bolt, osiris) визуально скастовался — канал не заведомо битый.
-Действие — тикет на проверку `QueueName "network"` для своего-хода кастов игрока + сверка
-`Osi.GetActionPoint`/компонента. Не блокер приёмки (level of emulation, поведение честнее
-движка, но не совпадает с UI).
+### r10 / manual flourish — miss + honest-path divergence
+r10 (`flourish → goblin_tracker_3`, on Tav's own turn) → `cast_failed: Cast interrupted/failed`, while
+`bench_snapshot` of Tav reads `ActionPoint=0` (action spent on r9). The user manually
+cast flourish on the same turn — the game allowed it. Bottom line: 0 damage on all enemies = **the maneuver
+missed** (CastSpellDefinitive ≠ damage, per the rule). Open question of casting the maneuver:
+- why the honest osiris queue refused on the player's own turn, while the game allowed it manually —
+  is `ActionPoint` read incorrectly (maneuver budget book/WeaponActionPoint), or is it the
+  queue channel (osiris vs `network` for player casts on own turn);
+- data point: r9 (positional fire_bolt, osiris) cast visually — the channel is not a priori broken.
+Action — a ticket to check `QueueName "network"` for player's own-turn casts + cross-check
+`Osi.GetActionPoint`/component. Not an acceptance blocker (level of emulation, behavior more honest
+than the engine, but does not match the UI).
 
-### Комбат-стейт пишется событийно (TurnStarted), не тиками — подтверждено живьём
-Ход Тава длился 10+ минут (r9 cast, r10 fail, ручной flourish, melee -1hp на tracker_3):
-`bg3_to_neuro.json` мtime застыл на моменте TurnStarted (18:17:40), HP в файле = полные 9/9,
-хотя в игре урон был нанесён. Код: captureCombatState вызывается из TurnStarted-листенера
-(BG3Neuro.lua:511), exploration — периодический цикл (строка 5582, line 5581). В бою цикла
-5681/5581 НЕТ — только событие хода. Контракт для App: внутри хода HP/AP/позиции в стейте —
-от начала хода; свежие значения приходят на смену хода. Не баг; подтверждение выбранной
-архитектуры (event-driven combat). Замечание: если приёмке нужен интратурный дамаг-стрим —
-отдельный вопрос (НЕ в v1).
+### Combat state is written event-driven (TurnStarted), not by ticks — confirmed live
+Tav's turn lasted 10+ minutes (r9 cast, r10 fail, manual flourish, melee -1hp on tracker_3):
+`bg3_to_neuro.json` mtime froze at the TurnStarted moment (18:17:40), HP in the file = full 9/9,
+although damage was dealt in the game. Code: captureCombatState is called from the TurnStarted listener
+(BG3Neuro.lua:511), exploration — periodic loop (line 5582, line 5581). In combat the loop
+5681/5581 is ABSENT — only the turn event. Contract for the App: inside a turn, HP/AP/positions in the state —
+from the turn start; fresh values arrive on turn change. Not a bug; confirmation of the chosen
+architecture (event-driven combat). Note: if acceptance needs an intra-turn damage stream —
+a separate question (NOT in v1).
 
-### P2/P3 — затруднено скриптовой засадой
-Каждое движение к лагерю триггерит сюжетную засаду (dialogue → combat), из-за чего чистый
-«walk → LOS-флип объекта» в exploration дважды прерван. P2/P3 добиваем ПОСЛЕ боя: отойти к
-воротам, проверить, что скрытые гоблины снова исчезли из exploration-объектов (это и есть
-P3), затем если нужно — точный однократный шаг к границе LOS и назад.
+### P2/P3 — hindered by the scripted ambush
+Every move toward the camp triggers the story ambush (dialogue → combat), which is why the clean
+«walk → LOS-flip of an object» in exploration was interrupted twice. P2/P3 are finished AFTER the combat: step back to
+the gates, check that the hidden goblins disappeared again from the exploration objects (this is exactly
+P3), then if needed — a precise single step to the LOS boundary and back.
 
-## P2 / P3 (v0.8.60, 2026-09-21, стенд «сейв ДО засады у ворот»)
+## P2 / P3 (v0.8.60, 2026-09-21, bench «save BEFORE the gate ambush»)
 
-Серия снапшотов одним файловым мостом (App/Randy не участвовали; инжекты не требовались —
-`bg3_to_neuro.json` читался напрямую, mod пишет exploration-стейт периодически). Снапшоты:
+A series of snapshots over a single file bridge (App/Randy not involved; injects not needed —
+`bg3_to_neuro.json` was read directly, the mod writes the exploration state periodically). Snapshots:
 `artifacts/p2s0_gate.json`, `p2s1_away.json`, `p2s2_back.json`, `p2s3_closer.json`, `p2s4_front.json`.
 
-Шаги (партия двигалась вручную; `EXPLORE_MAX_DISTANCE = 60`, `BG3Neuro.lua:2636`):
-- **S0** `tav 219.1/31.4/409.6` → **18 объектов**, все `character`, `seen_by=player`, дистанции 11–55 м.
-- **S1** отход на ~18 м `tav 234.3/26.3/400.8` → **2 объекта** (`kanon_1` 51.9 м, `door_1`). 16 персонажей исчезли → **P3**.
-- **S2** возврат (недолёт) `tav 224.3/29.0/404.8` → 3 объекта (только рамповые).
-- **S3** `tav 222.3/30.3/407.3` → 5 объектов (`arka_1` вернулась, но через границу 60 м: S2≈60.6 → S3≈57.2 — дистанция, не восприятие).
-- **S4** возврат на точку S0 `tav 218.3/31.6/410.3` → **18 объектов** → **P2**.
+Steps (the party moved manually; `EXPLORE_MAX_DISTANCE = 60`, `BG3Neuro.lua:2636`):
+- **S0** `tav 219.1/31.4/409.6` → **18 objects**, all `character`, `seen_by=player`, distances 11–55 m.
+- **S1** retreat ~18 m `tav 234.3/26.3/400.8` → **2 objects** (`kanon_1` 51.9 m, `door_1`). 16 characters disappeared → **P3**.
+- **S2** return (short of target) `tav 224.3/29.0/404.8` → 3 objects (only ramp ones).
+- **S3** `tav 222.3/30.3/407.3` → 5 objects (`arka_1` came back, but across the 60 m boundary: S2≈60.6 → S3≈57.2 — distance, not perception).
+- **S4** return to point S0 `tav 218.3/31.6/410.3` → **18 objects** → **P2**.
 
-**Контроль дистанции (главное):** для 18 сущностей из S4 посчитаны расстояния от позиции S1:
-**14 из них — 17.5–51.9 м (< 60)** → их отсутствие в S1 не могло быть отсечкой по дальности, значит
-это **LOS** (честная P3), а возврат в S4 — **P2** с актуальными позициями. Дистанционно-неоднозначные
-`arka_1` 70.3, `elegis_1` 66.6, `zevlor_1` 65.7, `memnos_1` 71.6 (>60) из доказательства исключены.
+**Distance control (the main thing):** for 18 entities from S4, distances from the S1 position were computed:
+**14 of them — 17.5–51.9 m (< 60)** → their absence in S1 could not be a range cutoff, which means
+it is **LOS** (honest P3), and the return in S4 — **P2** with actual positions. Distance-ambiguous
+`arka_1` 70.3, `elegis_1` 66.6, `zevlor_1` 65.7, `memnos_1` 71.6 (>60) excluded from the proof.
 
-**Наблюдаемый сигнал:** в exploration-стейте нет поля `perception` — видимость выражается
-**присутствием/отсутствием в `objects`** (персонаж вне `Osi.HasLineOfSight(lead,*)` отсекается в
-`scanNearbyObjects`, `BG3Neuro.lua:2828`); `known`/`last_seen` отсутствуют (бинарная модель v1).
+**Observed signal:** in the exploration state there is no `perception` field — visibility is expressed
+by **presence/absence in `objects`** (a character outside `Osi.HasLineOfSight(lead,*)` is culled in
+`scanNearbyObjects`, `BG3Neuro.lua:2828`); `known`/`last_seen` are absent (binary model v1).
 
-**Замечание (не блокер):** `seen_by = "player"` всё ещё жёстко эмитится (`BG3Neuro.lua:2842`),
-хотя контракт 03 rev2 фиксировал «`seen_by` удалён». Кандидат в фоллоу-ап. **Закрыто:** фоллоу-ап
-`bg3-neuro-followups/23-remove-seen-by` (2026-09-21, v0.8.62) — эмиссия убрана, поле и группировка
-в C# удалены, сериализатор печатает один заголовок `## Objects (N)`.
+**Note (not a blocker):** `seen_by = "player"` is still hard-coded emitted (`BG3Neuro.lua:2842`),
+although contract 03 rev2 fixed «`seen_by` removed». Candidate for a follow-up. **Closed:** follow-up
+`bg3-neuro-followups/23-remove-seen-by` (2026-09-21, v0.8.62) — emission removed, the field and grouping
+deleted in C#, the serializer prints a single header `## Objects (N)`.
 
 ## Claim (2026-09-20)
 
-Захвачен для сессии (paper-часть, игра закрыта): 1) переписать сценарии под бинарную модель,
-2) критерии готовности и порог стоимости, 3) черновик строк чеклиста. Выполнение на стенде —
-следующий заход вместе с research §8 и 04b.
+Captured for the session (paper part, game closed): 1) rewrite the scenarios for the binary model,
+2) readiness criteria and cost threshold, 3) draft of checklist lines. Execution on the bench —
+the next entry together with research §8 and 04b.
 
 ## Answer
 
-**Приёмочный план зафиксирован (paper). Исполнение — после research §8 + 04b на стенде.**
+**The acceptance plan is fixed (paper). Execution — after research §8 + 04b on the bench.**
 
-### Сценарии приёмки (бинарная модель) — вход → ожидаемый исход
+### Acceptance scenarios (binary model) — input → expected outcome
 
-| # | Сценарий | Вход | Ожидаемый исход |
+| # | Scenario | Input | Expected outcome |
 |---|---|---|---|
-| P1 | Засада не видна | эксплорейшн у ворот, камера вне двора | 18 вражеских сущностей НЕ в `objects`/`enemies` (не эмитится то, что вне кадра) |
-| P2 | Вход в LOS | сущность вошла в кадр | появилась в `state` с актуальной позицией (поля `perception` нет — эмиссия = факт присутствия) |
-| P3 | Уход из вида | сущность ушла за укрытие/кадр | исчезла из `state`; в следующем снапшоте её нет (нет `known`/`last_seen`) |
-| P4 | Бой — полный ростер | `mode=combat` | все участники в `enemies`, в т.ч. заэкранные и невидимый-силуэт (spec §4), позиции истинные |
-| P5 | Отказ по невидимой цели | `attack_entity`/`cast_spell` c `target_id`, отсутствующим в `state` | роутер: `TargetMissing` (Channel A, мгновенно); мод: `no_perception` (после 04b) |
-| P6 | Невидимый вне боя в кадре | скрывшийся NPC в зоне камеры | не эмитится (B = «движок отрисовал игроку», spec §2); v2 (v0.8.63): enforced статус-гейтом `INVISIBLE`/`SNEAKING` (искл. `TRUESIGHT`/see-invisibility ≤9 м) |
-| P7 | Партия | каст/движение/атака по союзнику, `allies` в `state` | всегда проходит перцепт-гейт (spec §9) |
-| P8 | AoE-точка | `cast_spell` с `position` вне восприятия | v1: не гейтится восприятием (успех/провал по механикам `feasible`) |
+| P1 | Ambush not visible | exploration at the gates, camera outside the courtyard | 18 enemy entities NOT in `objects`/`enemies` (what is offscreen is not emitted) |
+| P2 | Entering LOS | an entity entered the frame | appeared in `state` with an actual position (no `perception` field — emission = the fact of presence) |
+| P3 | Leaving sight | an entity went behind cover/off frame | disappeared from `state`; absent from the next snapshot (no `known`/`last_seen`) |
+| P4 | Combat — full roster | `mode=combat` | all participants in `enemies`, incl. offscreen and invisible-silhouette (spec §4), positions true |
+| P5 | Refusal on an invisible target | `attack_entity`/`cast_spell` with a `target_id` absent from `state` | router: `TargetMissing` (Channel A, instant); mod: `no_perception` (after 04b) |
+| P6 | Invisible out of combat on frame | a concealed NPC in the camera area | not emitted (B = «the engine actually rendered it to the player», spec §2); v2 (v0.8.63): enforced by the status gate `INVISIBLE`/`SNEAKING` (exc. `TRUESIGHT`/see-invisibility ≤9 m) |
+| P7 | Party | cast/move/attack against an ally, `allies` in `state` | always passes the perception gate (spec §9) |
+| P8 | AoE point | `cast_spell` with a `position` outside perception | v1: not gated by perception (success/fail per `feasible` mechanics) |
 
-### Доказательство
+### Proof
 
-- Снапшоты стейта `snapshots/05-*.json` до/после каждого шага (стиль `02-*`), ид-ы инжектов в логе,
-  SE-лог без Lua-ошибок, серийный inject одним скриптом (`drive_action.ps1`, по одному, ждать `result_<id>`).
-- Сверка P5: оба слоя (роутер и мод) в одном сценарии отвечают согласованно.
+- State snapshots `snapshots/05-*.json` before/after each step (style of `02-*`), inject ids in the log,
+  SE log without Lua errors, serial inject by one script (`drive_action.ps1`, one at a time, wait for `result_<id>`).
+- Cross-check of P5: both layers (router and mod) answer consistently in one scenario.
 
-### Стоимость (порог пригодности)
+### Cost (fitness threshold)
 
-- Черновой фильтр (тикет 02): 11–15 мс/тик (макс 16.3 мс) на look.
-- **Порог:** B-сенсор + ростер не должен поднять среднюю стоимость тика эмиссии выше **20 мс**
-  (замер: 5 прогонов, медиана) — иначе фильтр признаётся непригодным и нужен кэш LOS/разрежение частоты.
-- Замер в бою и в эксплорейшне отдельно (тик собирает разное).
+- Draft filter (ticket 02): 11–15 ms/tick (max 16.3 ms) per look.
+- **Threshold:** the B-sensor + roster must not push the average emission tick cost above **20 ms**
+  (measurement: 5 runs, median) — otherwise the filter is deemed unfit and a LOS cache/frequency reduction is needed.
+- Measured in combat and in exploration separately (the tick collects different things).
 
-### Критерии «спек готов к реализации»
+### Criteria of «spec ready for implementation»
 
-1. Закрыт research §8 ✓ (2026-09-21): камера/фог в client-Lua **недоступны** (по исходнику bg3se v32) → выбран фолбэк `HasLineOfSight` + статус-гейт `INVISIBLE`/`SNEAKING`, слепая зона «перспектива камеры» задокументирована (research/02, spec §8); `StartSightEvents` в покое — эффекта нет (зонд v076); дебаунс снят (экранного края в эмиссии нет); «бой раскрывает всех участников» — подтверждено (P4).
-2. Контракт (03) и гейты (04) зафиксированы ✓ (spec rev 2, тикеты resolved).
-3. Заведены имплементационные тикеты B (эмиссия) и A (feasible), 04b (мод-гейт) — из них зелёные юнит-тесты.
-4. Черновик строк чеклиста ниже добавлен в `docs/manual-regression-checklist.md`.
+1. Research §8 closed ✓ (2026-09-21): camera/fog in client-Lua are **unavailable** (by bg3se v32 source) → the `HasLineOfSight` fallback + status gate `INVISIBLE`/`SNEAKING` was chosen, the «camera perspective» blind zone is documented (research/02, spec §8); `StartSightEvents` at rest — no effect (probe v076); debounce dropped (no screen edge in emission); «combat reveals all participants» — confirmed (P4).
+2. The contract (03) and gates (04) are fixed ✓ (spec rev 2, tickets resolved).
+3. Implementation tickets B (emission) and A (feasible) created, 04b (mod gate) — with green unit tests among them.
+4. The draft of checklist lines below added to `docs/manual-regression-checklist.md`.
 
-### Место в чеклисте — черновик строк (добавлено в `docs/manual-regression-checklist.md`, раздел Perception)
+### Place in the checklist — draft of lines (added to `docs/manual-regression-checklist.md`, Perception section)
 
-См. раздел «Perception (fair perception, контракт 03/04/05)» в чеклисте: боксы P1–P8 как чек-лист с
-ожидаемыми исходами + регрессионный бокс «существующий §9.5 бой/лечение остаются зелёными после включения фильтра».
+See the «Perception (fair perception, contract 03/04/05)» section of the checklist: boxes P1–P8 as a checklist with
+expected outcomes + the regression box «existing §9.5 combat/heal remain green after the filter is enabled».
 
-## Исполнение приёмки (2026-09-21, v0.8.60, стенд у ворот) — DONE
+## Acceptance execution (2026-09-21, v0.8.60, bench at the gates) — DONE
 
-| # | Итог | Доказательство |
+| # | Result | Proof |
 |---|---|---|
-| P1 | ✅ засада не эмитится (v082) | чеклист §Perception |
-| P2 | ✅ вход в LOS — объекты вернулись с актуальной позицией | `artifacts/p2s4_front.json` (18 объектов); контроль дистанции 17.5–51.9 м |
-| P3 | ✅ уход из вида — 16 персонажей исчезли, без `known`/`last_seen` | `artifacts/p2s1_away.json` (2 объекта) |
-| P4 | ✅ бой — полный ростер (v082 + повтор `reg0_combat`: 8 врагов) | `artifacts/reg0_combat.json` |
-| P5 | ✅ отказ по невидимой цели (роутер `TargetMissing` + мод `no_perception`) (v082) | чеклист §Perception |
-| P6 | ✅ невидимый/скрытный вне боя не эмитится (P6 v2, 2026-09-21, v0.8.63, PAK v095) | `perception_probe`: `INVISIBLE`/`SNEAKING` → `masked=["Ogre Brute"]`, `objects` 18→17, remove → 18, `TRUESIGHT` → исключение. См. followup `24-invisible-b-gate.md` |
-| P7 | ✅ партия всегда проходит гейт (v082) | чеклист §Perception |
-| P8 | ✅ AoE-точка не гейтится (v083 r9) | чеклист §Perception |
+| P1 | ✅ ambush not emitted (v082) | checklist §Perception |
+| P2 | ✅ entering LOS — objects returned with actual positions | `artifacts/p2s4_front.json` (18 objects); distance control 17.5–51.9 m |
+| P3 | ✅ leaving sight — 16 characters disappeared, without `known`/`last_seen` | `artifacts/p2s1_away.json` (2 objects) |
+| P4 | ✅ combat — full roster (v082 + `reg0_combat` re-run: 8 enemies) | `artifacts/reg0_combat.json` |
+| P5 | ✅ refusal on an invisible target (router `TargetMissing` + mod `no_perception`) (v082) | checklist §Perception |
+| P6 | ✅ invisible/stealthy out of combat not emitted (P6 v2, 2026-09-21, v0.8.63, PAK v095) | `perception_probe`: `INVISIBLE`/`SNEAKING` → `masked=["Ogre Brute"]`, `objects` 18→17, remove → 18, `TRUESIGHT` → exception. See followup `24-invisible-b-gate.md` |
+| P7 | ✅ party always passes the gate (v082) | checklist §Perception |
+| P8 | ✅ AoE point not gated (v083 r9) | checklist §Perception |
 
-**Стоимость (≤ 20 мс медиана):** exploration `exploreLoop` med **11.20 мс** (n=336, p90 14.17);
-combat `TurnStarted` med **9.51 мс** (n=25, p90 14.05) — оба под порогом (лог
-`Extender Runtime 2026-09-21 13-47-00.log`; тикет 21).
+**Cost (≤ 20 ms median):** exploration `exploreLoop` med **11.20 ms** (n=336, p90 14.17);
+combat `TurnStarted` med **9.51 ms** (n=25, p90 14.05) — both under the threshold (log
+`Extender Runtime 2026-09-21 13-47-00.log`; ticket 21).
 
-**Регрессия §9.5:** ростер, тёрн-луп (`tav→aradin→astarion→za_krug→remira→cleric`), лечение
-(`healing_word` BA+L1, HP 9→13), атака (AP 1→0, `prevalidate pass`) — зелёные.
-Фидинг: неизвестный спелл (`wish`) не отсекается на честном пути → `issues/07-unknown-spell-stuck-cast.md`.
+**Regression §9.5:** roster, turn loop (`tav→aradin→astarion→za_krug→remira→cleric`), healing
+(`healing_word` BA+L1, HP 9→13), attack (AP 1→0, `prevalidate pass`) — green.
+Feeding: unknown spell (`wish`) is not cut off on the honest path → `issues/07-unknown-spell-stuck-cast.md`.
