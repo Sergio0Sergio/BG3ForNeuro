@@ -330,7 +330,7 @@ Details:
 - **`cast_spell`** (AoE): `actor` + `spell_name` — from state (source of truth); `coverage` (optional) — desired victim list, the plugin centers the blast on the coverage optimum, failure with a list if not everything is reachable; `position` (optional) — raw center coordinates `{x, y, z}` (BG3SE API 3D), fallback (enabled via config, disabled by default). **v0.8.60 (ticket 20):** `target_ids` (optional) — list of targets for multi-target spells (e.g. Bless); the plugin casts the spell once and lets the engine hit all listed targets. AoE coverage and range are computed by the plugin — a single code path with StateSerializer. **v0.8.35:** this is also the path for weapon actions / bonus-action abilities (e.g. Flourish). `spell_name` accepts **either** the engine stat id (`Target_OpeningAttack`) **or** the friendly `name` from the state (`flourish`); the plugin resolves the friendly name to the engine id before dispatch. The plugin spends the ability's own resource cost (a bonus-action ability spends BA) natively — `bonus_action` stays `offhand_attack`-only.
 - **`use_item`**: `actor` + item + target. Present in the schema and validated on the C# side, but **execution returns `not_supported`** (the mod has no Lua executor for it — falls through to the v1 decline, `BG3Neuro.lua:6659`). Drinking a potion as an action is not available in v1 through this path; only `bonus_action.drink_potion`/economy is planned (§6.4b).
 - **`throw`**: `actor` + `item_id` + `target_id`. Present in the schema, but execution returns `not_supported` — **bench-proven** (see §11 note): the engine rejects synthetic `Throw_Throw` casts in every variant (4 force queues + 2 honest `FromClient`), always `CastSpellFailed(..., storyActionID=0)`, `UsingSpell` never fires. Honest "implemented later" failure, not silence.
-- **`hide`** (v0.8.70, ticket 28): `actor` only, no target. Casts `Shout_Hide` (Shout) through the honest cast queue; a bonus action by economy. `Osi.HasSpell(actor, "Shout_Hide")` must be in the caster's book (`no_hide` failure otherwise). Requires combat phase (validator: `not_in_combat` out of combat, `wrong_phase` on another's turn).
+- **`hide`** (v0.8.70, ticket 28): `actor` only, no target. Casts `Shout_Hide` (Shout) through the honest cast queue; a bonus action by economy. `Osi.HasSpell(actor, "Shout_Hide")` must be in the caster's book (`action_failed` with a `no_hide: 'Shout_Hide' is not in the caster's book` detail otherwise — `no_hide` is a detail prefix, not an `ErrorCode`). Requires combat phase (validator: `not_in_combat` out of combat, `wrong_phase` on another's turn).
 - **`bonus_action.action_type`** (full, fixed enum):
   - `offhand_attack` — attack with the second hand (needs an offhand weapon)
   - `drink_potion` — drink a potion (as a second tempo/bonus)
@@ -547,7 +547,7 @@ Note: free-form parameters (`cast_spell.spell_name`, `interact_with.interaction_
 | Attack (NPC/fallback) | `Osi.Attack(character, target, alwaysHit)` — one-shot, no resource accounting | ⚠ |
 | Item | `Osi.Use(character, item, useItem, isInteraction, event)`; equip `Osi.Equip` | ✔ |
 | Dialogue start | `Osi.CharacterMoveToAndTalk` / `Osi.StartDialog_Internal` | ✔ |
-| Dialogue option select | **no public function** → §7 (X1) | ✘ |
+| Dialogue option select | **no public function** — workaround via `ClientAutoselectExecutor` → §7 (X1) | ✘ API / ✔ workaround (live bench) |
 | Rest | `Osi.RequestLongRest(initiator, isForced)` (+ `RequestLongRestConfirmed`); gate `Osi.CanAllPartiesLongRest` | ✔ |
 | Stealth as a **mode** (`toggle_mode: "stealth"`) | **no public function** → §5.3 (X3) | ✘ |
 | Hide in combat (`hide` action) | `Osi.UseSpell`/`enqueueCastRequest` on `Shout_Hide` (v0.8.70, ticket 28) | ✔ |
@@ -558,6 +558,8 @@ Note: free-form parameters (`cast_spell.spell_name`, `interact_with.interaction_
 | Turn order | `Ext.Entity.Get(combatGuid).TurnOrder` (`EocCombatTurnOrderComponent.Groups/Groups2/field_40`=round) | ✔ |
 
 Full catalog with signatures and sources: `.scratch/bg3-neuro-integration/research/bg3se-lua-action-api.md`.
+
+> **Legend (reliability column):** ✔ = public call, documented and exercised; ⚠ = works but is version-dependent or bypasses game systems; ✘ = **no supported public call** — workaround/hack only. The mark describes **API availability, not feature status**: a ✘ row can still be green end-to-end via its workaround (dialogue select), while another ✘ row can be genuinely unimplemented (stealth mode) — see the row notes.
 
 ### 6.3 Resource Handling (AP/cooldowns)
 
@@ -624,6 +626,7 @@ There is **no public Osiris function** to select an option (research §7.2). Exe
 - **`ClientAutoselectExecutor`**: the client-context Lua finds the option element in the dialogue window by `option_index` (= UI order), **highlights it and clicks it itself** — the human presses nothing. (The earlier `confirm` mode was collapsed into this — the difference between "highlight + manual Enter" and "autoselect" is gone.)
 - Toggling — the `dialogue.mode` flag in `config.json` (the value `confirm` kept as an alias, behavior unified).
 - If the client script is unavailable (no client context / server-only mod) → **fallback to `not_supported` + a warning in the log** — do not send Neuro into a loop without a channel.
+- **Live proof**: Run 2026-09-17 (v0.8.34) — `select_dialogue_option {"option_index":1}` advanced the gate dialogue into combat (`docs/manual-regression-checklist.md`, exploration → dialogue → combat); dialogue-bridge success also recorded in acceptance (`bg3-neuro-perception` `05-acceptance-and-bench.md`).
 ```
 select_dialogue_option (schema from §5.2)
         │
@@ -703,7 +706,7 @@ The Lua part (BG3SE mod) against mocked `Ext.*` — light smoke on the bench, **
 - Packaging and deployment
 - Trading (buy/sell) — a separate UI screen outside dialogue options
 - `throw` (item throwing) — `not_supported` (bench-proven 2026-09-23, ticket 28: engine rejects the synthetic cast in all queues — forced `osiris/network/item/anubis` and honest `FromClient` `item/network` — with `CastSpellFailed(..., storyActionID=0)`; a live manual throw shows the engine itself picking the item into the caster's hand first, a stage the synthetic request lacks).
-- `use_item` as an action — **registered + validated but `not_supported` in v1** (no Lua executor, `BG3Neuro.lua:6659`); same for `set_reaction` and the non-`offhand_attack` `bonus_action` types (§6.4b).
+- `use_item` as an action — **registered + validated but `not_supported` in v1** (no Lua executor, `BG3Neuro.lua:6659`); same for `set_reaction` and the non-`offhand_attack` `bonus_action` types (§5.1).
 - Stealth mode `"stealth"` for `toggle_mode` — no public API (the `hide` action is a separate, working Shout_Hide §5.1 — hiding in combat, not a mode toggle).
 
 **Post-v1 experiments** (not part of the current spec): stealth-status experiment (for `"stealth"` in `toggle_mode`).
