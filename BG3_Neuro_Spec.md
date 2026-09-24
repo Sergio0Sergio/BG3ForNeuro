@@ -135,18 +135,19 @@ Markdown, no `#` top-level, structure via `##`. Meters as the distance unit (the
 
 ```markdown
 ## Turn: Karlach (initiative 3/5)
-## Controlled characters
-- Karlach: HP 45/60, distance 6m, effects: Rage (3 rounds)...
+## Allied characters
+- Karlach: HP 45/60, distance 6m, availability: can act, conditions: Rage (1)
 ## Enemies
 - goblin_1 (Goblin Raider): HP 12/18, distance 6m, status: —
 ## Spells (Karlach)
-- Fireball: slot 3, radius 18m, AoE 4m → in range: [goblin_1, goblin_2]
+- Fireball: cost action, slot 3, range 18m, AoE 4m → covers: [goblin_1, goblin_2] (2 targets)
 - flourish (Target_OpeningAttack): cost bonus_action, range 1.5m → in range: [goblin_1]
 ## Available actions (Karlach)
 - move_to_target: [<move targets>]
 - attack_entity: [goblin_1, goblin_2]
 - cast_spell: [Fireball, Magic Missile, flourish]
 - throw: [health_potion, javelin] → [goblin_1, goblin_2]
+- hide
 - use_item: [health_potion]
 - bonus_action: [offhand_attack, help, shove]
 - set_reaction: [opportunity_attack, shield]
@@ -168,16 +169,20 @@ Both layers together:
 ### 3.4 Dialogue state: text + prompt, numbers = UI window
 
 ```markdown
-## Dialogue with Astarion (relationship: neutral)
-He says: "..."
-## Answer options
-1. "We have to go. This is important."
-2. "You're right, let's put this off."
-3. "I have a question about Cazador." [Persuasion]
-4. [Leave the dialogue]
+## Dialogue
+Speaker: Astarion
+Line: "..."
+Reply options:
+- [1] "We have to go. This is important."
+- [2] "You're right, let's put this off."
+- [3] "I have a question about Cazador." [Persuasion]
+- [4] [Leave the dialogue]
+
+## Available actions
+- select_dialogue_option
 ```
 
-- **Option numbers = order in the BG3 dialogue UI window (1-based)** — the plugin numbers exactly as the game shows (matches the streamer mod).
+- **Option numbers = order in the BG3 dialogue UI window (1-based)** — the plugin numbers exactly as the game shows (matches the streamer mod), rendered as `- [N] <text>`.
 - `select_dialogue_option` takes `option_index` (primary) + `option_text` (fallback, matched by text).
 - Do not show difficulty metadata (DC); do not show reputation numbers.
 
@@ -188,16 +193,29 @@ He says: "..."
 - Entity data — only from what is visible to the player, never from absolute coordinates.
 
 ```markdown
-## Mode: normal
+## Mode: exploration
+
 ## Objects (8)
-- goblin_camp_sign (readable, 5m)
-...
+- goblin_camp_sign (Goblin Camp Sign): 5m, open: [read]
+- wooden_door (Large Wooden Door): 3m, closed: [open, break, shove]
+- backpack (Adventurer's Backpack): 2m: [loot]
+- …, and 5 more
+
+## Locations (travel)
+- Druid Grove (id: GROVE): 100m
+- Goblin Camp (id: CAMP): 240m
+
+## Rest
+- rest: [full, partial]
+
 ## Available actions
-- move_to_entity: [...]
-- interact_with: [...]
-- open_map
-- toggle_mode: [normal]
+- move_to_entity: [goblin_camp_sign, wooden_door, backpack]
+- interact_with: [goblin_camp_sign, wooden_door]
+- loot: [backpack]
+- open_map, open_inventory, toggle_mode: [normal]
 ```
+
+> `## Mode: exploration` for free-roam; `## Screen: map` / `## Screen: inventory` for those two views. `## Objects (N)` in the format `- alias (Name): <distance>, status: [interactions]`. The Rest section shows `rest: [full, partial]` or `Unavailable: no camp or supplies (no_camp)`. `## Locations (travel)` lists overworld travel points. Unknown responses render as `- … and N more` (with an em dash ellipsis) when `maxVisibleObjects` caps the list.
 
 > Perception contract rev 2 (`.scratch/bg3-neuro-perception/spec.md`): emission is **binary** — an entity is either on screen (emitted at its true current position; there is **no `perception` field** — visibility is expressed by the entity's mere presence in `objects`) or absent from the state entirely. Per-character `seen by` grouping and the `seen_by` field are **removed** (single `## Objects (N)` header).
 
@@ -234,6 +252,9 @@ All runtime settings live in a single `config.json`, read at startup.
     "name": "Baldur's Gate 3",
     "controlledPartySize": 1
   },
+  "autopilot": {
+    "enabled": false
+  },
   "actions": {
     "result_timeout_s": 20
   },
@@ -260,6 +281,10 @@ All runtime settings live in a single `config.json`, read at startup.
 - `distanceFormat`: `meters | region | hybrid`; hybrid — close ≤50m in meters, far "area: name"
 - `showPosition`: false — absolute position is not needed, geometry in distances
 
+`autopilot` (`AutopilotConfig`, v0.8.x bench harness): `enabled` (default `true`) — forces a scripted decision when no real Neuro is connected; `false` disables it, leaving only explicit injects. The bench sets it to `false` so only deterministic actions run.
+
+`actions.result_timeout_s` (`ActionsConfig.ResultTimeoutS`, default `20`): how long C# waits for `result_<id>.json` from the mod (§6.1 step 4, §8 R6).
+
 `agents` (multi-agent, §12): one entry per Neuro. **Absent = single-agent v1** (one WS client, no owned character).
 ```json
 "agents": [
@@ -279,31 +304,33 @@ All actions are registered as `Action` (as in SPECIFICATION.md): `name` (lowerca
 Principles:
 - Context gives information, actions give gestures.
 - **`actor?: string` parameter** — alias of the controlled character (from state §1.5/§3). Required when `controlledPartySize > 1`, omitted at `party = 1` (the active/turn-taking character acts). Sets the single executor; see the schema in each action.
-- **Full fixed set**: all **17 actions** (8 combat + 1 dialogue + 8 exploration) registered **once at startup** and unchanged for the session (no re-reg/dereg, no disposables). Dynamic whole-action registration is **not used** in v1 — a stable set speeds up Neuro responses (BEST_PRACTICES: "Register everything you can once at startup").
+- **Full fixed set**: all **18 actions** (9 combat + 1 dialogue + 8 exploration) registered **once at startup** and unchanged for the session (no re-reg/dereg, no disposables). Dynamic whole-action registration is **not used** in v1 — a stable set speeds up Neuro responses (BEST_PRACTICES: "Register everything you can once at startup"). 7 internal diagnostic actions (`state_capture`, `probe`, `diag_skip`, `end_turn_ecs`, `bench_*`) carry `"internal": true` in `action_schemas.json` and are filtered out in `ActionRegistry` — they never reach Neuro. `hide` (v0.8.70, ticket 28) is the 9th combat action.
 - Enum — always full; an unavailable option → failure with an actionable message, no enum resizing.
 - **Fixation risk** (BEST_PRACTICES: "she tends to fixate on a few of them") is compensated by the state explicitly showing the actions/targets available this turn, and the validator giving an actionable failure with an options list — Neuro effectively sees the relevant subset through state, not through the action set.
 
-### 5.1 Combat Actions (8)
+### 5.1 Combat Actions (9)
 
 | # | Action | Parameters | Description |
 |---|---|---|---|
 | 1 | `move_to_target` | `actor?: string`, `target_id: string` | Move to the specified target |
 | 2 | `attack_entity` | `actor?: string`, `target_id: string` | Attack the specified enemy with the main weapon |
-| 3 | `cast_spell` | `actor?: string`, `spell_name: string`, `target_id?: string`, `coverage?: string[]`, `position?: {x, y, z}` | Cast a spell |
+| 3 | `cast_spell` | `actor?: string`, `spell_name: string`, `target_id?: string`, `target_ids?: string[]`, `coverage?: string[]`, `position?: {x, y, z}` | Cast a spell |
 | 4 | `use_item` | `actor?: string`, `item_id: string`, `target_id?: string` | Use an item from inventory |
 | 5 | `throw` | `actor?: string`, `item_id: string`, `target_id: string` | Throw an item at a target (**X2: in v1 → `not_supported`**) |
-| 6 | `bonus_action` | `actor?: string`, `action_type: enum` | Perform a bonus action |
-| 7 | `set_reaction` | `actor?: string`, `reaction_type: enum` | Set the reaction for this turn |
-| 8 | `end_turn` | `actor?: string` | End the turn |
+| 6 | `hide` | `actor?: string` | Hide as a bonus action (Shout_Hide) |
+| 7 | `bonus_action` | `actor?: string`, `action_type: enum` | Perform a bonus action |
+| 8 | `set_reaction` | `actor?: string`, `reaction_type: enum` | Set the reaction for this turn |
+| 9 | `end_turn` | `actor?: string` | End the turn |
 
-> **Shared `actor`** across all 8 combat actions: `actor?: string` — executor alias (required when `controlledPartySize > 1`, omitted at `= 1`). Validation: the alias must be a controlled character; at `party = 1` the single/active one acts. The validator checks phase/right (whose turn) against `actor`.
+> **Shared `actor`** across all 9 combat actions: `actor?: string` — executor alias (required when `controlledPartySize > 1`, omitted at `= 1`). Validation: the alias must be a controlled character; at `party = 1` the single/active one acts. The validator checks phase/right (whose turn) against `actor`.
 
 Details:
 - **`move_to_target`**: schema `{ "type": "object", "required": ["target_id"], "properties": { "target_id": {"type": "string"}, "actor": {"type": "string"} } }`. Neuro sees available targets in state.
 - **`attack_entity`**: `target_id` + `actor` (main hand always, no `weapon_slot` — offhand only via `bonus_action`).
-- **`cast_spell`** (AoE): `actor` + `spell_name` — from state (source of truth); `coverage` (optional) — desired victim list, the plugin centers the blast on the coverage optimum, failure with a list if not everything is reachable; `position` (optional) — raw center coordinates `{x, y, z}` (BG3SE API 3D), fallback (enabled via config, disabled by default). AoE coverage and range are computed by the plugin — a single code path with StateSerializer. **v0.8.35:** this is also the path for weapon actions / bonus-action abilities (e.g. Flourish). `spell_name` accepts **either** the engine stat id (`Target_OpeningAttack`) **or** the friendly `name` from the state (`flourish`); the plugin resolves the friendly name to the engine id before dispatch. The plugin spends the ability's own resource cost (a bonus-action ability spends BA) natively — `bonus_action` stays `offhand_attack`-only.
-- **`use_item`**: `actor` + item + target. Drinking a potion as an action — here (both paths: `use_item` and `bonus_action.drink_potion`).
+- **`cast_spell`** (AoE): `actor` + `spell_name` — from state (source of truth); `coverage` (optional) — desired victim list, the plugin centers the blast on the coverage optimum, failure with a list if not everything is reachable; `position` (optional) — raw center coordinates `{x, y, z}` (BG3SE API 3D), fallback (enabled via config, disabled by default). **v0.8.60 (ticket 20):** `target_ids` (optional) — list of targets for multi-target spells (e.g. Bless); the plugin casts the spell once and lets the engine hit all listed targets. AoE coverage and range are computed by the plugin — a single code path with StateSerializer. **v0.8.35:** this is also the path for weapon actions / bonus-action abilities (e.g. Flourish). `spell_name` accepts **either** the engine stat id (`Target_OpeningAttack`) **or** the friendly `name` from the state (`flourish`); the plugin resolves the friendly name to the engine id before dispatch. The plugin spends the ability's own resource cost (a bonus-action ability spends BA) natively — `bonus_action` stays `offhand_attack`-only.
+- **`use_item`**: `actor` + item + target. Present in the schema and validated on the C# side, but **execution returns `not_supported`** (the mod has no Lua executor for it — falls through to the v1 decline, `BG3Neuro.lua:6659`). Drinking a potion as an action is not available in v1 through this path; only `bonus_action.drink_potion`/economy is planned (§6.4b).
 - **`throw`**: `actor` + `item_id` + `target_id`. Present in the schema, but execution returns `not_supported` — **bench-proven** (see §11 note): the engine rejects synthetic `Throw_Throw` casts in every variant (4 force queues + 2 honest `FromClient`), always `CastSpellFailed(..., storyActionID=0)`, `UsingSpell` never fires. Honest "implemented later" failure, not silence.
+- **`hide`** (v0.8.70, ticket 28): `actor` only, no target. Casts `Shout_Hide` (Shout) through the honest cast queue; a bonus action by economy. `Osi.HasSpell(actor, "Shout_Hide")` must be in the caster's book (`no_hide` failure otherwise). Requires combat phase (validator: `wrong_phase` out of combat / on another's turn).
 - **`bonus_action.action_type`** (full, fixed enum):
   - `offhand_attack` — attack with the second hand (needs an offhand weapon)
   - `drink_potion` — drink a potion (as a second tempo/bonus)
@@ -318,9 +345,11 @@ Details:
   - `counterspell` — counterspell
   - `none` — do not use a reaction this turn
 
+> **`set_reaction`** is registered and phase-validated on the C# side, but **execution returns `not_supported` in v1** — the mod has no Lua executor for it (falls through to the v1 decline, `BG3Neuro.lua:6659`, like `use_item`/pre-`hide` `throw`). No scripted runtime ever sets a reaction in v1; the schema stays for the economy rollout.
+
 > **Phase validation for `bonus_action`/`set_reaction`:** these actions require the controlled character's turn. If it is someone else's turn or there is no combat → `wrong_phase` (Channel A, §6.5) with an actionable message ("It's not your turn — whose/phase"), not `invalid_parameters`.
 
-> Limitation (from BEST_PRACTICES): "she tends to fixate on a few of them". Compensation — the full fixed set (all 17 at startup, B) + the relevant subset in state + actionable failure with the options list.
+> Limitation (from BEST_PRACTICES): "she tends to fixate on a few of them". Compensation — the full fixed set (all 18 at startup, B) + the relevant subset in state + actionable failure with the options list.
 
 ### 5.2 Dialogue Actions (1)
 
@@ -329,7 +358,7 @@ Details:
 ```json
 {
   "name": "select_dialogue_option",
-  "description": "Choose one of the proposed dialogue answer options.",
+  "description": "Choose one of the offered dialogue responses.",
   "schema": {
     "type": "object",
     "required": ["option_index"],
@@ -363,9 +392,9 @@ Details:
 > **Shared `actor`** across all 8 exploration actions: `actor?: string` — executor alias (required when `controlledPartySize > 1`, omitted at `= 1`). Same as combat actions (§5.1).
 
 Details:
-- **`interact_with`**: free-form `interaction_type` (not an enum!) from state — matches BEST_PRACTICES (a changing set of interactions → free parameter + runtime validation). Show available interactions in state: `wooden_door (closed, 3m): [open, break, shove]`. Mismatch → failure with an actionable message ("The door has available: open, break, shove"). Omitted → default (first/"open").
+- **`interact_with`**: free-form `interaction_type` (not an enum!) from state — matches BEST_PRACTICES (a changing set of interactions → free parameter + runtime validation). Show available interactions in state: `- wooden_door (Large Wooden Door): 3m, closed: [open, break, shove]` (§3.5 format). Mismatch → failure with an actionable message ("The door has available: open, break, shove"). Omitted → default (first/"open").
 - **`loot`**: a separate action (a frequent gesture in BG3, Neuro orders it explicitly).
-- **`open_map`/`open_inventory`**: view only. `open_map` → map screen state (locations for `travel_to`); `open_inventory` → inventory state (use via `use_item`). Equipping/dropping/sorting/trading — out of scope.
+- **`open_map`/`open_inventory`**: view only. `open_map` → map screen state (locations for `travel_to`); `open_inventory` → inventory state (view items; using items from inventory is not_supported in v1 — the `use_item` action slot exists but has no executor, §5.1). Equipping/dropping/sorting/trading — out of scope.
 - **`toggle_mode`** (X3): `target_id?` (default active; required for a party) + `mode`. **In v1 the enum is only `["normal"]`**; `"stealth"` removed (no public Osiris API to toggle stealth; will return after an experiment).
 - **`rest`**: `rest_type` enum [full, partial]. Neuro chooses how many supplies to spend.
 - **`travel_to`**: `destination` = **region name** (human-readable, primary); `region_id?` — **optional**, region id for unambiguity with ambiguous names (the validator checks: if `region_id` given — match by it, otherwise by name). State shows the mapping: `→ locations (available): [Area Name (id: xxx)]` with distance in the §3.3 hybrid format.
@@ -374,9 +403,9 @@ Details:
 
 ### 5.4 Full JSON Schemas (registration reference, E5)
 
-Registration format — `Action` from SPECIFICATION.md: `name`, `description`, `schema` (JSON Schema object). All 17 — PERSISTENT, at startup (B). `actor` — optional in schema (runtime validation: required when `controlledPartySize > 1`, see §5.1/§5.3).
+Registration format — `Action` from SPECIFICATION.md: `name`, `description`, `schema` (JSON Schema object). All 18 — PERSISTENT, at startup (B). `actor` — optional in schema (runtime validation: required when `controlledPartySize > 1`, see §5.1/§5.3).
 
-**Combat (8):**
+**Combat (9):**
 
 ```json
 [
@@ -387,24 +416,25 @@ Registration format — `Action` from SPECIFICATION.md: `name`, `description`, `
         "target_id": { "type": "string" },
         "actor":     { "type": "string" } } } },
   { "name": "attack_entity",
-    "description": "Attack the specified enemy with the main weapon.",
+    "description": "Attack the specified enemy with a main-hand weapon.",
     "schema": { "type": "object", "required": ["target_id"],
       "properties": {
         "target_id": { "type": "string" },
         "actor":     { "type": "string" } } } },
   { "name": "cast_spell",
-    "description": "Cast a spell; for AoE — provide a target_id, coverage, or a center position.",
+    "description": "Cast a spell; for AoE, provide target_id, coverage, or the centre position. For multi-target spells (e.g. bless), provide target_ids.",
     "schema": { "type": "object", "required": ["spell_name"],
       "properties": {
         "spell_name": { "type": "string" },
         "target_id":  { "type": "string" },
+        "target_ids": { "type": "array", "items": { "type": "string" } },
         "coverage":   { "type": "array", "items": { "type": "string" } },
         "position":   { "type": "object",
           "required": ["x", "y", "z"],
           "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "z": { "type": "number" } } },
         "actor":      { "type": "string" } } } },
   { "name": "use_item",
-    "description": "Use an inventory item (heal, armor, food) on yourself or the specified target.",
+    "description": "Use an inventory item (healing, armour, food) on yourself or the specified target.",
     "schema": { "type": "object", "required": ["item_id"],
       "properties": {
         "item_id":   { "type": "string" },
@@ -417,6 +447,11 @@ Registration format — `Action` from SPECIFICATION.md: `name`, `description`, `
         "item_id":   { "type": "string" },
         "target_id": { "type": "string" },
         "actor":     { "type": "string" } } } },
+  { "name": "hide",
+    "description": "Hide the current character as a bonus action (Shout_Hide).",
+    "schema": { "type": "object", "required": [],
+      "properties": {
+        "actor": { "type": "string" } } } },
   { "name": "bonus_action",
     "description": "Perform a bonus action (offhand_attack, drink_potion, help, shove, disengage, dash, dodge).",
     "schema": { "type": "object", "required": ["action_type"],
@@ -444,11 +479,11 @@ Registration format — `Action` from SPECIFICATION.md: `name`, `description`, `
 ```json
 [
   { "name": "move_to_entity",
-    "description": "Move to the specified aware target.",
+    "description": "Move to the specified known target.",
     "schema": { "type": "object", "required": ["target_id"],
       "properties": { "target_id": { "type": "string" }, "actor": { "type": "string" } } } },
   { "name": "interact_with",
-    "description": "Interact with an object using one of the available ways (see state).",
+    "description": "Interact with the object using one of the available interactions (see state).",
     "schema": { "type": "object", "required": ["target_id"],
       "properties": {
         "target_id":        { "type": "string" },
@@ -459,15 +494,15 @@ Registration format — `Action` from SPECIFICATION.md: `name`, `description`, `
     "schema": { "type": "object", "required": ["target_id"],
       "properties": { "target_id": { "type": "string" }, "actor": { "type": "string" } } } },
   { "name": "open_map",
-    "description": "Open the map (view locations).",
+    "description": "Open the map (location overview).",
     "schema": { "type": "object", "required": [],
       "properties": { "actor": { "type": "string" } } } },
   { "name": "open_inventory",
-    "description": "Open the inventory (view items).",
+    "description": "Open the inventory (item overview).",
     "schema": { "type": "object", "required": [],
       "properties": { "actor": { "type": "string" } } } },
   { "name": "toggle_mode",
-    "description": "Toggle the character mode (v1: normal).",
+    "description": "Toggle the character's mode (v1: normal).",
     "schema": { "type": "object", "required": ["mode"],
       "properties": {
         "mode":      { "type": "string", "enum": ["normal"] },
@@ -478,7 +513,7 @@ Registration format — `Action` from SPECIFICATION.md: `name`, `description`, `
     "schema": { "type": "object", "required": ["rest_type"],
       "properties": { "rest_type": { "type": "string", "enum": ["full", "partial"] }, "actor": { "type": "string" } } } },
   { "name": "travel_to",
-    "description": "Travel to a location by area name.",
+    "description": "Travel to a location by region name.",
     "schema": { "type": "object", "required": ["destination"],
       "properties": {
         "destination": { "type": "string" },
@@ -498,7 +533,7 @@ Note: free-form parameters (`cast_spell.spell_name`, `interact_with.interaction_
 1. C# validates the schema + target existence + prechecks against state (`IsInCombat`, `CanAllPartiesLongRest`, spell existence in `SpellBook`) → writes the single `neuro_to_bg3.json` command file (plus an `action_<id>.json` trace copy).
 2. Server Lua poll: `Ext.Timer.WaitForRealtime(100–250ms)` → reads `neuro_to_bg3.json` → dispatches → immediately writes `result_<id>.json` (`Ext.Json.Stringify` + `Ext.IO.SaveFile`): `{success, error_code, error_detail}`.
 3. Long actions (movement/cast) → intermediate `success:true, running:true` + final via a `RegisterListener` event (`CastedSpell`, `CharacterMoveToCancelled`) — never block the thread with `WaitFor`.
-4. Timeout: **5 s** ACK from C#; missing result file after N polls = error per the dictionary (§6.5). No timer-based waits for game effects in Lua.
+4. Timeout: the C# side polls for `result_<id>.json` every **100 ms** up to `actions.result_timeout_s` (default **20 s**, `ActionsConfig.ResultTimeoutS`, see §8 R6); missing result file after that = `action_failed`/timeout per the dictionary (§6.5). No timer-based waits for game effects in Lua.
 5. BG3SE Lua single-threading confirmed → commands are serialized: one in-flight action per context, queues in C# and Lua.
 
 ### 6.2 Key BG3SE APIs (research digest)
@@ -514,7 +549,8 @@ Note: free-form parameters (`cast_spell.spell_name`, `interact_with.interaction_
 | Dialogue start | `Osi.CharacterMoveToAndTalk` / `Osi.StartDialog_Internal` | ✔ |
 | Dialogue option select | **no public function** → §7 (X1) | ✘ |
 | Rest | `Osi.RequestLongRest(initiator, isForced)` (+ `RequestLongRestConfirmed`); gate `Osi.CanAllPartiesLongRest` | ✔ |
-| Stealth | **no public function** → §5.3 (X3) | ✘ |
+| Stealth as a **mode** (`toggle_mode: "stealth"`) | **no public function** → §5.3 (X3) | ✘ |
+| Hide in combat (`hide` action) | `Osi.UseSpell`/`enqueueCastRequest` on `Shout_Hide` (v0.8.70, ticket 28) | ✔ |
 | Loot | `Osi.Pickup`, `Osi.OpenCharacterLootUI`, `Osi.MoveAllLootableItemsTo`, `Osi.ToInventory` | ✔ |
 | Turn/combat | Events `TurnStarted/TurnEnded/CombatStarted/CombatEnded/CombatRoundStarted`, `Osi.CombatGetActiveEntity`, `Osi.EndTurn` | ✔ |
 | Spell/ability list | `Ext.Entity.Get(char).SpellBookPrepares.PreparedSpells` (full stat id via `OriginatorPrototype`/`Prototype`) + `Ext.Stats.Get(name)` (`UseCosts` → `cost`, `SpellType`/`TargetRadius`/`AreaRadius` → range/AoE) + `Ext.Stats.Get(name).DisplayName` → `Ext.Loca.GetTranslatedString` (friendly `name`, slugged; curated `ABILITY_NAME_FALLBACK` when there is no translation) | ✔ |
@@ -564,7 +600,7 @@ Stored in the mod's `ScriptExtender/Config.json` (`force_legacy`, `legacy_fail_l
 | `not_in_combat` | The action requires combat; there is no combat |
 | `no_spell` | Spell unavailable (not in SpellBook / on cooldown / no resources) |
 | `no_camp` | Cannot rest (no camp / no valid spot) |
-| `not_supported` | There is a schema slot but execution comes later (`throw`) |
+| `not_supported` | There is a schema slot but execution comes later (`throw`, `use_item`, `set_reaction`, and the unimplemented `bonus_action` types — all validate on the C# side, then the mod declines with `not_supported` since there is no Lua executor) |
 | `target_not_in_range` / `invalid_parameters` | Parameter validation failed |
 | `wrong_phase` | The action requires a controlled character's turn (`bonus_action`, `set_reaction`), but it is someone else's turn / no combat |
 | `not_your_character` | Multi-agent (§12): `actor` is a **controlled party member owned by a different agent** (criss-cross). Single-agent never emits it — every controlled character belongs to the one agent. Actionable message names your owned alias ("You are playing Karlach, not Astarion — only act for your own character.") |
@@ -606,7 +642,7 @@ ClientAutoselectExecutor
 ## 8. Resilience and Error Handling
 
 - **R1 — Neuro WS reconnect**: after recovery → re-send `startup` + re-register actions. Handle `actions/reregister_all` (PROPOSALS.md): respond by registering the whole persistent (fixed) set.
-- **R2 — BG3SE Mod restart**: the mod writes `heartbeat.json` every **2 s**; C# considers the heartbeat stale when older than **> 10 s** → status "mod unavailable", waits for recovery; for an unfinished action → failure `mod_unavailable`; after recovery — re-init (the mod recreates polling). The 10 s threshold favors resilience to engine pauses (level loading, cutscenes) rather than detection speed — in a turn-based game detection latency is harmless. The 5s timeout is an additional signal.
+- **R2 — BG3SE Mod restart**: the mod writes `heartbeat.json` every **2 s**; C# considers the heartbeat stale when older than **> 10 s** → status "mod unavailable", waits for recovery; for an unfinished action → failure `mod_unavailable`; after recovery — re-init (the mod recreates polling). The 10 s threshold favors resilience to engine pauses (level loading, cutscenes) rather than detection speed — in a turn-based game detection latency is harmless. The action-result timeout (`result_timeout_s`, R6) is an independent signal on a different axis (how long C# waits for the mod's `result_<id>.json`, not heartbeat staleness).
 - **R3 — force/self-action race**: always dispatch whatever actions Neuro sends (README: listen regardless of force). C# validation rejects the impossible with an actionable failure. Clarified (review C): force is a context push, replaced without a queue; a new force on top of an active one **cancels and replaces** (SPEC §Force Actions), safe because every force carries the full fresh state.
 - **R4 — Disposables**: no disposable actions, everything PERSISTENT. An invalid repeat → a consistent actionable failure ("dialogue already closed").
 - **R5 — Force replacement**: forces are replaced idempotently (a new force is a new push, see R3).
@@ -668,7 +704,8 @@ The Lua part (BG3SE mod) against mocked `Ext.*` — light smoke on the bench, **
 - Packaging and deployment
 - Trading (buy/sell) — a separate UI screen outside dialogue options
 - `throw` (item throwing) — `not_supported` (bench-proven 2026-09-23, ticket 28: engine rejects the synthetic cast in all queues — forced `osiris/network/item/anubis` and honest `FromClient` `item/network` — with `CastSpellFailed(..., storyActionID=0)`; a live manual throw shows the engine itself picking the item into the caster's hand first, a stage the synthetic request lacks).
-- Stealth mode `"stealth"` for `toggle_mode` — no public API
+- `use_item` as an action — **registered + validated but `not_supported` in v1** (no Lua executor, `BG3Neuro.lua:6659`); same for `set_reaction` and the non-`offhand_attack` `bonus_action` types (§6.4b).
+- Stealth mode `"stealth"` for `toggle_mode` — no public API (the `hide` action is a separate, working Shout_Hide §5.1 — hiding in combat, not a mode toggle).
 
 **Post-v1 experiments** (not part of the current spec): stealth-status experiment (for `"stealth"` in `toggle_mode`).
 
