@@ -34,51 +34,50 @@ A recommended delivery topology (which candidate, or combination), with the exac
 
 ## Answer
 
-**Вердикт 1 — сокеты: N отдельных WS-соединений, по одному на агента; мультиплексировать двух агентов в один socket нельзя.**
+**Verdict 1 — sockets: N separate WS connections, one per agent; multiplexing two agents into one socket is not possible.**
 
-- Протокол Neuro назначает соединению ровно одного персонажа при старте: `startup.data.session.characterId` ∈ `{neuro, evil}` с `displayName` (`SPECIFICATION.md:198-216`); сервер выбирает character по своему конфигу при подключении (`VOICE_CHAT.md:137`: "which character a connection talks to is backend configuration"). Один socket = одна развилка персонаж/агент.
-- Сервер **нативно рассчитан на несколько одновременных подключений**: `BEST_PRACTICES.md:22` — "Action names are scoped to the character and shared with any other integration connected at the same time" (регистрации от нескольких integration живут вместе), а `VOICE_CHAT.md:135-138` описывает как официальный сценарий «Neuro и Evil в одном lobby» (каждый через «each game process connects on behalf of its own character»). То есть N sockets укладывается в серверный контракт прямо.
-- Единственный серверный запрет — не «сколько sockets», а «one action force at a time» (`SPECIFICATION.md:139-140`, `Unity/USAGE.md:165`): это ограничение **на канал**, и оно же даёт нам разделение: у каждого агента свой force-канал за счёт своего socket (вопрос 4 → «каждый агент форсит свой канал»).
+- The Neuro protocol assigns exactly one character to a connection at startup: `startup.data.session.characterId` ∈ `{neuro, evil}` with `displayName` (`SPECIFICATION.md:198-216`); the server selects the character by its own config at connection time (`VOICE_CHAT.md:137`: "which character a connection talks to is backend configuration"). One socket = one character/agent fork.
+- The server is **natively built for several simultaneous connections**: `BEST_PRACTICES.md:22` — "Action names are scoped to the character and shared with any other integration connected at the same time" (registrations from several integrations coexist), and `VOICE_CHAT.md:135-138` describes "Neuro and Evil in one lobby" as an official scenario (each via "each game process connects on behalf of its own character"). That is, N sockets fit the server contract directly.
+- The only server restriction — not "how many sockets", but "one action force at a time" (`SPECIFICATION.md:139-140`, `Unity/USAGE.md:165`): this constraint is **per channel**, and it also gives us the separation: each agent has its own force channel thanks to its own socket (question 4 → "each agent forces its own channel").
 
-Наш `NeuroWebSocketClient` уже устроен как **один инстанс = одно соединение** (поля `_url/_game/_actions/_reconnectInterval` в конструкторе, `:52-58`; свой `_ws`/`_sendLock`/`_cts`; `SessionInfo.CharacterId` уже читается в `HandleStartupAck`, `:246-254`). Один экземпляр = один агент; второй агент = второй экземпляр (тот же/свой URL). Никакого мультиплекса в классе.
+Our `NeuroWebSocketClient` is already structured as **one instance = one connection** (fields `_url/_game/_actions/_reconnectInterval` in the constructor, `:52-58`; its own `_ws`/`_sendLock`/`_cts`; `SessionInfo.CharacterId` is already read in `HandleStartupAck`, `:246-254`). One instance = one agent; the second agent = a second instance (same or its own URL). No multiplexing in the class.
 
-**Вердикт 2 — файловый мост: кандидат 3 (очередь/сериализация) в чистом виде; per-agent файлы (кандидат 2) не нужны и вредны; кандидат 1 отклонён вместе с мультиплексом.**
+**Verdict 2 — file bridge: candidate 3 (queue/serialization) in its pure form; per-agent files (candidate 2) are unneeded and harmful; candidate 1 is rejected together with the multiplex.**
 
-| | Запись команды | Запись результата | Мод |
+| | Command write | Result write | Mod |
 | --- | --- | --- | --- |
-| Cейчас | C# → `neuro_to_bg3.json` (`IpcPaths.WriteCommandFile:48-58`) | Lua → `result_<id>.json` (`BG3Neuro.lua:124`) | читает **один** файл `NEURO_TO_BG3_FILE` (`:36, 89`), поллит раз в `ACTION_POLL_MS` (`:33`), очищает сразу после чтения (`clearInFlight:6662`) |
-| Два агента | оба C#-агента пишут **в один и тот же файл** — нужен лок/очередь | `result_<id>.json` уже уникален по id — **не конфликтует** | мод остаётся **однопотоковым single-slot**: он и так исполняет одно действие в момент — это его догмат; менять его НЕ нужно |
+| Now | C# → `neuro_to_bg3.json` (`IpcPaths.WriteCommandFile:48-58`) | Lua → `result_<id>.json` (`BG3Neuro.lua:124`) | reads **one** file `NEURO_TO_BG3_FILE` (`:36, 89`), polls every `ACTION_POLL_MS` (`:33`), clears it right after reading (`clearInFlight:6662`) |
+| Two agents | both C# agents write **to the same file** — a lock/queue is needed | `result_<id>.json` is already unique by id — **no conflict** | the mod stays **single-threaded single-slot**: it already executes one action at a time — that's its doctrine; it must NOT be changed |
 
-Вывод по кандидатам:
-- **Кандидат 1 (agent_id в `data.action`) — не для моста, а для различения.** В `action` нейросервера нет агента — но агент известен по **экземпляру клиента/сокета**, из которого пришло событие (`Program.cs` подписывается на `ActionRequested` каждого `NeuroWebSocketClient` отдельно, `:71`). `agent_id` не нужно глотать в JSON — identity живёт в C#, а мода агент не интересует (ему нужен `actor` из `data`/`actingChar`, который уже парти-скоуп). `SessionInfo` не «нести двух identities» — он один на соединение по построению.
-- **Кандидат 2 (per-agent файлы `neuro_to_bg3_<char>.json`)** — отклонён: мод читает один жёстко зашитый файл (`:36`); разносить поллинг по N файлам = менять мод, а выгоды ноль — движок и так исполняет одно действие за раз. Два файла не дают параллелизма исполнения, только риск гонок на стороне игры.
-- **Кандидат 3 (очередь)** — **это и есть модель**: C#-сторона сериализует записи в `neuro_to_bg3.json` одним потоком-писателем. Второй агент «ждёт слота» естественно: `DecisionLoop.WaitForExecutionResultAsync` (`:232-254`) уже ждёт `result_<id>.json` (до таймаута `result_timeout_s`); пока первый агент `running:true`/без результата, второй на та же очередь не пишет. Это превращает бенч-правило «инжекти строго серийно» в код. Одно «действие в пути» в файле — ровно как single-party сегодня.
+Candidate conclusions:
+- **Candidate 1 (`agent_id` in `data.action`) — not for the bridge, but for distinction.** The Neuro server's `action` has no agent — but the agent is known from the **client/socket instance** that raised the event (`Program.cs` subscribes to each `NeuroWebSocketClient`'s `ActionRequested` separately, `:71`). `agent_id` does not need to be swallowed into JSON — the identity lives in C#, and the agent is irrelevant to the mod (it needs `actor` from `data`/`actingChar`, which is already party-scoped). `SessionInfo` does not "carry two identities" — it is one per connection by construction.
+- **Candidate 2 (per-agent files `neuro_to_bg3_<char>.json`)** — rejected: the mod reads one hardcoded file (`:36`); splitting the polling across N files means changing the mod, and the benefit is zero — the engine already executes one action at a time. Two files give no execution parallelism, only a race risk on the game side.
+- **Candidate 3 (queue)** — **this is exactly the model**: the C# side serializes writes to `neuro_to_bg3.json` with a single writer thread. The second agent "waits for the slot" naturally: `DecisionLoop.WaitForExecutionResultAsync` (`:232-254`) already waits for `result_<id>.json` (until the `result_timeout_s` timeout); while the first agent is `running:true`/without a result, the second does not write to the same queue. This turns the bench rule "inject strictly serially" into code. One "action in flight" in the file — exactly like single-party today.
 
-**Вердикт 3 — результат/атрибуция.** `result_<id>.json` уникален по id (у каждого агента свой `NeuroWebSocketClient` и свой id-поток). Соответствие «id → какому агенту вернуть» хранится на C#: у `DecisionLoop` есть свой `_neuro` (`:24`) и `SendResultAsync` идёт в конкретный клиент (`:221,226`). Два `DecisionLoop` ≠ один общий — у каждого собственный `_neuro` и `_lastForcedContent` (`:31`), поэтому `_lastForcedContent` не «похарят» друг друга (вопрос 4).
+**Verdict 3 — result/attribution.** `result_<id>.json` is unique by id (each agent has its own `NeuroWebSocketClient` and its own id stream). The "id → which agent to return to" mapping is stored on the C# side: `DecisionLoop` has its own `_neuro` (`:24`) and `SendResultAsync` goes to the specific client (`:221,226`). Two `DecisionLoop`s ≠ one shared one — each has its own `_neuro` and `_lastForcedContent` (`:31`), so `_lastForcedContent` won't clobber each other (question 4).
 
-**Вердикт 4 — force.** Один force-канал на агента: у каждого `DecisionLoop` свой `SendForceAsync` на свой `NeuroWebSocketClient`. Серверное «one force at a time» соблюдается в рамках канала — а межканального запрета нет. `_lastForcedContent` дедупликация — per-agent, не глобальная.
+**Verdict 4 — force.** One force channel per agent: each `DecisionLoop` has its own `SendForceAsync` to its own `NeuroWebSocketClient`. The server's "one force at a time" holds within a channel — and there is no cross-channel restriction. `_lastForcedContent` deduplication is per-agent, not global.
 
-### Итоговая топология (рекомендация)
+### Final topology (recommendation)
 
 ```
-Neuro #1 (characterId=neuro) ──ws──▶ NeuroWebSocketClient#1 ──▶ DecisionLoop#1 ──▶ ActionRouter(request) ─▶ IpcPaths (один writer-lock) ─▶ neuro_to_bg3.json ─▶ BG3Neuro.lua (однопоточный poll)
-Neuro #2 (characterId=evil)  ──ws──▶ NeuroWebSocketClient#2 ──▶ DecisionLoop#2 ──▶ (тот же) ActionRouter ──🔒 serialized──┘                                          │
-                                                                                                                                           result_<id>.json (per id) ◀──┘
+Neuro #1 (characterId=neuro) ──ws──▶ NeuroWebSocketClient#1 ──▶ DecisionLoop#1 ──▶ ActionRouter(request) ─▶ IpcPaths (single writer-lock) ─▶ neuro_to_bg3.json ─▶ BG3Neuro.lua (single-threaded poll)
+Neuro #2 (characterId=evil)  ──ws──▶ NeuroWebSocketClient#2 ──▶ DecisionLoop#2 ──▶ (same) ActionRouter ──🔒 serialized──┘                                          │
 ```
-- Два независимых `NeuroWebSocketClient` (агент = экземпляр).
-- Один общий `ActionRouter` (валидация) + **один поток-писатель** для `IpcPaths.WriteCommandFile` (SemaphoreSlim или однопоточная очередь; место — `Program.cs` / `DecisionLoop` общий writer).
-- Мод **не меняется** для доставки: один `neuro_to_bg3.json`, один poll, one-slot. `pollActions:6672-6696` без правок.
-- Для «кто каким персонажем владеет» — правки вне доставки, см. тикет 03 (`agent→character` map, `actor` уже переносится в `data`).
+- Two independent `NeuroWebSocketClient` instances (agent = instance).
+- One shared `ActionRouter` (validation) + **a single writer thread** for `IpcPaths.WriteCommandFile` (SemaphoreSlim or a single-threaded queue; location — a shared writer in `Program.cs` / `DecisionLoop`).
+- The mod is **unchanged** for delivery: one `neuro_to_bg3.json`, one poll, one-slot. `pollActions:6672-6696` untouched.
+- For "who owns which character" — changes outside delivery, see ticket 03 (`agent→character` map, `actor` is already carried into `data`).
 
-### Точные изменения (если пойдём в имплементацию)
+### Exact changes (if we go into implementation)
 
 C#:
-- `Program.cs:46-54`: создать **два** `NeuroWebSocketClient` (+ второй `DecisionLoop`), подписки на `SessionStarted`/`ActionRequested`/`ConnectionStateChanged` per agent; `CharacterId` уже различает агентов (`NeuroWebSocketClient.cs:246-254`).
-- `IpcPaths.WriteCommandFile` (`:48-58`): обернуть в сериализацию (SemaphoreSlim/очередь). Ничего не менять в сигнатурах: `data` уже JSON-string, команда одна.
-- `DecisionLoop.DispatchAsync` (`:215-227`): уже per-agent по `_neuro`; обеспечить, чтобы validation-запись и ожидание результата шли через общий writer-lock (или один писатель в Program.cs). `_lastForcedContent` остаётся per-instance.
-- `Messages.cs/`ActionRequestedEventArgs`: необязательно добавить `AgentId` — идентичность известна по подписке/аргументу события.
+- `Program.cs:46-54`: create **two** `NeuroWebSocketClient` (+ a second `DecisionLoop`), subscriptions to `SessionStarted`/`ActionRequested`/`ConnectionStateChanged` per agent; `CharacterId` already distinguishes the agents (`NeuroWebSocketClient.cs:246-254`).
+- `IpcPaths.WriteCommandFile` (`:48-58`): wrap in serialization (SemaphoreSlim/queue). Change nothing in signatures: `data` is already a JSON string, the command is one.
+- `DecisionLoop.DispatchAsync` (`:215-227`): already per-agent via `_neuro`; ensure the validation-write and the result wait go through the shared writer-lock (or a single writer in Program.cs). `_lastForcedContent` stays per-instance.
+- `Messages.cs/`ActionRequestedEventArgs`: optionally add `AgentId` — the identity is known from the event subscription/argument.
 
 Lua / `mod/BG3Neuro/BG3Neuro.lua`:
-- **Изменений не требуется** для доставки (мост остаётся single-slot, мод и не должен знать про 2 агентов). Персонаж действия уже гейтится самим модом по `actor`/`actingChar` — разделение персонажей это тикет 03.
+- **No changes required** for delivery (the bridge stays single-slot, and the mod shouldn't even know about 2 agents). The action's character is already gated by the mod itself via `actor`/`actingChar` — character separation is ticket 03.
 
-Источники: `neuro-sdk/API/SPECIFICATION.md:198-240` (startup/characterId, one force at a time), `BEST_PRACTICES.md:22,36` (несколько integrations одновременно, force per channel), `VOICE_CHAT.md:135-138` (Neuro+Evil в одном lobby — каждый через свой connection), `Unity/USAGE.md:165`, `NeuroWebSocketClient.cs:34-58,238-254`, `DecisionLoop.cs:24-31,209-254`, `IpcPaths.cs:21-58`, `BG3Neuro.lua:33-37,86-130,6662-6696`.
+Sources: `neuro-sdk/API/SPECIFICATION.md:198-240` (startup/characterId, one force at a time), `BEST_PRACTICES.md:22,36` (multiple simultaneous integrations, force per channel), `VOICE_CHAT.md:135-138` (Neuro+Evil in one lobby — each via its own connection), `Unity/USAGE.md:165`, `NeuroWebSocketClient.cs:34-58,238-254`, `DecisionLoop.cs:24-31,209-254`, `IpcPaths.cs:21-58`, `BG3Neuro.lua:33-37,86-130,6662-6696`.

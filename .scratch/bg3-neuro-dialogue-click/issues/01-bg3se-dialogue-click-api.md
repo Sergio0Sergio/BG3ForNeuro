@@ -1,4 +1,4 @@
-# 01 — BG3SE: как программно выбрать вариант диалога (server vs client)
+# 01 — BG3SE: how to programmatically select a dialogue option (server vs client)
 
 Type: research
 Status: resolved
@@ -6,24 +6,24 @@ Blocked by: —
 
 ## Question
 
-Какими API и механизмами BG3 Script Extender можно **программно выбрать вариант диалога**?
+Which BG3 Script Extender APIs and mechanisms allow **programmatically selecting a dialogue option**?
 
-1. **Server-контекст**: какие средства существуют в BG3SE/osiris — функции `NRD_Dialog*`, `Ext.Dialog`, команды вида `DialogSetAnswer` / `CharacterUserSetDialog` / `DialogGetNode` — и что из них реально «выбирает» опцию, а не только читает дерево диалога. Есть ли рабочий server-only маршрут (например, через osiris-колбэк на выбранную ноду или прямую установку answer).
-2. **Client-контекст**: реальность `Ext.UI` на клиенте — имя UI-элемента окна диалога, как найти option по `option_index` (= порядок в окне), как вызвать «клик»/«выбор» (Invoke / коллбеки / кнопка / `Ext.UI.GetByType`), ограничения (client-only, local-coop-сессия).
-3. **Server↔client обмен**: доступны ли в SE явные OS-мосты (`Ext.Net.PostMessageToServer` / `PostMessageToClient` или аналоги), как server-Lua передаёт команду client-Lua, что в двухпроцессной модели local-coop (server и client — отдельные процессы).
-4. **Вердикт-факт**: обязателен ли клиентский контекст для клика, или существует серверный маршрут.
+1. **Server context**: what facilities exist in BG3SE/osiris — functions `NRD_Dialog*`, `Ext.Dialog`, commands like `DialogSetAnswer` / `CharacterUserSetDialog` / `DialogGetNode` — and which of them actually "select" an option rather than only reading the dialogue tree. Is there a working server-only route (e.g., via an osiris callback on the selected node or a direct answer set).
+2. **Client context**: the reality of `Ext.UI` on the client — the dialogue window UI element name, how to find an option by `option_index` (= order in the window), how to trigger a "click"/"selection" (Invoke / callbacks / button / `Ext.UI.GetByType`), limitations (client-only, local-coop session).
+3. **Server↔client exchange**: are explicit OS bridges available in SE (`Ext.Net.PostMessageToServer` / `PostMessageToClient` or similar), how server-Lua passes a command to client-Lua, what happens in the two-process local-coop model (server and client — separate processes).
+4. **Verdict fact**: is a client context mandatory for the click, or does a server route exist.
 
-Первоисточники: документация BG3SE (wiki-разделы Ext.UI/Ext.Dialog/osiris-функции), репозиторий Norbyte/bg3se (types/lua, ReleaseNotes), примеры модов, использующих диалоговый UI (OptionAutoselect-подобные). Факты, не мнения: под каждый заявленный механизм — источник.
+Primary sources: BG3SE documentation (wiki sections Ext.UI/Ext.Dialog/osiris functions), the Norbyte/bg3se repository (types/lua, ReleaseNotes), examples of mods using dialogue UI (OptionAutoselect-like). Facts, not opinions: a source for every claimed mechanism.
 
-Результат: файл `.scratch/bg3-neuro-dialogue-click/research/01-bg3se-dialogue-click-api.md`.
+Result: the file `.scratch/bg3-neuro-dialogue-click/research/01-bg3se-dialogue-click-api.md`.
 
 ## Answer
 
-**Вердикт: клиентский контекст обязателен — серверного маршрута выбора опции нет.**
+**Verdict: a client context is mandatory — there is no server route for selecting an option.**
 
-- `Ext.Dialog` не существует; в osiris нет `DialogSetAnswer`/`CharacterUserSetDialog`/`DialogGetNode*` — только lifecycle/переменные (start/stop, add/remove actors, set vars). Server-контекст — административный.
-- `Ext.UI` — **client-only**: `GetRoot()` → обход Noesis-дерева (`Child`/`VisualChild`/`Find`) по `option_index`; клик — кнопка `:Execute()` / `Subscribe("Click")`, или симуляция ввода `Ext.Input.InjectKeyPress`.
-- Server↔client мост — **NetChannel**: `Ext.Net.CreateChannel` + `SendToClient` / `RequestToClient(cb)` (legacy `PostMessageToClient`); в single-player обмен in-process, Lua-state изолированы.
-- Обязательный маршрут: server → NetChannel → client-Lua → клик. Нет клиента → fallback `not_supported` (X1).
+- `Ext.Dialog` does not exist; osiris has no `DialogSetAnswer`/`CharacterUserSetDialog`/`DialogGetNode*` — only lifecycle/variables (start/stop, add/remove actors, set vars). The server context is administrative.
+- `Ext.UI` is **client-only**: `GetRoot()` → traversal of the Noesis tree (`Child`/`VisualChild`/`Find`) by `option_index`; the click — a button `:Execute()` / `Subscribe("Click")`, or input simulation `Ext.Input.InjectKeyPress`.
+- The server↔client bridge — **NetChannel**: `Ext.Net.CreateChannel` + `SendToClient` / `RequestToClient(cb)` (legacy `PostMessageToClient`); in single-player the exchange is in-process, Lua states are isolated.
+- Mandatory route: server → NetChannel → client-Lua → click. No client → fallback `not_supported` (X1).
 
-Артефакт: `.scratch/bg3-neuro-dialogue-click/research/01-bg3se-dialogue-click-api.md` (ветка `research/bg3se-dialogue-click-api`, commit `739028c`). Контекст-указатель: тикет 02 «Маршрут клика по диалогу и контракт server↔client» — проектируется поверх этих фактов.
+Artifact: `.scratch/bg3-neuro-dialogue-click/research/01-bg3se-dialogue-click-api.md` (branch `research/bg3se-dialogue-click-api`, commit `739028c`). Context pointer: ticket 02 "Dialogue click route and the server↔client contract" — designed on top of these facts.
