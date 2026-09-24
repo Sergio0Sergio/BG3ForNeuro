@@ -1,7 +1,7 @@
 # 25 — Short Rest (`rest_type != "full"`) is a hollow ack — needs a real rest path
 
 Type: feature
-Status: done (bench passed, v0.8.61 / PAK v099)
+Status: done (bench passed, v0.8.64 / PAK v099)
 Blocked by: PAK install requires a graceful game close (process rule); v099+ installed
 
 ## Finding
@@ -48,7 +48,7 @@ was: the action is only reachable through the **client UI** ("Take Short Rest" b
 4. **Contract:** `rest` documents the short-rest outcome; C# validator `CanAllPartiesLongRest`
    stays for full rest.
 
-## Bench result (2026-09-22, v0.8.61 / PAK v099, passed)
+## Bench result (2026-09-22, v0.8.64 / PAK v099, passed)
 
 - `rest {"actor":"tav","rest_type":"partial"}` → client `executeShortRestViaDc()` finds the HUD widget
   `ls.UIWidget:HotBar` (DataContext `ui::DCWidget`, property `ShortRest`) and calls `cmd:Execute(nil)`.

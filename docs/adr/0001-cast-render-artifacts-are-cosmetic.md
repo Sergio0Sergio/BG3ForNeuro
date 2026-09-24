@@ -2,7 +2,7 @@
 
 - **Status:** accepted (2026-09-21)
 - **Context:** tickets 16 and 22 (`bg3-neuro-followups`)
-- **Related:** `CONTEXT.md` → «Diagnostic pitfalls»
+- **Related:** `CONTEXT.md` → «Diagnostic traps»
 
 ## Context
 

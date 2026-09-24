@@ -39,7 +39,7 @@ In every emitted object/combatant (except the party):
 ```
 
 - Fields `perception`/`perception_reason` are **absent from the state** (rev2, implementation v0.8.62+): the contract **emission = visibility**; the values `known`/`unknown`/`visible` do not exist in v1.
-- `seen_by` from the old schema is **removed** (it was the «lie»). Production C# does not read it (verified: only the test fixture `StateSerializerTests.cs:241`); update the fixture.
+- `seen_by` from the old schema is **removed** (it was the «lie»). **Done in v0.8.62 (ticket 23)**: until then the C# side did read it (`StateSerializer` grouped objects by `SeenBy`), contrary to the earlier draft note — the mod emission (`BG3Neuro.lua:2842`), `ExplorationObject.SeenBy`, the `GroupBy` renderer header and the test fixture (`StateSerializerTests.cs:343-344`) all carried it; all removed, single `## Objects (N)` header instead.
 - **Party**: party members do not pass the perception filter, always emitted (current position).
 - Coordinates of all emitted entities — **current true**; stale coordinates are absent from the protocol by construction.
 - The diagnostics «which signal gave the verdict» (`cansee`/`los`/`frustum`/`fog`) was planned as `perception_reason`, but is **not emitted**; if needed it will return as a separate field outside the App contract.

@@ -46,12 +46,12 @@ does NOT surface this — the error is only visible in the Extender Runtime log.
 - [ ] **1v1**: entering combat → force with `## Turn: …` → `end_turn` → next turn in the state → new force.
 - [ ] **1 vs many**: entering combat with a group ≥2 → `move_to_target`/`attack_entity` at the selected target → damage visible in the next state (`HP …/…`).
 - [ ] **AoE**: `cast_spell` with an AoE spell and empty `coverage` → autonomous target from `CoverageAuto` → failure/success reflected in the state.
-- [ ] **Healing**: `use_item` (potion/healing spell) on self/ally → HP increased in the next state.
-- [ ] **Refusal codes in combat**: `no_spell` (spell not in the list), `not_in_range` (target out of range) — `action/result` arrives with an actionable message, no action file is written.
+- [ ] **Healing**: `cast_spell` Healing Word (potion/healing spell) on self/ally → HP increased in the next state. (`use_item` is registered+validated but `not_supported` in v1 — healing goes through `cast_spell`.)
+- [ ] **Refusal codes in combat**: `no_spell` (spell not in the list), `target_not_in_range` (target out of range) — `action/result` arrives with an actionable message, no action file is written.
 
-## Dialog
+## Dialogue
 
-- [ ] **Simple choice**: dialog → force `## Dialog` with `[1]…` → `select_dialogue_option` → the line changed in the next state, the window closed → force for combat/exploration.
+- [ ] **Simple choice**: dialog → force `## Dialogue` with `[1]…` → `select_dialogue_option` → the line changed in the next state, the window closed → force for combat/exploration.
 - [ ] **Quest dialog**: a branch of several consecutive choices; after the quest completes — correct next mode.
 - [ ] **Closed dialog**: `select_dialogue_option` without an active dialog → `dialogue_closed` via Channel A.
 

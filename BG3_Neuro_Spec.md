@@ -199,7 +199,7 @@ Reply options:
 - goblin_camp_sign (Goblin Camp Sign): 5m, open: [read]
 - wooden_door (Large Wooden Door): 3m, closed: [open, break, shove]
 - backpack (Adventurer's Backpack): 2m: [loot]
-- …, and 5 more
+- … and 5 more
 
 ## Locations (travel)
 - Druid Grove (id: GROVE): 100m
@@ -330,7 +330,7 @@ Details:
 - **`cast_spell`** (AoE): `actor` + `spell_name` — from state (source of truth); `coverage` (optional) — desired victim list, the plugin centers the blast on the coverage optimum, failure with a list if not everything is reachable; `position` (optional) — raw center coordinates `{x, y, z}` (BG3SE API 3D), fallback (enabled via config, disabled by default). **v0.8.60 (ticket 20):** `target_ids` (optional) — list of targets for multi-target spells (e.g. Bless); the plugin casts the spell once and lets the engine hit all listed targets. AoE coverage and range are computed by the plugin — a single code path with StateSerializer. **v0.8.35:** this is also the path for weapon actions / bonus-action abilities (e.g. Flourish). `spell_name` accepts **either** the engine stat id (`Target_OpeningAttack`) **or** the friendly `name` from the state (`flourish`); the plugin resolves the friendly name to the engine id before dispatch. The plugin spends the ability's own resource cost (a bonus-action ability spends BA) natively — `bonus_action` stays `offhand_attack`-only.
 - **`use_item`**: `actor` + item + target. Present in the schema and validated on the C# side, but **execution returns `not_supported`** (the mod has no Lua executor for it — falls through to the v1 decline, `BG3Neuro.lua:6659`). Drinking a potion as an action is not available in v1 through this path; only `bonus_action.drink_potion`/economy is planned (§6.4b).
 - **`throw`**: `actor` + `item_id` + `target_id`. Present in the schema, but execution returns `not_supported` — **bench-proven** (see §11 note): the engine rejects synthetic `Throw_Throw` casts in every variant (4 force queues + 2 honest `FromClient`), always `CastSpellFailed(..., storyActionID=0)`, `UsingSpell` never fires. Honest "implemented later" failure, not silence.
-- **`hide`** (v0.8.70, ticket 28): `actor` only, no target. Casts `Shout_Hide` (Shout) through the honest cast queue; a bonus action by economy. `Osi.HasSpell(actor, "Shout_Hide")` must be in the caster's book (`no_hide` failure otherwise). Requires combat phase (validator: `wrong_phase` out of combat / on another's turn).
+- **`hide`** (v0.8.70, ticket 28): `actor` only, no target. Casts `Shout_Hide` (Shout) through the honest cast queue; a bonus action by economy. `Osi.HasSpell(actor, "Shout_Hide")` must be in the caster's book (`no_hide` failure otherwise). Requires combat phase (validator: `not_in_combat` out of combat, `wrong_phase` on another's turn).
 - **`bonus_action.action_type`** (full, fixed enum):
   - `offhand_attack` — attack with the second hand (needs an offhand weapon)
   - `drink_potion` — drink a potion (as a second tempo/bonus)
@@ -347,7 +347,7 @@ Details:
 
 > **`set_reaction`** is registered and phase-validated on the C# side, but **execution returns `not_supported` in v1** — the mod has no Lua executor for it (falls through to the v1 decline, `BG3Neuro.lua:6659`, like `use_item`/pre-`hide` `throw`). No scripted runtime ever sets a reaction in v1; the schema stays for the economy rollout.
 
-> **Phase validation for `bonus_action`/`set_reaction`:** these actions require the controlled character's turn. If it is someone else's turn or there is no combat → `wrong_phase` (Channel A, §6.5) with an actionable message ("It's not your turn — whose/phase"), not `invalid_parameters`.
+> **Phase validation for `bonus_action`/`set_reaction`:** these actions require the controlled character's turn. Someone else's turn → `wrong_phase`; no combat → `not_in_combat` (both Channel A, §6.5) with an actionable message ("It's not your turn — whose/phase"), not `invalid_parameters`.
 
 > Limitation (from BEST_PRACTICES): "she tends to fixate on a few of them". Compensation — the full fixed set (all 18 at startup, B) + the relevant subset in state + actionable failure with the options list.
 
@@ -372,7 +372,7 @@ Details:
 
 - `option_index` — **primary**: option number = order in the BG3 dialogue UI window (1-based, matches the streamer mod).
 - `option_text` — fallback: if Neuro wrote the text but missed the index, the plugin matches by text and fills the index in.
-- Registration **PERSISTENT**: once at startup; no active dialogue → failure "No active dialogue right now"; race protection (dialogue closed → failure, not a missing action).
+- Registration **PERSISTENT**: once at startup; no active dialogue → failure "No active dialogue: the dialogue closed or never started. Start the dialogue again and repeat your choice."; race protection (dialogue closed → failure, not a missing action).
 - **Forced dialogue** (enemy attacks during dialogue): the game interrupts the dialogue automatically; DecisionLoop switches mode (combat > dialogue); `select_dialogue_option` stays registered.
 - **Trading — out of scope**: "[Trade]" is a normal option, but it opens the trading screen (a separate UI type, outside scope).
 
@@ -581,7 +581,7 @@ Stored in the mod's `ScriptExtender/Config.json` (`force_legacy`, `legacy_fail_l
 
 ### 6.4b Resource snapshots (ticket 02) and `bonus_action` (ticket 05)
 
-- Every resource-spending action (`attack_entity`, `cast_spell`, `bonus_action`) writes `writeResourceSnapshot(id, actor, "before"/"after")` — the `SNAPSHOT_RESOURCES` set (`ActionPoint`/`BonusActionPoint`/`ReactionActionPoint`/`Movement`/`WeaponActionPoint`, via `Osi.GetActionResourceValuePersonal(actor, name, 0)`); cooldowns are captured separately under `out.cooldowns` (`SpellBookCooldowns`, unwrapped by `unwrapField`) — spell slots are **not** part of the snapshot. The AP/BA delta is the honest-economy acceptance criterion on the test bench.
+- Every resource-spending action (`attack_entity`, `cast_spell`, `bonus_action`) writes `writeResourceSnapshot(id, actor, "before"/"after")` — the `SNAPSHOT_RESOURCES` set (`ActionPoint`/`BonusActionPoint`/`ReactionActionPoint`/`Movement`/`WeaponActionPoint`, via `Osi.GetActionResourceValuePersonal(actor, name, 0)`); cooldowns are captured separately under `out.cooldowns` (`SpellBookCooldowns`, unwrapped by `unwrapField`); spell slots are captured under `slots` (levels 1..9 for `SpellSlot`/`WarlockSpellSlot`, `readSlotLevels`) since v0.8.50 (ticket 18). The AP/BA delta is the honest-economy acceptance criterion on the test bench.
 - `bonus_action` (v0.8.25): v1 supports only `offhand_attack`. It runs through the same honest `enqueueCastRequest` with `bonusAction=true`, but casts the dedicated weapon stat **`OffhandAttack`** (`Target_OffhandAttack` / `Projectile_OffhandAttack`) — there is no `CastOffhand` option in `SpellCastOptions` in this game version, so off-hand is resolved by the engine through the offhand weapon's own action. The game spends **BonusActionPoint natively** (bench-verified: snapshot BA 1.0→0.0, AP untouched). Verified mechanics:
   - `isPlayer` comes from the `ServerCharacter` component (`InParty`/`IsPlayer`/`PartyFollower`); a "Player" name check is only a fallback — clean UUIDs (e.g. Astarion's `c7c13742-…`) carry no `Player` marker, and a missed player sends a NPC cast (double-prefixed `OriginatorPrototype` + NULL source) that the engine silently swallows.
   - `NoMovement` is **removed** from `CastOptions` for bonus attacks — otherwise the engine refuses to close into range (`CastSpellFailed`/`BlockedRequiredMove` on a distant target).
@@ -602,7 +602,7 @@ Stored in the mod's `ScriptExtender/Config.json` (`force_legacy`, `legacy_fail_l
 | `no_camp` | Cannot rest (no camp / no valid spot) |
 | `not_supported` | There is a schema slot but execution comes later (`throw`, `use_item`, `set_reaction`, and the unimplemented `bonus_action` types — all validate on the C# side, then the mod declines with `not_supported` since there is no Lua executor) |
 | `target_not_in_range` / `invalid_parameters` | Parameter validation failed |
-| `wrong_phase` | The action requires a controlled character's turn (`bonus_action`, `set_reaction`), but it is someone else's turn / no combat |
+| `wrong_phase` | The action requires a controlled character's turn (`bonus_action`, `set_reaction`), but it is someone else's turn (no combat → `not_in_combat`, not `wrong_phase`) |
 | `not_your_character` | Multi-agent (§12): `actor` is a **controlled party member owned by a different agent** (criss-cross). Single-agent never emits it — every controlled character belongs to the one agent. Actionable message names your owned alias ("You are playing Karlach, not Astarion — only act for your own character.") |
 | `dialogue_closed` | `select_dialogue_option` without an active dialogue |
 | `mod_unavailable` | Mod unavailable **at validation time** (stale heartbeat) — C# answers failure without driving the game |
@@ -612,9 +612,8 @@ Stored in the mod's `ScriptExtender/Config.json` (`force_legacy`, `legacy_fail_l
 | Code | When |
 |---|---|
 | `action_failed` | Validation passed, but the action did not happen in-game (cast failed, movement blocked) — details in `error_detail` + the next state |
-| `mod_unavailable` | Mod crashed **during execution** (stale heartbeat after a successful result was sent) — re-init per R7, the picture via state |
 
-> **`mod_unavailable` timing:** before validation → Channel A (immediate failure in `action/result`), during execution → Channel B (do not push a late `action/result`). Determined by position relative to validation, not by the code. **Do not send a late `action/result` for Channel B codes** — the server drops it; the Neuro picture is restored by the next state/force (§1.6 dialogue/combat triggers).
+> The channel is decided by the **error code** (`ErrorMapper.ToChannel`, `ChannelBCodes = {ActionFailed}` → Channel B, everything else — Channel A), not by timing: `mod_unavailable` is a Channel A code only. There is no "mod_unavailable during execution" path: if the mod crashes mid-flight the C# side never gets `result_<id>.json` and the action is answered with the generic "Mod did not confirm execution of '<name>' within <timeout>s (no result_id.json)" message (`DecisionLoop.cs:274`); the picture is restored by the next state/force (§1.6 dialogue/combat triggers). **Do not send a late `action/result` for Channel B codes** — the server drops it; the Neuro picture is restored by the next state/force.
 
 ---
 

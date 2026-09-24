@@ -25,14 +25,14 @@ The C# process is the "brain." The Lua mod is the "hands."
 | `DecisionLoop` | `src/BG3Neuro.Core/State/` | Orchestration: event → context/force → validate → execute → result |
 | `StateSerializer` | `src/BG3Neuro.Core/State/` | BG3 state JSON → Markdown context for Neuro |
 | `CoverageAuto` | `src/BG3Neuro.Core/State/` | Range/AoE coverage calculations (shared with StateSerializer) |
-| `ActionRegistry` | `src/BG3Neuro.Core/Actions/` | action schemas from `action_schemas.json` (17 gameplay entries; `"internal": true` entries are hidden from Neuro) |
+| `ActionRegistry` | `src/BG3Neuro.Core/Actions/` | action schemas from `action_schemas.json` (18 gameplay entries; `"internal": true` entries are hidden from Neuro) |
 | `ErrorMapper` | `src/BG3Neuro.Core/State/` | error_code → actionable message mapping |
 
 ### Lua Mod
 
 | File | Role |
 |---|---|
-| `BG3Neuro.lua` | Server-side: heartbeat, state emission, action execution (v0.8.31) |
+| `BG3Neuro.lua` | Server-side: heartbeat, state emission, action execution (v0.8.79) |
 | `BG3NeuroClient.lua` | Client-side: dialog snapshot + Noesis UI click via NetChannel |
 | `BootstrapServer.lua` | Server entry point for BG3SE |
 | `BootstrapClient.lua` | Client entry point for BG3SE |
@@ -60,7 +60,7 @@ Communication between the C# process and the Lua mod happens through JSON files 
 ```json
 {
   "timestamp": "2026-09-16T12:00:00Z",
-  "mod_version": "0.8.31",
+  "mod_version": "0.8.79",
   "sequence": 42
 }
 ```
@@ -184,20 +184,23 @@ The Markdown format is designed for Neuro's context window — concise but compl
 
 ## Error Handling
 
-Two error channels:
+Two error channels (§6.5 in `BG3_Neuro_Spec.md`):
 
-- **Channel A (engine errors)** — the BG3 engine rejects the action (e.g., not enough resources, out of range). The mod returns `error_code` from the engine.
-- **Channel B (validation errors)** — the C# process rejects the action before sending it (e.g., unknown entity, invalid schema). The `ActionRouter` returns a validation error.
+- **Channel A (validation)** — the C# process rejects the action **before** in-game execution (e.g., unknown entity, invalid schema, no combat). The `ActionRouter` returns a validation error and `action/result` reaches Neuro immediately. Which codes land here is decided by code: `ErrorMapper.ToChannel` returns Channel B only for `ActionFailed`, everything else (including `ModUnavailable`) is Channel A.
+- **Channel B (execution)** — validation passed, but the action did not happen in-game (cast failed, movement blocked). The mod returns `action_failed`; this is surfaced via the next state + context rather than a late `action/result` (the server drops late results).
 
-Common error codes:
+Common error codes (`ErrorCode` enum, `src/BG3Neuro.Core/State/ErrorCode.cs`):
 
 | Code | Meaning |
 |---|---|
-| `action_failed` | Generic failure (check `error_detail`) |
-| `actor_not_found` | Entity alias not in the current state |
-| `not_your_turn` | Action sent for wrong actor |
-| `schema_violation` | Action doesn't match its schema |
-| `timeout` | Action didn't complete in time |
+| `action_failed` | Validation passed, but the action did not happen in-game (check `error_detail`) |
+| `target_missing` | Entity alias not in the current state |
+| `not_in_combat` | Action requires combat, but there is no combat |
+| `wrong_phase` | Action sent for the wrong actor / not the controlled character's turn |
+| `not_your_character` | `actor` is a controlled party member owned by a different agent (multi-agent) |
+| `invalid_parameters` | Action doesn't match its schema |
+| `not_supported` | Schema slot exists, but execution comes later (`use_item`, `set_reaction`, unused `bonus_action` types, `throw`) |
+| `mod_unavailable` | Mod heartbeat is stale — failure answered without driving the game |
 
 ## Resilience
 

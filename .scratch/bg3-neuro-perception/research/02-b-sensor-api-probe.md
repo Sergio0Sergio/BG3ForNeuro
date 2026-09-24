@@ -72,6 +72,9 @@ Run 2026-09-20 (PG bench at the gates, exploration, party of 4, 8 candidates):
   exploration — probe v070: does CanSee survive outside combat, with StartSightEvents and without; measurement
   of symmetry/LOS/distance). Fallback if CanSee is dead at rest — own cone+LOS from
   the «lead» party member (proxy «the character sees», divergence from the camera is documented).
+  **Final B implementation (supersedes the above, see `spec.md` §8:94 + followup 24, v0.8.63):**
+  `HasLineOfSight(leader, candidate)` + status gate `INVISIBLE`/`SNEAKING` (exc.
+  `TRUESIGHT`/see-invisibility ≤9 m); `CanSee` remains the probe for A/`feasible`.
 
 ## Intermediate findings (probes v1–v2, SE console, server-VM `S >>`)
 

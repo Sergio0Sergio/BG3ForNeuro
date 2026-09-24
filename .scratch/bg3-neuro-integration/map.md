@@ -33,7 +33,7 @@ A complete architectural specification for integrating Baldur's Gate 3 with the 
 - ~~How to determine actions available in the current turn (combat)~~ → resolved: `TurnStarted/TurnEnded` events + `EocCombatTurnOrderComponent` (`IsPlayer`, `Initiative`, `Members`); `Osi.CombatGetActiveEntity`
 - ~~Pathfinding algorithm for exploration~~ → resolved: native `Osi.CharacterMoveTo( Position)` / `TeleportToPosition`; no custom A* needed
 - ~~Execution timeouts and error model~~ → resolved in ticket 07: ACK 5s, `{success, error_code, error_detail}`, long actions `running:true`
-- ~~How the dialogue option is selected~~ → resolved in ticket 07 (X1): `confirm` (human presses a key) as v1 + experimental `auto` (client UI) behind the `dialogue.mode` flag; `option_index` = order in the UI window
+- ~~How the dialogue option is selected~~ → resolved in ticket 07 (X1): `select_dialogue_option` is executed via `ClientAutoselectExecutor` — client-side Lua finds the option element by `option_index` (= UI order) and **clicks it itself** (the human presses nothing); `confirm` is a collapsed alias (<highlight + manual Enter> ≈ <autoselect>, `"confirm"` kept only as a `dialogue.mode` flag), with server-side fallback to `not_supported` + warning
 - Concrete force/query/state schema for each scenario (combat/dialogue/exploration) — resolved when assembling the final specification from tickets 03–07 ("Ready blocks" section, data pipeline)
 
 ## Out of scope

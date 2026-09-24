@@ -116,9 +116,6 @@ The status lands (`StatusApplied`, ticket 16 g2) but no AP is spent.
 - **BA writer proven end-to-end without a spell**: component write on the
   BonusActionPoint pool (`420c8df5-…`, index 1, Level 0) 1.0→0.0 is visible to
   Osiris reads; restored 0.0→1.0 right after (bench ep10/ep11 + snapshots).
-- **BA writer proven end-to-end without a spell**: component write on the
-  BonusActionPoint pool (`420c8df5-…`, index 1, Level 0) 1.0→0.0 is visible to
-  Osiris reads; restored 0.0→1.0 right after (bench ep10/ep11 + snapshots).
   Full live-fire via Healing Word still pending (no L1 slots anywhere in this
   combat). Note: static-save reloads reset slots to save state (observed twice).
 - **(v61b1) useOsiSpell robustness hole**: bare `"hex"` (not in Wyll's book) fired a

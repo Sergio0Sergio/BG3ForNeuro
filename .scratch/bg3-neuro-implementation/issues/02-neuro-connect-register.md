@@ -16,5 +16,5 @@
 - `ActionRegistry` + static registry of 17 schemas from `action_schemas.json` (embedded resource).
 - `NeuroWebSocketClient`: startup handshake, `actions/register`, auto-respond to `actions/reregister_all`, incoming `action` handling, camelCase serialization.
 - Unit tests against FakeNeuroServer — 38/38 green.
-- Integration test against real Randy (`RandyIntegrationTests`): 17 actions registered without duplicates, re-registration after `reregister_all`, an incoming `action end_turn` arrives and is answered with `actions/result` (fake action via HTTP POST `/` on a random port) — **the full test suite 37/37 green**.
+- Integration test against real Randy (`RandyIntegrationTests`): 17 actions registered without duplicates, re-registration after `reregister_all`, an incoming `action end_turn` arrives and is answered with `actions/result` (fake action via HTTP POST `/` on a random port) — **the Randy integration suite 37/37 green** (38 unit + 37 integration, per `issues/map.md`).
 - Randy patched for tests: WS/HTTP ports from env (`RANDY_WS_PORT`/`RANDY_HTTP_PORT`, default 8000/1337).
