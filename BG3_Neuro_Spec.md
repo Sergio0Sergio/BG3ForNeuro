@@ -544,7 +544,7 @@ Note: free-form parameters (`cast_spell.spell_name`, `interact_with.interaction_
 | Teleport helper | `Osi.TeleportTo` / `Osi.TeleportToPosition` | ✔ |
 | Player cast/attack | `Ext.System.ServerCastRequest.OsirisCastRequests` (**FromClient** — pipeline rails, honest AP/cooldowns) | ⚠→✔ |
 | Cast fallback | `Osi.UseSpell` / `Osi.UseSpellAtPosition` | ⚠ |
-| Attack (NPC/fallback) | `Osi.Attack(character, target, alwaysHit)` — one-shot, manual AP accounting (`AddActionPoints -1`, symmetric with the `UseSpell` fallback) | ⚠ |
+| Attack (NPC/fallback) | `Osi.Attack(character, target, alwaysHit)` — one-shot, manual AP accounting (`AddActionPoints -1`, symmetric with the `UseSpell` fallback; **unreleased — fix in repo, not in v0.8.79**, ticket 29) | ⚠ |
 | Item | `Osi.Use(character, item, useItem, isInteraction, event)`; equip `Osi.Equip` | ✔ |
 | Dialogue start | `Osi.CharacterMoveToAndTalk` / `Osi.StartDialog_Internal` | ✔ |
 | Dialogue option select | **no public function** — workaround via `ClientAutoselectExecutor` → §7 (X1) | ✘ API / ✔ workaround (live bench) |
