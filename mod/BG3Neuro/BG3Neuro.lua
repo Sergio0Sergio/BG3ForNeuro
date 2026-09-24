@@ -3084,7 +3084,7 @@ local function itemCategory(statsId)
 end
 
 function BG3NEURO_ITEM_OWNER_FROM_COMPONENTS(itemEnt, partySet)
-    -- v0.8.76 (тикет 28): владелец предмета � из компонентов владения на самом предмете.
+    -- v0.8.76 (тикет 28): владелец предмета � из компонентов владения на самом предмете.
     -- Возвращает guid владельца из партии (верне из partySet), либо nil.
     -- Порядок источников (по приоритету):
     --   ServerOwneeHistory.OriginalOwner/LatestOwner  (EsvOwnershipOwneeHistoryComponent)
@@ -3239,11 +3239,11 @@ function scanPartyInventory(partySet)
     end
     d.result = #out
     if #out == 0 then
-        -- v0.8.77 (тикет 28): атрибуция владения � �ОЛЬКО по компонентам владения на самом предмете.
+        -- v0.8.77 (тикет 28): атрибуция владения � �ОЛЬКО по компонентам владения на самом предмете.
         -- v0.8.73-76 контейнерный map (InventoryOwner.PrimaryInventory/Inventories) схлопывался
         -- в 1 ключ (containers_found=1) и весь инвентарь приписывался одному
         -- персонажу (v0.8.76 в бою: 2079/2192 предметов через контейнер-путь — ложь).
-        -- Владелец читается только из ��������-компонентов. В подходящие только те,
+        -- Владелец читается только из ��������-компонентов. В подходящие только те,
         -- для которых мы знаем владельца из партии: неизвестный owner лучше,
         -- чем неверный.
         local okAll, handles = pcall(function() return Ext.Entity.GetAllEntitiesWithComponent("ServerItem") end)
@@ -5353,7 +5353,8 @@ local function executeAttack(action)
     -- поэтому AP, bonus actions и cooldowns списываются нативно, FromClient для игрока.
     -- v0.8.22 (fallback 1, доказан вживую): Osi.UseSpell по прототипному имени ОСЕЙ
     -- оружейной атаки + ручное списание 1 AP (Osiris игнорирует ресурсы сам).
-    -- (fallback 2, NPC): Osi.Attack (one-shot, без ресурсов).
+    -- (fallback 2, NPC): Osi.Attack (one-shot; движок AP не списывает —
+    -- делаем вручную ниже, симметрично fallback 1).
     -- v0.8.28 (followup 03): сужен до двух РЕАЛЬНЫХ прототипов базовой атаки vanilla
     -- (research 01): Target_MainHandAttack (melee) и Projectile_MainHandAttack (ranged).
     -- Остальные четыре имени из прежнего набора — фантомы (0 в стат-индексе).
@@ -5428,7 +5429,14 @@ local function executeAttack(action)
 
     if not ok then
         -- Fallback 2: документированный fallback для NPC — Osi.Attack (one-shot, alwaysHit=0).
+        -- Движок AP не списывает — делаем вручную, симметрично Fallback 1 (иначе атака бесплатна).
         ok, err = pcall(Osi.Attack, actor, target, 0)
+        if ok then
+            local atkApOk, atkApErr = pcall(Osi.AddActionPoints, actor, -1)
+            if not atkApOk then
+                _P("[BG3Neuro] attack AP spend failed (Osi.Attack fallback): " .. tostring(atkApErr))
+            end
+        end
     end
     if not ok then
         return false, nil, "action_failed", tostring(err)
@@ -5822,10 +5830,10 @@ end
 -- Финализация both-действий по событию каста (общий pendingCasts + списание
 -- экономики как у cast_spell). Возвращает success, running, errorCode, errorDetail.
 function BG3NEURO_COMBAT.enqueueAndFinalize(action, actor, sid, opts)
-    -- v0.8.74 (тикет 28): Shout/Throw ������� ������� ������� �� �����������
-    -- (CastSpellFailed storyActionID=0, �������� �� ������) � ������ forced. ������
-    -- forced-������� ������� �� ������ ��� (��. cast_spell L4703) � ������� ���������
-    -- �����: ���-���� AP/BA/����� �� enqueue + ������ �������� ����� CastedSpell.
+    -- v0.8.74 (тикет 28): Shout/Throw ������� ������� ������� �� �����������
+    -- (CastSpellFailed storyActionID=0, �������� �� ������) � ������ forced. ������
+    -- forced-������� ������� �� ������ ��� (��. cast_spell L4703) � ������� ���������
+    -- �����: ���-���� AP/BA/����� �� enqueue + ������ �������� ����� CastedSpell.
     local forceFlags = opts.forceFlags == true
     local costKind, slotLevel
     local stOK, stRes = pcall(function() return Ext.Stats.Get(sid) end)
@@ -5926,10 +5934,10 @@ function BG3NEURO_COMBAT.throw(action)
         sType = stRes.SpellType
     end
 
-    -- v0.8.79 (тикет 28, bench 2026-09-23): honest=true (use) � FromClient-�������, �� ����-�����.
-    -- ��������� �� ������ bot: item � network ������� ��твегаются CastSpellFailed storyActionID=0
-    -- (��� � ��� 4 ����-��������). Throw ������ ��� unsupported; ���� �������� ��� ������� �������������
-    -- (client-initiated ����� / AnubisPickUpItem, ��. ����� 28). ������� ����: ���� ����� ItemStartRequests.
+    -- v0.8.79 (тикет 28, bench 2026-09-23): honest=true (use) � FromClient-�������, �� ����-�����.
+    -- ��������� �� ������ bot: item � network ������� ��твегаются CastSpellFailed storyActionID=0
+    -- (��� � ��� 4 ����-��������). Throw ������ ��� unsupported; ���� �������� ��� ������� �������������
+    -- (client-initiated ����� / AnubisPickUpItem, ��. ����� 28). ������� ����: ���� ����� ItemStartRequests.
     local honest = data.honest == true
     return BG3NEURO_COMBAT.enqueueAndFinalize(action, actor, usedSid, {
         spellName = usedSid,
